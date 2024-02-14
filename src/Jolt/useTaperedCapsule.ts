@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useJolt } from "./useJolt";
 import {
-  BoxGeometry,
+  BufferAttribute,
+  BufferGeometry,
   Mesh,
   MeshBasicMaterial,
   Quaternion,
@@ -9,15 +10,19 @@ import {
 } from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 
-export const useBox = ({
-  size,
+export const useTaperedCapsule = ({
+  topRadius,
+  bottomRadius,
+  height,
   position,
   rotation = [0, 0, 0, 1],
   motionType,
   debug = false,
   material,
 }: {
-  size: [number, number, number];
+  topRadius: number;
+  bottomRadius: number;
+  height: number;
   position: [number, number, number];
   rotation?: [number, number, number, number];
   motionType: "static" | "dynamic";
@@ -33,12 +38,14 @@ export const useBox = ({
   const { scene } = useThree();
 
   const api = useMemo(() => {
-    const shape = new Jolt.BoxShape(
-      new Jolt.Vec3(size[0] * 0.5, size[1] * 0.5, size[2] * 0.5),
-      0.05,
+    const shape = new Jolt.TaperedCapsuleShapeSettings(
+      height * 0.5,
+      topRadius,
+      bottomRadius,
       undefined
-    );
-
+    )
+      .Create()
+      .Get();
     const bodySettings = new Jolt.BodyCreationSettings(
       shape,
       new Jolt.Vec3(position[0], position[1], position[2]),
@@ -65,27 +72,46 @@ export const useBox = ({
 
     let debugMesh: Mesh | null = null;
 
+    const taperedCapsuleShape = Jolt.castObject(
+      shape,
+      Jolt.TaperedCapsuleShape
+    );
+    const shapeScale = new Jolt.Vec3(1, 1, 1);
+    const tris = new Jolt.ShapeGetTriangles(
+      taperedCapsuleShape,
+      Jolt.AABox.prototype.sBiggest(),
+      shape.GetCenterOfMass(),
+      Jolt.Quat.prototype.sIdentity(),
+      shapeScale
+    );
+    Jolt.destroy(shapeScale);
+    const vertices = new Float32Array(
+      Jolt.HEAPF32.buffer,
+      tris.GetVerticesData(),
+      tris.GetVerticesSize() / Float32Array.BYTES_PER_ELEMENT
+    );
+    const buffer = new BufferAttribute(vertices, 3).clone();
+    Jolt.destroy(tris);
+    const geometry = new BufferGeometry();
+    geometry.setAttribute("position", buffer);
+    geometry.computeVertexNormals();
+
     if (debug) {
-      const boxShape = Jolt.castObject(shape, Jolt.BoxShape);
-      const halfExtent = boxShape.GetHalfExtent();
-      const box = new BoxGeometry(
-        halfExtent.GetX() * 2,
-        halfExtent.GetY() * 2,
-        halfExtent.GetZ() * 2
-      );
-      const boxMesh = new Mesh(
-        box,
+      const taperedCapsuleMesh = new Mesh(
+        geometry,
         new MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
       );
-      debugMesh = boxMesh;
-      scene.add(boxMesh);
+      debugMesh = taperedCapsuleMesh;
+      scene.add(taperedCapsuleMesh);
     }
 
-    return { body, shape, debugMesh };
+    return { body, shape, debugMesh, geometry };
   }, [
     Jolt,
     bodyInterface,
-    size,
+    height,
+    topRadius,
+    bottomRadius,
     layers,
     material,
     motionType,

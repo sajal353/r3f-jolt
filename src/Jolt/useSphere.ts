@@ -1,23 +1,23 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useJolt } from "./useJolt";
 import {
-  BoxGeometry,
   Mesh,
   MeshBasicMaterial,
   Quaternion,
+  SphereGeometry,
   Vector3,
 } from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 
-export const useBox = ({
-  size,
+export const useSphere = ({
+  radius,
   position,
   rotation = [0, 0, 0, 1],
   motionType,
   debug = false,
   material,
 }: {
-  size: [number, number, number];
+  radius: number;
   position: [number, number, number];
   rotation?: [number, number, number, number];
   motionType: "static" | "dynamic";
@@ -33,11 +33,7 @@ export const useBox = ({
   const { scene } = useThree();
 
   const api = useMemo(() => {
-    const shape = new Jolt.BoxShape(
-      new Jolt.Vec3(size[0] * 0.5, size[1] * 0.5, size[2] * 0.5),
-      0.05,
-      undefined
-    );
+    const shape = new Jolt.SphereShape(radius, undefined);
 
     const bodySettings = new Jolt.BodyCreationSettings(
       shape,
@@ -66,26 +62,22 @@ export const useBox = ({
     let debugMesh: Mesh | null = null;
 
     if (debug) {
-      const boxShape = Jolt.castObject(shape, Jolt.BoxShape);
-      const halfExtent = boxShape.GetHalfExtent();
-      const box = new BoxGeometry(
-        halfExtent.GetX() * 2,
-        halfExtent.GetY() * 2,
-        halfExtent.GetZ() * 2
-      );
-      const boxMesh = new Mesh(
-        box,
+      const sphereShape = Jolt.castObject(shape, Jolt.SphereShape);
+      const sphereRadius = sphereShape.GetRadius();
+      const sphere = new SphereGeometry(sphereRadius, 32, 32);
+      const sphereMesh = new Mesh(
+        sphere,
         new MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
       );
-      debugMesh = boxMesh;
-      scene.add(boxMesh);
+      debugMesh = sphereMesh;
+      scene.add(sphereMesh);
     }
 
     return { body, shape, debugMesh };
   }, [
     Jolt,
     bodyInterface,
-    size,
+    radius,
     layers,
     material,
     motionType,

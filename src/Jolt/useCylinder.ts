@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useJolt } from "./useJolt";
 import {
-  BoxGeometry,
+  CylinderGeometry,
   Mesh,
   MeshBasicMaterial,
   Quaternion,
@@ -9,15 +9,17 @@ import {
 } from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 
-export const useBox = ({
-  size,
+export const useCylinder = ({
+  height,
+  radius,
   position,
   rotation = [0, 0, 0, 1],
   motionType,
   debug = false,
   material,
 }: {
-  size: [number, number, number];
+  height: number;
+  radius: number;
   position: [number, number, number];
   rotation?: [number, number, number, number];
   motionType: "static" | "dynamic";
@@ -33,11 +35,7 @@ export const useBox = ({
   const { scene } = useThree();
 
   const api = useMemo(() => {
-    const shape = new Jolt.BoxShape(
-      new Jolt.Vec3(size[0] * 0.5, size[1] * 0.5, size[2] * 0.5),
-      0.05,
-      undefined
-    );
+    const shape = new Jolt.CylinderShape(height * 0.5, radius, 0.05, undefined);
 
     const bodySettings = new Jolt.BodyCreationSettings(
       shape,
@@ -66,26 +64,29 @@ export const useBox = ({
     let debugMesh: Mesh | null = null;
 
     if (debug) {
-      const boxShape = Jolt.castObject(shape, Jolt.BoxShape);
-      const halfExtent = boxShape.GetHalfExtent();
-      const box = new BoxGeometry(
-        halfExtent.GetX() * 2,
-        halfExtent.GetY() * 2,
-        halfExtent.GetZ() * 2
+      const cylinderShape = Jolt.castObject(shape, Jolt.CylinderShape);
+      const cylinderRadius = cylinderShape.GetRadius();
+      const halfHeight = cylinderShape.GetHalfHeight();
+      const cylinder = new CylinderGeometry(
+        cylinderRadius,
+        cylinderRadius,
+        halfHeight * 2,
+        32
       );
-      const boxMesh = new Mesh(
-        box,
+      const cylinderMesh = new Mesh(
+        cylinder,
         new MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
       );
-      debugMesh = boxMesh;
-      scene.add(boxMesh);
+      debugMesh = cylinderMesh;
+      scene.add(cylinderMesh);
     }
 
     return { body, shape, debugMesh };
   }, [
     Jolt,
     bodyInterface,
-    size,
+    height,
+    radius,
     layers,
     material,
     motionType,
