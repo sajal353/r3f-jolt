@@ -74,7 +74,7 @@ export const useCapsule = ({
       const capsule = new CapsuleGeometry(capsuleRadius, halfHeight * 2);
       const capsuleMesh = new Mesh(
         capsule,
-        new MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
+        new MeshBasicMaterial({ color: "blue", wireframe: true })
       );
       debugMesh = capsuleMesh;
       scene.add(capsuleMesh);

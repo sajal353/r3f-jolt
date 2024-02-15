@@ -6,6 +6,8 @@ import { useCapsule } from "./Jolt/useCapsule";
 import { useTaperedCapsule } from "./Jolt/useTaperedCapsule";
 import { useTrimesh } from "./Jolt/useTrimesh";
 import { useGLTF } from "@react-three/drei";
+import { Geometry } from "three-stdlib";
+import { useConvex } from "./Jolt/useConvex";
 
 const Scene = () => {
   const suzanne = useGLTF(
@@ -14,8 +16,19 @@ const Scene = () => {
 
   const suzanneMesh = suzanne.nodes.Suzanne as THREE.Mesh;
 
+  suzanneMesh.geometry.rotateY(-Math.PI / 4);
+
   const pos = suzanneMesh.geometry.getAttribute("position");
   const idx = suzanneMesh.geometry.index?.array;
+
+  const convexGeometry = new Geometry().fromBufferGeometry(
+    suzanneMesh.geometry
+  );
+
+  convexGeometry.computeVertexNormals();
+  convexGeometry.mergeVertices();
+
+  const verts = convexGeometry.vertices.map((v) => [v.x, v.y, v.z]);
 
   const [floorRef] = useBox({
     position: [0, 0, 0],
@@ -86,7 +99,7 @@ const Scene = () => {
     motionType: "dynamic",
     material: {
       friction: 0,
-      restitution: 0.7,
+      restitution: 0.8,
     },
   });
 
@@ -95,10 +108,21 @@ const Scene = () => {
       position: pos,
       index: idx!,
     },
-    position: [3, -1, 0.5],
+    position: [3, -1, 1],
     debug: true,
     material: {
       friction: 0,
+    },
+  });
+
+  const [convexRef] = useConvex({
+    vertices: verts,
+    position: [0, 8, 0],
+    debug: true,
+    motionType: "dynamic",
+    material: {
+      friction: 0,
+      restitution: 0.5,
     },
   });
 
@@ -128,6 +152,9 @@ const Scene = () => {
         <meshNormalMaterial />
       </mesh>
       <mesh ref={trimeshRef} geometry={trimeshApi.geometry}>
+        <meshNormalMaterial />
+      </mesh>
+      <mesh ref={convexRef} geometry={suzanneMesh.geometry}>
         <meshNormalMaterial />
       </mesh>
     </>

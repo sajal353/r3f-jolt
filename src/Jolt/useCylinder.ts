@@ -79,7 +79,7 @@ export const useCylinder = ({
       );
       const cylinderMesh = new Mesh(
         cylinder,
-        new MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
+        new MeshBasicMaterial({ color: "green", wireframe: true })
       );
       debugMesh = cylinderMesh;
       scene.add(cylinderMesh);

@@ -15,7 +15,6 @@ import { useFrame, useThree } from "@react-three/fiber";
 export const useTrimesh = ({
   mesh,
   position,
-  rotation = [0, 0, 0, 1],
   debug = false,
   material,
 }: {
@@ -24,7 +23,6 @@ export const useTrimesh = ({
     index: TypedArray;
   };
   position: [number, number, number];
-  rotation?: [number, number, number, number];
   debug?: boolean;
   material?: {
     friction?: number;
@@ -66,11 +64,13 @@ export const useTrimesh = ({
     mats.push_back(new Jolt.PhysicsMaterial());
 
     const shape = new Jolt.MeshShapeSettings(verts, tris, mats).Create().Get();
+    Jolt.destroy(verts);
     Jolt.destroy(tris);
+    Jolt.destroy(mats);
     const bodySettings = new Jolt.BodyCreationSettings(
       shape,
       new Jolt.Vec3(position[0], position[1], position[2]),
-      new Jolt.Quat(rotation[0], rotation[1], rotation[2], rotation[3]),
+      new Jolt.Quat(0, 0, 0, 1),
       Jolt.EMotionType_Static,
       layers.LAYER_NON_MOVING
     );
@@ -115,24 +115,14 @@ export const useTrimesh = ({
     if (debug) {
       const meshMesh = new Mesh(
         geometry,
-        new MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
+        new MeshBasicMaterial({ color: "hotpink", wireframe: true })
       );
       debugMesh = meshMesh;
       scene.add(meshMesh);
     }
 
     return { body, shape, debugMesh, geometry };
-  }, [
-    Jolt,
-    bodyInterface,
-    mesh,
-    layers,
-    material,
-    position,
-    rotation,
-    debug,
-    scene,
-  ]);
+  }, [Jolt, bodyInterface, mesh, layers, material, position, debug, scene]);
 
   useFrame(() => {
     if (!api.body) return;

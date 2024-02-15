@@ -103,7 +103,7 @@ export const useTaperedCapsule = ({
     if (debug) {
       const taperedCapsuleMesh = new Mesh(
         geometry,
-        new MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
+        new MeshBasicMaterial({ color: "orange", wireframe: true })
       );
       debugMesh = taperedCapsuleMesh;
       scene.add(taperedCapsuleMesh);

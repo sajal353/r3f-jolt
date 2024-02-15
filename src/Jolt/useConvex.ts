@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useJolt } from "./useJolt";
 import {
+  BufferAttribute,
+  BufferGeometry,
   Mesh,
   MeshBasicMaterial,
   Quaternion,
-  SphereGeometry,
   Vector3,
 } from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 
-export const useSphere = ({
-  radius,
+export const useConvex = ({
+  vertices,
   position,
   rotation = [0, 0, 0, 1],
   motionType,
@@ -18,7 +19,7 @@ export const useSphere = ({
   mass = 1000,
   material,
 }: {
-  radius: number;
+  vertices: number[][];
   position: [number, number, number];
   rotation?: [number, number, number, number];
   motionType: "static" | "dynamic";
@@ -35,7 +36,16 @@ export const useSphere = ({
   const { scene } = useThree();
 
   const api = useMemo(() => {
-    const shape = new Jolt.SphereShape(radius, undefined);
+    const hull = new Jolt.ConvexHullShapeSettings();
+
+    for (let i = 0; i < vertices.length; i++) {
+      hull.mPoints.push_back(
+        new Jolt.Vec3(vertices[i][0], vertices[i][1], vertices[i][2])
+      );
+    }
+
+    const shape = hull.Create().Get();
+    Jolt.destroy(hull);
 
     const bodySettings = new Jolt.BodyCreationSettings(
       shape,
@@ -65,31 +75,49 @@ export const useSphere = ({
 
     let debugMesh: Mesh | null = null;
 
+    const meshShape = Jolt.castObject(shape, Jolt.MeshShape);
+    const shapeScale = new Jolt.Vec3(1, 1, 1);
+    const geometryTris = new Jolt.ShapeGetTriangles(
+      meshShape,
+      Jolt.AABox.prototype.sBiggest(),
+      shape.GetCenterOfMass(),
+      Jolt.Quat.prototype.sIdentity(),
+      shapeScale
+    );
+    Jolt.destroy(shapeScale);
+    const geometryVertices = new Float32Array(
+      Jolt.HEAPF32.buffer,
+      geometryTris.GetVerticesData(),
+      geometryTris.GetVerticesSize() / Float32Array.BYTES_PER_ELEMENT
+    );
+    const buffer = new BufferAttribute(geometryVertices, 3).clone();
+    Jolt.destroy(geometryTris);
+    const geometry = new BufferGeometry();
+    geometry.setAttribute("position", buffer);
+    geometry.computeVertexNormals();
+
     if (debug) {
-      const sphereShape = Jolt.castObject(shape, Jolt.SphereShape);
-      const sphereRadius = sphereShape.GetRadius();
-      const sphere = new SphereGeometry(sphereRadius, 32, 32);
-      const sphereMesh = new Mesh(
-        sphere,
-        new MeshBasicMaterial({ color: "yellow", wireframe: true })
+      const meshMesh = new Mesh(
+        geometry,
+        new MeshBasicMaterial({ color: "magenta", wireframe: true })
       );
-      debugMesh = sphereMesh;
-      scene.add(sphereMesh);
+      debugMesh = meshMesh;
+      scene.add(meshMesh);
     }
 
-    return { body, shape, debugMesh };
+    return { body, shape, debugMesh, geometry };
   }, [
     Jolt,
     bodyInterface,
-    radius,
+    vertices,
     layers,
-    mass,
     material,
-    motionType,
     position,
     rotation,
+    mass,
     debug,
     scene,
+    motionType,
   ]);
 
   useFrame(() => {

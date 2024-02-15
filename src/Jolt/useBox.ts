@@ -79,7 +79,7 @@ export const useBox = ({
       );
       const boxMesh = new Mesh(
         box,
-        new MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
+        new MeshBasicMaterial({ color: "violet", wireframe: true })
       );
       debugMesh = boxMesh;
       scene.add(boxMesh);
