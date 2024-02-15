@@ -1,31 +1,31 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useJolt } from "./useJolt";
 import {
-  CapsuleGeometry,
+  BufferAttribute,
+  BufferGeometry,
+  InterleavedBufferAttribute,
   Mesh,
   MeshBasicMaterial,
   Quaternion,
+  TypedArray,
   Vector3,
 } from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 
-export const useCapsule = ({
-  height,
-  radius,
+export const useTrimesh = ({
+  mesh,
   position,
   rotation = [0, 0, 0, 1],
-  motionType,
   debug = false,
-  mass = 1000,
   material,
 }: {
-  height: number;
-  radius: number;
+  mesh: {
+    position: BufferAttribute | InterleavedBufferAttribute;
+    index: TypedArray;
+  };
   position: [number, number, number];
   rotation?: [number, number, number, number];
-  motionType: "static" | "dynamic";
   debug?: boolean;
-  mass?: number;
   material?: {
     friction?: number;
     restitution?: number;
@@ -37,21 +37,45 @@ export const useCapsule = ({
   const { scene } = useThree();
 
   const api = useMemo(() => {
-    const shape = new Jolt.CapsuleShape(height * 0.5, radius, undefined);
+    const verts = new Jolt.VertexList();
 
+    for (let i = 0; i < mesh.position.count; i++) {
+      verts.push_back(
+        new Jolt.Float3(
+          mesh.position.getX(i),
+          mesh.position.getY(i),
+          mesh.position.getZ(i)
+        )
+      );
+    }
+
+    const tris = new Jolt.IndexedTriangleList();
+
+    for (let i = 0; i < mesh.index.length; i += 3) {
+      tris.push_back(
+        new Jolt.IndexedTriangle(
+          mesh.index[i],
+          mesh.index[i + 1],
+          mesh.index[i + 2],
+          0
+        )
+      );
+    }
+
+    const mats = new Jolt.PhysicsMaterialList();
+    mats.push_back(new Jolt.PhysicsMaterial());
+
+    const shape = new Jolt.MeshShapeSettings(verts, tris, mats).Create().Get();
+    Jolt.destroy(tris);
     const bodySettings = new Jolt.BodyCreationSettings(
       shape,
       new Jolt.Vec3(position[0], position[1], position[2]),
       new Jolt.Quat(rotation[0], rotation[1], rotation[2], rotation[3]),
-      motionType === "dynamic"
-        ? Jolt.EMotionType_Dynamic
-        : Jolt.EMotionType_Static,
-      motionType === "dynamic" ? layers.LAYER_MOVING : layers.LAYER_NON_MOVING
+      Jolt.EMotionType_Static,
+      layers.LAYER_NON_MOVING
     );
 
     const body = bodyInterface.CreateBody(bodySettings);
-
-    body.GetMotionProperties().SetInverseMass(1 / mass);
 
     if (material?.friction) {
       body.SetFriction(material.friction);
@@ -67,29 +91,43 @@ export const useCapsule = ({
 
     let debugMesh: Mesh | null = null;
 
+    const meshShape = Jolt.castObject(shape, Jolt.MeshShape);
+    const shapeScale = new Jolt.Vec3(1, 1, 1);
+    const geometryTris = new Jolt.ShapeGetTriangles(
+      meshShape,
+      Jolt.AABox.prototype.sBiggest(),
+      shape.GetCenterOfMass(),
+      Jolt.Quat.prototype.sIdentity(),
+      shapeScale
+    );
+    Jolt.destroy(shapeScale);
+    const geometryVertices = new Float32Array(
+      Jolt.HEAPF32.buffer,
+      geometryTris.GetVerticesData(),
+      geometryTris.GetVerticesSize() / Float32Array.BYTES_PER_ELEMENT
+    );
+    const buffer = new BufferAttribute(geometryVertices, 3).clone();
+    Jolt.destroy(geometryTris);
+    const geometry = new BufferGeometry();
+    geometry.setAttribute("position", buffer);
+    geometry.computeVertexNormals();
+
     if (debug) {
-      const capsuleShape = Jolt.castObject(shape, Jolt.CapsuleShape);
-      const capsuleRadius = capsuleShape.GetRadius();
-      const halfHeight = capsuleShape.GetHalfHeightOfCylinder();
-      const capsule = new CapsuleGeometry(capsuleRadius, halfHeight * 2);
-      const capsuleMesh = new Mesh(
-        capsule,
+      const meshMesh = new Mesh(
+        geometry,
         new MeshBasicMaterial({ color: 0x00ff00, wireframe: true })
       );
-      debugMesh = capsuleMesh;
-      scene.add(capsuleMesh);
+      debugMesh = meshMesh;
+      scene.add(meshMesh);
     }
 
-    return { body, shape, debugMesh };
+    return { body, shape, debugMesh, geometry };
   }, [
     Jolt,
     bodyInterface,
-    height,
-    radius,
+    mesh,
     layers,
-    mass,
     material,
-    motionType,
     position,
     rotation,
     debug,

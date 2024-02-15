@@ -15,6 +15,7 @@ export const useSphere = ({
   rotation = [0, 0, 0, 1],
   motionType,
   debug = false,
+  mass = 1000,
   material,
 }: {
   radius: number;
@@ -22,6 +23,7 @@ export const useSphere = ({
   rotation?: [number, number, number, number];
   motionType: "static" | "dynamic";
   debug?: boolean;
+  mass?: number;
   material?: {
     friction?: number;
     restitution?: number;
@@ -46,6 +48,8 @@ export const useSphere = ({
     );
 
     const body = bodyInterface.CreateBody(bodySettings);
+
+    body.GetMotionProperties().SetInverseMass(1 / mass);
 
     if (material?.friction) {
       body.SetFriction(material.friction);
@@ -79,6 +83,7 @@ export const useSphere = ({
     bodyInterface,
     radius,
     layers,
+    mass,
     material,
     motionType,
     position,

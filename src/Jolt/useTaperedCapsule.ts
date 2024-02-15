@@ -18,6 +18,7 @@ export const useTaperedCapsule = ({
   rotation = [0, 0, 0, 1],
   motionType,
   debug = false,
+  mass = 1000,
   material,
 }: {
   topRadius: number;
@@ -27,6 +28,7 @@ export const useTaperedCapsule = ({
   rotation?: [number, number, number, number];
   motionType: "static" | "dynamic";
   debug?: boolean;
+  mass?: number;
   material?: {
     friction?: number;
     restitution?: number;
@@ -57,6 +59,8 @@ export const useTaperedCapsule = ({
     );
 
     const body = bodyInterface.CreateBody(bodySettings);
+
+    body.GetMotionProperties().SetInverseMass(1 / mass);
 
     if (material?.friction) {
       body.SetFriction(material.friction);
@@ -113,6 +117,7 @@ export const useTaperedCapsule = ({
     topRadius,
     bottomRadius,
     layers,
+    mass,
     material,
     motionType,
     position,

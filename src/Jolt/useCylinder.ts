@@ -16,6 +16,7 @@ export const useCylinder = ({
   rotation = [0, 0, 0, 1],
   motionType,
   debug = false,
+  mass = 1000,
   material,
 }: {
   height: number;
@@ -24,6 +25,7 @@ export const useCylinder = ({
   rotation?: [number, number, number, number];
   motionType: "static" | "dynamic";
   debug?: boolean;
+  mass?: number;
   material?: {
     friction?: number;
     restitution?: number;
@@ -48,6 +50,8 @@ export const useCylinder = ({
     );
 
     const body = bodyInterface.CreateBody(bodySettings);
+
+    body.GetMotionProperties().SetInverseMass(1 / mass);
 
     if (material?.friction) {
       body.SetFriction(material.friction);
@@ -88,6 +92,7 @@ export const useCylinder = ({
     height,
     radius,
     layers,
+    mass,
     material,
     motionType,
     position,

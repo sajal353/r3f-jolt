@@ -4,8 +4,19 @@ import { useCylinder } from "./Jolt/useCylinder";
 import { useSphere } from "./Jolt/useSphere";
 import { useCapsule } from "./Jolt/useCapsule";
 import { useTaperedCapsule } from "./Jolt/useTaperedCapsule";
+import { useTrimesh } from "./Jolt/useTrimesh";
+import { useGLTF } from "@react-three/drei";
 
 const Scene = () => {
+  const suzanne = useGLTF(
+    "https://vazxmixjsiawhamofees.supabase.co/storage/v1/object/public/models/suzanne-high-poly/model.gltf"
+  );
+
+  const suzanneMesh = suzanne.nodes.Suzanne as THREE.Mesh;
+
+  const pos = suzanneMesh.geometry.getAttribute("position");
+  const idx = suzanneMesh.geometry.index?.array;
+
   const [floorRef] = useBox({
     position: [0, 0, 0],
     rotation: [0, 0, -0.1, 1],
@@ -24,7 +35,7 @@ const Scene = () => {
     motionType: "dynamic",
     material: {
       friction: 0,
-      restitution: 0,
+      restitution: 1,
     },
   });
 
@@ -61,7 +72,7 @@ const Scene = () => {
     debug: true,
     motionType: "dynamic",
     material: {
-      friction: 1,
+      friction: 0,
       restitution: 0.5,
     },
   });
@@ -74,8 +85,20 @@ const Scene = () => {
     debug: true,
     motionType: "dynamic",
     material: {
-      friction: 1,
-      restitution: 0.5,
+      friction: 0,
+      restitution: 0.7,
+    },
+  });
+
+  const [trimeshRef, trimeshApi] = useTrimesh({
+    mesh: {
+      position: pos,
+      index: idx!,
+    },
+    position: [3, -1, 0.5],
+    debug: true,
+    material: {
+      friction: 0,
     },
   });
 
@@ -102,6 +125,9 @@ const Scene = () => {
         <meshNormalMaterial />
       </mesh>
       <mesh ref={taperedCapsuleRef} geometry={taperedCapsuleApi.geometry}>
+        <meshNormalMaterial />
+      </mesh>
+      <mesh ref={trimeshRef} geometry={trimeshApi.geometry}>
         <meshNormalMaterial />
       </mesh>
     </>

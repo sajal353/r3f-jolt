@@ -15,6 +15,7 @@ export const useBox = ({
   rotation = [0, 0, 0, 1],
   motionType,
   debug = false,
+  mass = 1000,
   material,
 }: {
   size: [number, number, number];
@@ -22,6 +23,7 @@ export const useBox = ({
   rotation?: [number, number, number, number];
   motionType: "static" | "dynamic";
   debug?: boolean;
+  mass?: number;
   material?: {
     friction?: number;
     restitution?: number;
@@ -50,6 +52,8 @@ export const useBox = ({
     );
 
     const body = bodyInterface.CreateBody(bodySettings);
+
+    body.GetMotionProperties().SetInverseMass(1 / mass);
 
     if (material?.friction) {
       body.SetFriction(material.friction);
@@ -87,6 +91,7 @@ export const useBox = ({
     bodyInterface,
     size,
     layers,
+    mass,
     material,
     motionType,
     position,
