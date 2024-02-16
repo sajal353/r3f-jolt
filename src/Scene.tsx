@@ -8,6 +8,7 @@ import { useTrimesh } from "./Jolt/useTrimesh";
 import { useGLTF } from "@react-three/drei";
 import { Geometry } from "three-stdlib";
 import { useConvex } from "./Jolt/useConvex";
+import { useCompound } from "./Jolt/useCompound";
 
 const Scene = () => {
   const suzanne = useGLTF(
@@ -32,12 +33,12 @@ const Scene = () => {
 
   const [floorRef] = useBox({
     position: [0, 0, 0],
-    rotation: [0, 0, -0.1, 1],
-    size: [10, 0.01, 10],
+    // rotation: [0, 0, -0.1, 1],
+    size: [100, 0.01, 100],
     debug: true,
     motionType: "static",
     material: {
-      friction: 0,
+      friction: 0.5,
     },
   });
 
@@ -47,96 +48,145 @@ const Scene = () => {
     debug: true,
     motionType: "dynamic",
     material: {
-      friction: 0,
-      restitution: 1,
-    },
-  });
-
-  const [sphereRef] = useSphere({
-    radius: 0.5,
-    position: [0, 4, 0],
-    debug: true,
-    motionType: "dynamic",
-    material: {
-      friction: 1,
-      restitution: 0.1,
-    },
-  });
-
-  const [cylinderRef] = useCylinder({
-    height: 2,
-    radius: 0.5,
-    position: [0, 5, 0],
-    rotation: new Quaternion()
-      .setFromEuler(new Euler(Math.PI / 2, 0, -Math.PI / 4, "XYZ"))
-      .toArray() as [number, number, number, number],
-    debug: true,
-    motionType: "dynamic",
-    material: {
-      friction: 0,
-      restitution: 0.75,
-    },
-  });
-
-  const [capsuleRef] = useCapsule({
-    height: 2,
-    radius: 0.5,
-    position: [0, 6, 0],
-    debug: true,
-    motionType: "dynamic",
-    material: {
-      friction: 0,
+      friction: 0.5,
       restitution: 0.5,
     },
   });
 
-  const [taperedCapsuleRef, taperedCapsuleApi] = useTaperedCapsule({
-    topRadius: 0.25,
-    bottomRadius: 0.5,
-    height: 3,
-    position: [0, 7, 0],
-    debug: true,
-    motionType: "dynamic",
-    material: {
-      friction: 0,
-      restitution: 0.8,
-    },
-  });
+  // const [sphereRef] = useSphere({
+  //   radius: 0.5,
+  //   position: [0, 4, 0],
+  //   debug: true,
+  //   motionType: "dynamic",
+  //   material: {
+  //     friction: 1,
+  //     restitution: 0.1,
+  //   },
+  // });
 
-  const [trimeshRef, trimeshApi] = useTrimesh({
-    mesh: {
-      position: pos,
-      index: idx!,
-    },
-    position: [3, -1, 1],
-    debug: true,
-    material: {
-      friction: 0,
-    },
-  });
+  // const [cylinderRef] = useCylinder({
+  //   height: 2,
+  //   radius: 0.5,
+  //   position: [0, 5, 0],
+  //   rotation: new Quaternion()
+  //     .setFromEuler(new Euler(Math.PI / 2, 0, -Math.PI / 4, "XYZ"))
+  //     .toArray() as [number, number, number, number],
+  //   debug: true,
+  //   motionType: "dynamic",
+  //   material: {
+  //     friction: 0.5,
+  //     restitution: 0.75,
+  //   },
+  // });
 
-  const [convexRef] = useConvex({
-    vertices: verts,
-    position: [0, 8, 0],
-    debug: true,
-    motionType: "dynamic",
-    material: {
-      friction: 0,
-      restitution: 0.5,
-    },
-  });
+  // const [capsuleRef] = useCapsule({
+  //   height: 2,
+  //   radius: 0.5,
+  //   position: [0, 6, 0],
+  //   debug: true,
+  //   motionType: "dynamic",
+  //   material: {
+  //     friction: 0.5,
+  //     restitution: 0.5,
+  //   },
+  // });
+
+  // const [taperedCapsuleRef, taperedCapsuleApi] = useTaperedCapsule({
+  //   topRadius: 0.25,
+  //   bottomRadius: 0.5,
+  //   height: 3,
+  //   position: [0, 7, 0],
+  //   debug: true,
+  //   motionType: "dynamic",
+  //   material: {
+  //     friction: 0.5,
+  //     restitution: 0.8,
+  //   },
+  // });
+
+  // const [trimeshRef, trimeshApi] = useTrimesh({
+  //   mesh: {
+  //     position: pos,
+  //     index: idx!,
+  //   },
+  //   position: [3, 0, 1],
+  //   debug: true,
+  //   material: {
+  //     friction: 0.5,
+  //   },
+  // });
+
+  // const [convexRef] = useConvex({
+  //   vertices: verts,
+  //   position: [0, 8, 0],
+  //   debug: true,
+  //   motionType: "dynamic",
+  //   material: {
+  //     friction: 0.5,
+  //     restitution: 0.5,
+  //   },
+  // });
+
+  // const [compoundRef, compoundApi] = useCompound({
+  //   shapes: [
+  //     {
+  //       type: "box",
+  //       position: [0, 0, 0],
+  //       size: [0.5, 0.5, 0.5],
+  //     },
+  //     {
+  //       type: "capsule",
+  //       position: [0, 0.5, 0],
+  //       height: 1,
+  //       radius: 0.25,
+  //     },
+  //     {
+  //       type: "cylinder",
+  //       position: [0, 1, 0],
+  //       rotation: new Quaternion()
+  //         .setFromEuler(new Euler(Math.PI / 2, 0, 0))
+  //         .toArray() as [number, number, number, number],
+  //       height: 2,
+  //       radius: 0.25,
+  //     },
+  //     {
+  //       type: "sphere",
+  //       position: [0, 1.5, 0],
+  //       radius: 0.5,
+  //     },
+  //     {
+  //       type: "taperedCapsule",
+  //       position: [0, 2, 0],
+  //       topRadius: 0.25,
+  //       bottomRadius: 0.125,
+  //       height: 0.5,
+  //     },
+  //     {
+  //       type: "convex",
+  //       position: [0, 2, 0],
+  //       vertices: verts,
+  //     },
+  //   ],
+  //   position: [-3, 2, 0],
+  //   debug: true,
+  //   motionType: "dynamic",
+  //   material: {
+  //     friction: 0.5,
+  //     restitution: 0.5,
+  //   },
+  // });
 
   return (
     <>
       <mesh ref={floorRef}>
-        <boxGeometry args={[10, 0.01, 10]} />
+        <boxGeometry args={[100, 0.01, 100]} />
         <meshNormalMaterial />
       </mesh>
       <mesh ref={boxRef}>
         <boxGeometry args={[1, 1, 1]} />
         <meshNormalMaterial />
       </mesh>
-      <mesh ref={sphereRef}>
+      {/* <mesh ref={sphereRef}>
         <sphereGeometry args={[0.5, 32, 32]} />
         <meshNormalMaterial />
       </mesh>
@@ -157,6 +207,9 @@ const Scene = () => {
       <mesh ref={convexRef} geometry={suzanneMesh.geometry}>
         <meshNormalMaterial />
       </mesh>
+      <mesh ref={compoundRef} geometry={compoundApi.geometry}>
+        <meshNormalMaterial />
+      </mesh> */}
     </>
   );
 };

@@ -14,8 +14,8 @@ import {
 import { useFrame, useThree } from "@react-three/fiber";
 import Jolt from "jolt-physics";
 
-export const useConvex = ({
-  vertices,
+export const useCompound = ({
+  shapes,
   position,
   rotation = [0, 0, 0, 1],
   motionType,
@@ -23,7 +23,23 @@ export const useConvex = ({
   mass = 1000,
   material,
 }: {
-  vertices: number[][];
+  shapes: {
+    type:
+      | "box"
+      | "capsule"
+      | "cylinder"
+      | "sphere"
+      | "taperedCapsule"
+      | "convex";
+    position: [number, number, number];
+    rotation?: [number, number, number, number];
+    size?: [number, number, number];
+    height?: number;
+    radius?: number;
+    topRadius?: number;
+    bottomRadius?: number;
+    vertices?: number[][];
+  }[];
   position: [number, number, number];
   rotation?: [number, number, number, number];
   motionType: "static" | "dynamic";
@@ -40,16 +56,118 @@ export const useConvex = ({
   const { scene } = useThree();
 
   const api = useMemo(() => {
-    const hull = new Jolt.ConvexHullShapeSettings();
+    const compound = new Jolt.StaticCompoundShapeSettings();
 
-    for (let i = 0; i < vertices.length; i++) {
-      hull.mPoints.push_back(
-        new Jolt.Vec3(vertices[i][0], vertices[i][1], vertices[i][2])
+    for (const shape of shapes) {
+      const position = new Jolt.Vec3(
+        shape.position[0],
+        shape.position[1],
+        shape.position[2]
       );
+      const rotation = shape.rotation
+        ? new Jolt.Quat(
+            shape.rotation[0],
+            shape.rotation[1],
+            shape.rotation[2],
+            shape.rotation[3]
+          )
+        : new Jolt.Quat(0, 0, 0, 1);
+
+      let shapeSettings;
+
+      switch (shape.type) {
+        case "box":
+          if (!shape.size) {
+            console.error("Size is required for box shape");
+            break;
+          }
+          shapeSettings = new Jolt.BoxShapeSettings(
+            new Jolt.Vec3(
+              shape.size[0] * 0.5,
+              shape.size[1] * 0.5,
+              shape.size[2] * 0.5
+            ),
+            0.05,
+            undefined
+          );
+          break;
+        case "capsule":
+          if (!shape.height || !shape.radius) {
+            console.error("Height and radius are required for capsule shape");
+            break;
+          }
+          shapeSettings = new Jolt.CapsuleShapeSettings(
+            shape.height * 0.5,
+            shape.radius,
+            undefined
+          );
+          break;
+        case "cylinder":
+          if (!shape.height || !shape.radius) {
+            console.error("Height and radius are required for cylinder shape");
+            break;
+          }
+          shapeSettings = new Jolt.CylinderShapeSettings(
+            shape.height * 0.5,
+            shape.radius,
+            0.05,
+            undefined
+          );
+          break;
+        case "sphere":
+          if (!shape.radius) {
+            console.error("Radius is required for sphere shape");
+            break;
+          }
+          shapeSettings = new Jolt.SphereShapeSettings(shape.radius, undefined);
+          break;
+        case "taperedCapsule":
+          if (!shape.height || !shape.topRadius || !shape.bottomRadius) {
+            console.error(
+              "Height, topRadius, and bottomRadius are required for taperedCapsule shape"
+            );
+            break;
+          }
+          shapeSettings = new Jolt.TaperedCapsuleShapeSettings(
+            shape.height * 0.5,
+            shape.topRadius,
+            shape.bottomRadius,
+            undefined
+          );
+          break;
+        case "convex":
+          if (!shape.vertices) {
+            console.error("Vertices are required for convex shape");
+            break;
+          }
+          shapeSettings = new Jolt.ConvexHullShapeSettings();
+          for (let i = 0; i < shape.vertices.length; i++) {
+            shapeSettings.mPoints.push_back(
+              new Jolt.Vec3(
+                shape.vertices[i][0],
+                shape.vertices[i][1],
+                shape.vertices[i][2]
+              )
+            );
+          }
+          break;
+        default:
+          console.error("Invalid shape type");
+          break;
+      }
+      compound.AddShape(
+        position,
+        rotation,
+        shapeSettings as Jolt.ShapeSettings,
+        0
+      );
+      Jolt.destroy(position);
+      Jolt.destroy(rotation);
+      // Jolt.destroy(shapeSettings);
     }
 
-    const shape = hull.Create().Get();
-    Jolt.destroy(hull);
+    const shape = compound.Create().Get();
+    Jolt.destroy(compound);
 
     const bodySettings = new Jolt.BodyCreationSettings(
       shape,
@@ -103,7 +221,7 @@ export const useConvex = ({
     if (debug) {
       const meshMesh = new Mesh(
         geometry,
-        new MeshBasicMaterial({ color: "magenta", wireframe: true })
+        new MeshBasicMaterial({ color: "crimson", wireframe: true })
       );
       debugMesh = meshMesh;
       scene.add(meshMesh);
@@ -113,7 +231,7 @@ export const useConvex = ({
   }, [
     Jolt,
     bodyInterface,
-    vertices,
+    shapes,
     layers,
     material,
     position,
@@ -193,7 +311,7 @@ export const useConvex = ({
     >,
     {
       body: Jolt.Body;
-      shape: Jolt.ConvexShape;
+      shape: Jolt.Shape;
       debugMesh: Mesh<
         BufferGeometry<NormalBufferAttributes>,
         Material | Material[],

@@ -2,12 +2,17 @@ import { useEffect, useMemo, useRef } from "react";
 import { useJolt } from "./useJolt";
 import {
   BoxGeometry,
+  BufferGeometry,
+  Material,
   Mesh,
   MeshBasicMaterial,
+  NormalBufferAttributes,
+  Object3DEventMap,
   Quaternion,
   Vector3,
 } from "three";
 import { useFrame, useThree } from "@react-three/fiber";
+import Jolt from "jolt-physics";
 
 export const useBox = ({
   size,
@@ -159,5 +164,22 @@ export const useBox = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return [ref, api] as const;
+  return [ref, api] as [
+    React.RefObject<
+      Mesh<
+        BufferGeometry<NormalBufferAttributes>,
+        Material | Material[],
+        Object3DEventMap
+      >
+    >,
+    {
+      body: Jolt.Body;
+      shape: Jolt.BoxShape;
+      debugMesh: Mesh<
+        BufferGeometry<NormalBufferAttributes>,
+        Material | Material[],
+        Object3DEventMap
+      > | null;
+    }
+  ];
 };

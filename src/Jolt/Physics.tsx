@@ -84,8 +84,7 @@ export const Physics = memo(
           api.Jolt.destroy(api.joltInterface);
         }
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [gravity]);
+    }, [gravity, api]);
 
     useEffect(() => {
       if (api) {

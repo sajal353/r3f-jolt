@@ -1,5 +1,6 @@
 import { useContext } from "react";
 import { joltContext } from "./context";
+import Jolt from "jolt-physics";
 
 export const useJolt = () => {
   const api = useContext(joltContext);
@@ -16,5 +17,14 @@ export const useJolt = () => {
     physicsSystem,
     bodyInterface,
     layers,
+  } as {
+    Jolt: typeof Jolt;
+    joltInterface: Jolt.JoltInterface;
+    physicsSystem: Jolt.PhysicsSystem;
+    bodyInterface: Jolt.BodyInterface;
+    layers: {
+      LAYER_NON_MOVING: number;
+      LAYER_MOVING: number;
+    };
   };
 };

@@ -3,12 +3,16 @@ import { useJolt } from "./useJolt";
 import {
   BufferAttribute,
   BufferGeometry,
+  Material,
   Mesh,
   MeshBasicMaterial,
+  NormalBufferAttributes,
+  Object3DEventMap,
   Quaternion,
   Vector3,
 } from "three";
 import { useFrame, useThree } from "@react-three/fiber";
+import Jolt from "jolt-physics";
 
 export const useTaperedCapsule = ({
   topRadius,
@@ -185,5 +189,23 @@ export const useTaperedCapsule = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return [ref, api] as const;
+  return [ref, api] as [
+    React.RefObject<
+      Mesh<
+        BufferGeometry<NormalBufferAttributes>,
+        Material | Material[],
+        Object3DEventMap
+      >
+    >,
+    {
+      body: Jolt.Body;
+      shape: Jolt.Shape;
+      debugMesh: Mesh<
+        BufferGeometry<NormalBufferAttributes>,
+        Material | Material[],
+        Object3DEventMap
+      > | null;
+      geometry: BufferGeometry<NormalBufferAttributes>;
+    }
+  ];
 };
