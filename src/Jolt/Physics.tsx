@@ -67,6 +67,10 @@ export const Physics = memo(
           const physicsSystem = joltInterface.GetPhysicsSystem();
           const bodyInterface = physicsSystem.GetBodyInterface();
 
+          physicsSystem.SetGravity(
+            new Jolt.Vec3(gravity[0], gravity[1], gravity[2])
+          );
+
           setApi({
             Jolt,
             joltInterface,
@@ -84,14 +88,6 @@ export const Physics = memo(
           api.Jolt.destroy(api.joltInterface);
         }
       };
-    }, [gravity, api]);
-
-    useEffect(() => {
-      if (api) {
-        api.physicsSystem.SetGravity(
-          new api.Jolt.Vec3(gravity[0], gravity[1], gravity[2])
-        );
-      }
     }, [gravity, api]);
 
     useFrame((_, delta) => {

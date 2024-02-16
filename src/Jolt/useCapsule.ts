@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { useJolt } from "./useJolt";
 import {
   BufferGeometry,
@@ -39,9 +39,9 @@ export const useCapsule = ({
   const ref = useRef<Mesh>(null);
 
   const { Jolt, bodyInterface, layers } = useJolt();
-  const { scene } = useThree();
+  const scene = useThree((state) => state.scene);
 
-  const api = useMemo(() => {
+  const { api, cleanup } = useMemo(() => {
     const shape = new Jolt.CapsuleShape(height * 0.5, radius, undefined);
 
     const bodySettings = new Jolt.BodyCreationSettings(
@@ -85,21 +85,40 @@ export const useCapsule = ({
       scene.add(capsuleMesh);
     }
 
-    return { body, shape, debugMesh };
+    return {
+      api: { body, shape, debugMesh },
+      cleanup: () => {
+        bodyInterface.RemoveBody(body.GetID());
+        bodyInterface.DestroyBody(body.GetID());
+        // Jolt.destroy(shape);
+        // Jolt.destroy(body);
+        if (debugMesh) {
+          scene.remove(debugMesh);
+          debugMesh.geometry.dispose();
+          if (debugMesh.material instanceof MeshBasicMaterial) {
+            debugMesh.material.dispose();
+          }
+        }
+      },
+    };
   }, [
     Jolt,
     bodyInterface,
+    debug,
     height,
-    radius,
     layers,
     mass,
     material,
     motionType,
     position,
+    radius,
     rotation,
-    debug,
     scene,
   ]);
+
+  useLayoutEffect(() => {
+    return cleanup;
+  }, [cleanup]);
 
   useFrame(() => {
     if (!api.body) return;
@@ -142,23 +161,6 @@ export const useCapsule = ({
       );
     }
   });
-
-  useEffect(() => {
-    return () => {
-      bodyInterface.RemoveBody(api.body.GetID());
-      bodyInterface.DestroyBody(api.body.GetID());
-      Jolt.destroy(api.body);
-      Jolt.destroy(api.shape);
-      if (api.debugMesh) {
-        scene.remove(api.debugMesh);
-        api.debugMesh.geometry.dispose();
-        if (api.debugMesh.material instanceof MeshBasicMaterial) {
-          api.debugMesh.material.dispose();
-        }
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   return [ref, api] as [
     React.RefObject<
