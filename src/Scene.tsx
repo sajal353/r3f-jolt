@@ -1,4 +1,4 @@
-import { Euler, Quaternion } from "three";
+import { Euler, Quaternion, Vector3 } from "three";
 import { useBox } from "./Jolt/useBox";
 import { useCylinder } from "./Jolt/useCylinder";
 import { useSphere } from "./Jolt/useSphere";
@@ -9,8 +9,8 @@ import { useGLTF } from "@react-three/drei";
 import { Geometry } from "three-stdlib";
 import { useConvex } from "./Jolt/useConvex";
 import { useCompound } from "./Jolt/useCompound";
+import { useCharacter } from "./Jolt/useCharacter";
 import { useFrame } from "@react-three/fiber";
-import { useJolt } from "./Jolt/useJolt";
 
 const Scene = () => {
   const suzanne = useGLTF(
@@ -33,7 +33,7 @@ const Scene = () => {
 
   const verts = convexGeometry.vertices.map((v) => [v.x, v.y, v.z]);
 
-  const { physicsSystem } = useJolt();
+  // const { physicsSystem } = useJolt();
 
   const [floorRef] = useBox({
     position: [0, 0, 0],
@@ -41,9 +41,6 @@ const Scene = () => {
     size: [100, 0.01, 100],
     debug: true,
     motionType: "static",
-    material: {
-      friction: 0.5,
-    },
   });
 
   const [boxRef] = useBox({
@@ -180,8 +177,34 @@ const Scene = () => {
     },
   });
 
-  useFrame(() => {
-    console.log(physicsSystem.GetNumBodies());
+  const [characterApi] = useCharacter({
+    options: {
+      height: {
+        standing: 1,
+      },
+      radius: {
+        standing: 0.4,
+      },
+      moveDuringJump: true,
+      moveSpeed: 5,
+      jumpSpeed: 10,
+      enableInertia: true,
+      enableStairStep: true,
+      enableStickToFloor: true,
+    },
+    position: [0, 5, 0],
+    debug: true,
+    mass: 1000,
+  });
+
+  useFrame(({ clock }, delta) => {
+    const et = clock.getElapsedTime();
+
+    characterApi.update(
+      new Vector3(Math.sin(et), 0, Math.cos(et)),
+      false,
+      delta
+    );
   });
 
   return (
