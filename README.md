@@ -1,30 +1,183 @@
-# React + TypeScript + Vite
+# React Hooks for Jolt Physics
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## `Physics`
 
-Currently, two official plugins are available:
+A memoized component for managing physics within a React application.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+### Props
 
-## Expanding the ESLint configuration
+- `gravity`: Optional gravity vector [x, y, z].
+- `children`: React node(s) representing the physics scene.
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+### Returns
 
-- Configure the top-level `parserOptions` property like this:
+A memoized JSX element or `null`.
 
-```js
-export default {
-  // other rules...
-  parserOptions: {
-    ecmaVersion: 'latest',
-    sourceType: 'module',
-    project: ['./tsconfig.json', './tsconfig.node.json'],
-    tsconfigRootDir: __dirname,
-  },
-}
-```
+## `useBox`
 
-- Replace `plugin:@typescript-eslint/recommended` to `plugin:@typescript-eslint/recommended-type-checked` or `plugin:@typescript-eslint/strict-type-checked`
-- Optionally add `plugin:@typescript-eslint/stylistic-type-checked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and add `plugin:react/recommended` & `plugin:react/jsx-runtime` to the `extends` list
+A hook for creating a static or dynamic box-shaped physics body.
+
+### Parameters
+
+- `size`: The size of the box [width, height, depth].
+- `position`: The initial position of the box [x, y, z].
+- `rotation`: The initial rotation of the box as a quaternion [x, y, z, w].
+- `motionType`: The type of motion, either "static" or "dynamic".
+- `debug`: Enable debugging visualization (optional).
+- `mass`: The mass of the box (optional).
+- `material`: Material properties for friction and restitution (optional).
+
+### Returns
+
+A tuple containing a reference to the Three.js mesh and the associated Jolt physics body and shape.
+
+## `useCapsule`
+
+A hook for creating a static or dynamic capsule-shaped physics body.
+
+### Parameters
+
+- `height`: The height of the capsule.
+- `radius`: The radius of the capsule.
+- `position`: The initial position of the capsule [x, y, z].
+- `rotation`: The initial rotation of the capsule as a quaternion [x, y, z, w].
+- `motionType`: The type of motion, either "static" or "dynamic".
+- `debug`: Enable debugging visualization (optional).
+- `mass`: The mass of the capsule (optional).
+- `material`: Material properties for friction and restitution (optional).
+
+### Returns
+
+A tuple containing a reference to the Three.js mesh and the associated Jolt physics body and shape.
+
+## `useCharacter`
+
+A hook for creating a character with physics properties.
+
+### Parameters
+
+- `options`: Object containing character options.
+- `position`: The initial position of the character [x, y, z].
+- `rotation`: The initial rotation of the character as a quaternion [x, y, z, w].
+- `debug`: Enable debugging visualization (optional).
+- `mass`: The mass of the character (optional).
+
+### Returns
+
+An object containing the character, an update function, and a debug mesh.
+
+## `useCompound`
+
+A hook for creating a compound physics body composed of multiple shapes.
+
+### Parameters
+
+- `shapes`: Array of shape definitions.
+- `position`: The initial position of the compound shape [x, y, z].
+- `rotation`: The initial rotation of the compound shape as a quaternion [x, y, z, w].
+- `motionType`: The type of motion, either "static" or "dynamic".
+- `debug`: Enable debugging visualization (optional).
+- `mass`: The total mass of the compound shape (optional).
+- `material`: Material properties for friction and restitution (optional).
+
+### Returns
+
+A tuple containing a reference to the Three.js mesh, the associated Jolt physics body and shape, and the Three.js geometry.
+
+## `useConvex`
+
+A hook for creating a static or dynamic convex-shaped physics body.
+
+### Parameters
+
+- `vertices`: Array of vertices defining the convex shape.
+- `position`: The initial position of the convex shape [x, y, z].
+- `rotation`: The initial rotation of the convex shape as a quaternion [x, y, z, w].
+- `motionType`: The type of motion, either "static" or "dynamic".
+- `debug`: Enable debugging visualization (optional).
+- `mass`: The mass of the convex shape (optional).
+- `material`: Material properties for friction and restitution (optional).
+
+### Returns
+
+A tuple containing a reference to the Three.js mesh and the associated Jolt physics body and shape.
+
+## `useCylinder`
+
+A hook for creating a static or dynamic cylinder-shaped physics body.
+
+### Parameters
+
+- `height`: The height of the cylinder.
+- `radius`: The radius of the cylinder.
+- `position`: The initial position of the cylinder [x, y, z].
+- `rotation`: The initial rotation of the cylinder as a quaternion [x, y, z, w].
+- `motionType`: The type of motion, either "static" or "dynamic".
+- `debug`: Enable debugging visualization (optional).
+- `mass`: The mass of the cylinder (optional).
+- `material`: Material properties for friction and restitution (optional).
+
+### Returns
+
+A tuple containing a reference to the Three.js mesh and the associated Jolt physics body and shape.
+
+## `useJolt`
+
+A hook providing access to various elements of the Jolt physics library.
+
+### Returns
+
+An object containing Jolt library elements such as Jolt, joltInterface, physicsSystem, bodyInterface, and layers.
+
+## `useSphere`
+
+A hook for creating a static or dynamic sphere-shaped physics body.
+
+### Parameters
+
+- `radius`: The radius of the sphere.
+- `position`: The initial position of the sphere [x, y, z].
+- `rotation`: The initial rotation of the sphere as a quaternion [x, y, z, w].
+- `motionType`: The type of motion, either "static" or "dynamic".
+- `debug`: Enable debugging visualization (optional).
+- `mass`: The mass of the sphere (optional).
+- `material`: Material properties for friction and restitution (optional).
+
+### Returns
+
+A tuple containing a reference to the Three.js mesh and the associated Jolt physics body and shape.
+
+## `useTaperedCapsule`
+
+A hook for creating a static or dynamic tapered capsule-shaped physics body.
+
+### Parameters
+
+- `topRadius`: The top radius of the tapered capsule.
+- `bottomRadius`: The bottom radius of the tapered capsule.
+- `height`: The height of the tapered capsule.
+- `position`: The initial position of the tapered capsule [x, y, z].
+- `rotation`: The initial rotation of the tapered capsule as a quaternion [x, y, z, w].
+- `motionType`: The type of motion, either "static" or "dynamic".
+- `debug`: Enable debugging visualization (optional).
+- `mass`: The mass of the tapered capsule (optional).
+- `material`: Material properties for friction and restitution (optional).
+
+### Returns
+
+A tuple containing a reference to the Three.js mesh, the associated Jolt physics body and shape, and the Three.js geometry.
+
+## `useTrimesh`
+
+A hook for creating a static or dynamic physics body based on a custom mesh.
+
+### Parameters
+
+- `mesh`: Object containing position and index information for the custom mesh.
+- `position`: The initial position of the custom mesh [x, y, z].
+- `debug`: Enable debugging visualization (optional).
+- `material`: Material properties for friction and restitution (optional).
+
+### Returns
+
+A tuple containing a reference to the Three.js mesh, the associated Jolt physics body and shape, and the Three.js geometry.

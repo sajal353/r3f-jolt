@@ -8,3 +8,4 @@ export { useCylinder } from "@/Jolt/useCylinder";
 export { useSphere } from "@/Jolt/useSphere";
 export { useTaperedCapsule } from "@/Jolt/useTaperedCapsule";
 export { useTrimesh } from "@/Jolt/useTrimesh";
+export { useCharacter } from "@/Jolt/useCharacter";
