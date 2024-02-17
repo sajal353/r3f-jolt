@@ -1,4 +1,4 @@
-# React-Three-Fiber Hooks for Jolt Physics
+# Jolt Physics Hooks for React-Three-Fiber
 
 ## `Physics`
 
