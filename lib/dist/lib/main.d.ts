@@ -1,0 +1,10 @@
+export { Physics } from '../src/Jolt/Physics';
+export { useJolt } from '../src/Jolt/useJolt';
+export { useBox } from '../src/Jolt/useBox';
+export { useCapsule } from '../src/Jolt/useCapsule';
+export { useCompound } from '../src/Jolt/useCompound';
+export { useConvex } from '../src/Jolt/useConvex';
+export { useCylinder } from '../src/Jolt/useCylinder';
+export { useSphere } from '../src/Jolt/useSphere';
+export { useTaperedCapsule } from '../src/Jolt/useTaperedCapsule';
+export { useTrimesh } from '../src/Jolt/useTrimesh';
