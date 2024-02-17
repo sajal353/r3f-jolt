@@ -5,12 +5,19 @@ import tsconfigPaths from "vite-tsconfig-paths";
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(), dts(), tsconfigPaths()],
+  plugins: [
+    react(),
+    dts({
+      rollupTypes: true,
+    }),
+    tsconfigPaths(),
+  ],
   build: {
+    emptyOutDir: true,
     lib: {
       entry: "lib/main.ts",
       name: "r3f-jolt",
-      formats: ["es", "umd"],
+      formats: ["es"],
       fileName: "r3f-jolt",
     },
     rollupOptions: {
