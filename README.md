@@ -1,4 +1,4 @@
-# React Hooks for Jolt Physics
+# React-Three-Fiber Hooks for Jolt Physics
 
 ## `Physics`
 
@@ -7,7 +7,7 @@ A memoized component for managing physics within a React application.
 ### Props
 
 - `gravity`: Optional gravity vector [x, y, z].
-- `children`: React node(s) representing the physics scene.
+- `children`: Physics world items.
 
 ### Returns
 
