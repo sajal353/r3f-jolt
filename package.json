@@ -11,7 +11,7 @@
     "r3f",
     "physics"
   ],
-  "description": "React-Three-Fiber Hooks for Jolt Physics",
+  "description": "Jolt Physics Hooks for React-Three-Fiber",
   "author": {
     "name": "Sajal",
     "email": "sajalbiswas353@gmail.com"
