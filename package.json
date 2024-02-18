@@ -1,8 +1,22 @@
 {
   "name": "r3f-jolt",
-  "private": true,
-  "version": "0.0.0",
+  "version": "0.1.1",
   "type": "module",
+  "main": "dist/r3f-jolt.js",
+  "keywords": [
+    "jolt",
+    "three",
+    "react",
+    "react-three-fiber",
+    "r3f",
+    "physics"
+  ],
+  "description": "React-Three-Fiber Hooks for Jolt Physics",
+  "author": {
+    "name": "Sajal",
+    "email": "sajalbiswas353@gmail.com"
+  },
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

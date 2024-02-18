@@ -1,0 +1,10 @@
+src/
+lib/
+public/
+.eslintrc.cjs
+.gitignore
+tsconfig.json
+tsconfig.node.json
+vite.config.ts
+yarn.lock
+index.html
