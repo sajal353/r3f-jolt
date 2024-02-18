@@ -24,12 +24,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@react-three/drei": "^9.96.5",
-    "@react-three/fiber": "^8.15.15",
-    "jolt-physics": "^0.17.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "three": "^0.160.1"
+    "jolt-physics": "^0.17.0"
+  },
+  "peerDependencies": {
+    "@react-three/drei": ">=9.96.5",
+    "@react-three/fiber": ">=8.15.15",
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0",
+    "three": ">=0.160.1"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",
