@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import dts from "vite-plugin-dts";
 import tsconfigPaths from "vite-tsconfig-paths";
+import { dependencies, peerDependencies } from "./package.json";
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -21,13 +22,10 @@ export default defineConfig({
       fileName: "r3f-jolt",
     },
     rollupOptions: {
-      external: ["react", "react-dom"],
-      output: {
-        globals: {
-          react: "React",
-          "react-dom": "ReactDOM",
-        },
-      },
+      external: [
+        ...Object.keys(dependencies),
+        ...Object.keys(peerDependencies),
+      ],
     },
   },
 });
