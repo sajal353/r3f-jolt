@@ -1,5 +1,7 @@
 # Jolt Physics Hooks for React-Three-Fiber
 
+[Example](https://github.com/sajal353/r3f-jolt/blob/main/src/Scene.tsx)
+
 ## `Physics`
 
 A memoized component for managing physics within a React application.

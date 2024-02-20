@@ -1,6 +1,6 @@
 {
   "name": "r3f-jolt",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "type": "module",
   "main": "dist/r3f-jolt.js",
   "keywords": [
@@ -15,6 +15,11 @@
   "author": {
     "name": "Sajal",
     "email": "sajalbiswas353@gmail.com"
+  },
+  "homepage": "https://github.com/sajal353/r3f-jolt",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sajal353/r3f-jolt"
   },
   "license": "MIT",
   "scripts": {
