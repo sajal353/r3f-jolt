@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useJolt } from "./useJolt";
 import {
   BufferAttribute,
@@ -22,6 +22,7 @@ export const useCompound = ({
   debug = false,
   mass = 1000,
   material,
+  bodySettingsOverride,
 }: {
   shapes: {
     type:
@@ -49,13 +50,25 @@ export const useCompound = ({
     friction?: number;
     restitution?: number;
   };
+  bodySettingsOverride?: (settings: Jolt.BodyCreationSettings) => void;
 }) => {
   const ref = useRef<Mesh>(null);
 
   const { Jolt, bodyInterface, layers } = useJolt();
   const scene = useThree((state) => state.scene);
 
-  const { api, cleanup } = useMemo(() => {
+  const [api, setApi] = useState<{
+    body: Jolt.Body;
+    shape: Jolt.Shape;
+    debugMesh: Mesh<
+      BufferGeometry<NormalBufferAttributes>,
+      Material | Material[],
+      Object3DEventMap
+    > | null;
+    geometry: BufferGeometry<NormalBufferAttributes>;
+  }>();
+
+  const init = useCallback(() => {
     const compound = new Jolt.StaticCompoundShapeSettings();
 
     for (const shape of shapes) {
@@ -179,6 +192,10 @@ export const useCompound = ({
       motionType === "dynamic" ? layers.LAYER_MOVING : layers.LAYER_NON_MOVING
     );
 
+    if (bodySettingsOverride) {
+      bodySettingsOverride(bodySettings);
+    }
+
     const body = bodyInterface.CreateBody(bodySettings);
 
     body.GetMotionProperties().SetInverseMass(1 / mass);
@@ -232,8 +249,6 @@ export const useCompound = ({
       cleanup: () => {
         bodyInterface.RemoveBody(body.GetID());
         bodyInterface.DestroyBody(body.GetID());
-        // Jolt.destroy(shape);
-        // Jolt.destroy(body);
         if (debugMesh) {
           scene.remove(debugMesh);
           debugMesh.geometry.dispose();
@@ -243,26 +258,17 @@ export const useCompound = ({
         }
       },
     };
-  }, [
-    Jolt,
-    bodyInterface,
-    debug,
-    layers,
-    mass,
-    material,
-    motionType,
-    position,
-    rotation,
-    scene,
-    shapes,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
+    const { api, cleanup } = init();
+    setApi(api);
     return cleanup;
-  }, [cleanup]);
+  }, [init]);
 
   useFrame(() => {
-    if (!api.body) return;
+    if (!api) return;
 
     if (ref.current) {
       ref.current.position.copy(

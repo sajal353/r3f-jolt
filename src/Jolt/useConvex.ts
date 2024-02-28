@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useJolt } from "./useJolt";
 import {
   BufferAttribute,
@@ -22,6 +22,7 @@ export const useConvex = ({
   debug = false,
   mass = 1000,
   material,
+  bodySettingsOverride,
 }: {
   vertices: number[][];
   position: [number, number, number];
@@ -33,13 +34,25 @@ export const useConvex = ({
     friction?: number;
     restitution?: number;
   };
+  bodySettingsOverride?: (settings: Jolt.BodyCreationSettings) => void;
 }) => {
   const ref = useRef<Mesh>(null);
 
   const { Jolt, bodyInterface, layers } = useJolt();
   const scene = useThree((state) => state.scene);
 
-  const { api, cleanup } = useMemo(() => {
+  const [api, setApi] = useState<{
+    body: Jolt.Body;
+    shape: Jolt.Shape;
+    debugMesh: Mesh<
+      BufferGeometry<NormalBufferAttributes>,
+      Material | Material[],
+      Object3DEventMap
+    > | null;
+    geometry: BufferGeometry<NormalBufferAttributes>;
+  }>();
+
+  const init = useCallback(() => {
     const hull = new Jolt.ConvexHullShapeSettings();
 
     for (let i = 0; i < vertices.length; i++) {
@@ -60,6 +73,10 @@ export const useConvex = ({
         : Jolt.EMotionType_Static,
       motionType === "dynamic" ? layers.LAYER_MOVING : layers.LAYER_NON_MOVING
     );
+
+    if (bodySettingsOverride) {
+      bodySettingsOverride(bodySettings);
+    }
 
     const body = bodyInterface.CreateBody(bodySettings);
 
@@ -114,8 +131,6 @@ export const useConvex = ({
       cleanup: () => {
         bodyInterface.RemoveBody(body.GetID());
         bodyInterface.DestroyBody(body.GetID());
-        // Jolt.destroy(shape);
-        // Jolt.destroy(body);
         if (debugMesh) {
           scene.remove(debugMesh);
           debugMesh.geometry.dispose();
@@ -125,26 +140,17 @@ export const useConvex = ({
         }
       },
     };
-  }, [
-    Jolt,
-    bodyInterface,
-    vertices,
-    layers,
-    material,
-    position,
-    rotation,
-    mass,
-    debug,
-    scene,
-    motionType,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
+    const { api, cleanup } = init();
+    setApi(api);
     return cleanup;
-  }, [cleanup]);
+  }, [init]);
 
   useFrame(() => {
-    if (!api.body) return;
+    if (!api) return;
 
     if (ref.current) {
       ref.current.position.copy(
@@ -195,7 +201,7 @@ export const useConvex = ({
     >,
     {
       body: Jolt.Body;
-      shape: Jolt.ConvexShape;
+      shape: Jolt.Shape;
       debugMesh: Mesh<
         BufferGeometry<NormalBufferAttributes>,
         Material | Material[],

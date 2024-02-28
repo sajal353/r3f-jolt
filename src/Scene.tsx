@@ -19,8 +19,6 @@ const Scene = () => {
 
   const suzanneMesh = suzanne.nodes.Suzanne as THREE.Mesh;
 
-  suzanneMesh.geometry.rotateY(-Math.PI / 4);
-
   const pos = suzanneMesh.geometry.getAttribute("position");
   const idx = suzanneMesh.geometry.index?.array;
 
@@ -117,7 +115,7 @@ const Scene = () => {
     },
   });
 
-  const [convexRef] = useConvex({
+  const [convexRef, convexApi] = useConvex({
     vertices: verts,
     position: [0, 8, 0],
     debug: true,
@@ -200,11 +198,12 @@ const Scene = () => {
   useFrame(({ clock }, delta) => {
     const et = clock.getElapsedTime();
 
-    characterApi.update(
-      new Vector3(Math.sin(et), 0, Math.cos(et)),
-      false,
-      delta
-    );
+    characterApi &&
+      characterApi.update(
+        new Vector3(Math.sin(et), 0, Math.cos(et)),
+        false,
+        delta
+      );
   });
 
   return (
@@ -230,18 +229,26 @@ const Scene = () => {
         <capsuleGeometry args={[0.5, 2]} />
         <meshNormalMaterial />
       </mesh>
-      <mesh ref={taperedCapsuleRef} geometry={taperedCapsuleApi.geometry}>
-        <meshNormalMaterial />
-      </mesh>
-      <mesh ref={trimeshRef} geometry={trimeshApi.geometry}>
-        <meshNormalMaterial />
-      </mesh>
-      <mesh ref={convexRef} geometry={suzanneMesh.geometry}>
-        <meshNormalMaterial />
-      </mesh>
-      <mesh ref={compoundRef} geometry={compoundApi.geometry}>
-        <meshNormalMaterial />
-      </mesh>
+      {taperedCapsuleApi && (
+        <mesh ref={taperedCapsuleRef} geometry={taperedCapsuleApi.geometry}>
+          <meshNormalMaterial />
+        </mesh>
+      )}
+      {trimeshApi && (
+        <mesh ref={trimeshRef} geometry={trimeshApi.geometry}>
+          <meshNormalMaterial />
+        </mesh>
+      )}
+      {convexApi && (
+        <mesh ref={convexRef} geometry={suzanneMesh.geometry}>
+          <meshNormalMaterial />
+        </mesh>
+      )}
+      {compoundApi && (
+        <mesh ref={compoundRef} geometry={compoundApi.geometry}>
+          <meshNormalMaterial />
+        </mesh>
+      )}
     </>
   );
 };

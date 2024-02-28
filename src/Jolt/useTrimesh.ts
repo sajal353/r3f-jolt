@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useJolt } from "./useJolt";
 import {
   BufferAttribute,
@@ -21,6 +21,7 @@ export const useTrimesh = ({
   position,
   debug = false,
   material,
+  bodySettingsOverride,
 }: {
   mesh: {
     position: BufferAttribute | InterleavedBufferAttribute;
@@ -32,13 +33,25 @@ export const useTrimesh = ({
     friction?: number;
     restitution?: number;
   };
+  bodySettingsOverride?: (settings: Jolt.BodyCreationSettings) => void;
 }) => {
   const ref = useRef<Mesh>(null);
 
   const { Jolt, bodyInterface, layers } = useJolt();
   const scene = useThree((state) => state.scene);
 
-  const { api, cleanup } = useMemo(() => {
+  const [api, setApi] = useState<{
+    body: Jolt.Body;
+    shape: Jolt.Shape;
+    debugMesh: Mesh<
+      BufferGeometry<NormalBufferAttributes>,
+      Material | Material[],
+      Object3DEventMap
+    > | null;
+    geometry: BufferGeometry<NormalBufferAttributes>;
+  }>();
+
+  const init = useCallback(() => {
     const verts = new Jolt.VertexList();
 
     for (let i = 0; i < mesh.position.count; i++) {
@@ -68,9 +81,11 @@ export const useTrimesh = ({
     mats.push_back(new Jolt.PhysicsMaterial());
 
     const shape = new Jolt.MeshShapeSettings(verts, tris, mats).Create().Get();
+
     Jolt.destroy(verts);
     Jolt.destroy(tris);
     Jolt.destroy(mats);
+
     const bodySettings = new Jolt.BodyCreationSettings(
       shape,
       new Jolt.Vec3(position[0], position[1], position[2]),
@@ -78,6 +93,10 @@ export const useTrimesh = ({
       Jolt.EMotionType_Static,
       layers.LAYER_NON_MOVING
     );
+
+    if (bodySettingsOverride) {
+      bodySettingsOverride(bodySettings);
+    }
 
     const body = bodyInterface.CreateBody(bodySettings);
 
@@ -130,8 +149,6 @@ export const useTrimesh = ({
       cleanup: () => {
         bodyInterface.RemoveBody(body.GetID());
         bodyInterface.DestroyBody(body.GetID());
-        // Jolt.destroy(shape);
-        // Jolt.destroy(body);
         if (debugMesh) {
           scene.remove(debugMesh);
           debugMesh.geometry.dispose();
@@ -141,24 +158,17 @@ export const useTrimesh = ({
         }
       },
     };
-  }, [
-    Jolt,
-    bodyInterface,
-    debug,
-    layers.LAYER_NON_MOVING,
-    material,
-    mesh.index,
-    mesh.position,
-    position,
-    scene,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
+    const { api, cleanup } = init();
+    setApi(api);
     return cleanup;
-  }, [cleanup]);
+  }, [init]);
 
   useFrame(() => {
-    if (!api.body) return;
+    if (!api) return;
 
     if (ref.current) {
       ref.current.position.copy(

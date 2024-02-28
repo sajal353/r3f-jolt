@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useJolt } from "./useJolt";
 import {
   CapsuleGeometry,
@@ -64,12 +64,18 @@ export const useCharacter = ({
   const { Jolt, joltInterface, physicsSystem, layers } = useJolt();
   const scene = useThree((state) => state.scene);
 
+  const [api, setApi] = useState<{
+    character: Jolt.CharacterVirtual;
+    update: (direction: Vector3, jump: boolean, deltaTime: number) => void;
+    debugMesh: Mesh | null;
+  }>();
+
   const characterRef = useRef({
     shouldSlide: true,
     desiredVelocity: new Vector3(),
   });
 
-  const { api, cleanup } = useMemo(() => {
+  const init = useCallback(() => {
     const updateSettings = new Jolt.ExtendedUpdateSettings();
 
     const objectVsBroadPhaseLayerFilter =
@@ -367,30 +373,30 @@ export const useCharacter = ({
     return {
       api: { character, update, debugMesh },
       cleanup: () => {
+        Jolt.destroy(characterPosition);
+        Jolt.destroy(characterRotation);
+        Jolt.destroy(tempVec3);
+        Jolt.destroy(character);
         if (debugMesh) {
           scene.remove(debugMesh);
+          debugMesh.geometry.dispose();
+          if (debugMesh.material instanceof MeshBasicMaterial) {
+            debugMesh.material.dispose();
+          }
         }
       },
     };
-  }, [
-    Jolt,
-    debug,
-    joltInterface,
-    layers.LAYER_MOVING,
-    mass,
-    options,
-    physicsSystem,
-    position,
-    rotation,
-    scene,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
+    const { api, cleanup } = init();
+    setApi(api);
     return cleanup;
-  }, [cleanup]);
+  }, [init]);
 
   useFrame(() => {
-    if (!api.character) return;
+    if (!api) return;
 
     if (api.debugMesh) {
       api.debugMesh.position.copy(

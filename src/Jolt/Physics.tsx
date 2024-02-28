@@ -88,17 +88,12 @@ export const Physics = memo(
           api.Jolt.destroy(api.joltInterface);
         }
       };
-    }, [gravity, api]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [api]);
 
-    useFrame((_, delta) => {
-      let deltaTime = delta;
-
-      deltaTime = Math.min(deltaTime, 1.0 / 30.0);
-
-      const numSteps = deltaTime > 1.0 / 55.0 ? 2 : 1;
-
+    useFrame(() => {
       if (api) {
-        api.joltInterface.Step(deltaTime, numSteps);
+        api.joltInterface.Step(1 / 60, 1);
       }
     });
 

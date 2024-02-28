@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useJolt } from "./useJolt";
 import {
   BufferGeometry,
@@ -23,6 +23,7 @@ export const useCapsule = ({
   debug = false,
   mass = 1000,
   material,
+  bodySettingsOverride,
 }: {
   height: number;
   radius: number;
@@ -35,13 +36,24 @@ export const useCapsule = ({
     friction?: number;
     restitution?: number;
   };
+  bodySettingsOverride?: (settings: Jolt.BodyCreationSettings) => void;
 }) => {
   const ref = useRef<Mesh>(null);
 
   const { Jolt, bodyInterface, layers } = useJolt();
-  const scene = useThree((state) => state.scene);
+  const scene = useThree(state => state.scene);
 
-  const { api, cleanup } = useMemo(() => {
+  const [api, setApi] = useState<{
+    body: Jolt.Body;
+    shape: Jolt.CapsuleShape;
+    debugMesh: Mesh<
+      BufferGeometry<NormalBufferAttributes>,
+      Material | Material[],
+      Object3DEventMap
+    > | null;
+  }>();
+
+  const init = useCallback(() => {
     const shape = new Jolt.CapsuleShape(height * 0.5, radius, undefined);
 
     const bodySettings = new Jolt.BodyCreationSettings(
@@ -53,6 +65,10 @@ export const useCapsule = ({
         : Jolt.EMotionType_Static,
       motionType === "dynamic" ? layers.LAYER_MOVING : layers.LAYER_NON_MOVING
     );
+
+    if (bodySettingsOverride) {
+      bodySettingsOverride(bodySettings);
+    }
 
     const body = bodyInterface.CreateBody(bodySettings);
 
@@ -90,8 +106,6 @@ export const useCapsule = ({
       cleanup: () => {
         bodyInterface.RemoveBody(body.GetID());
         bodyInterface.DestroyBody(body.GetID());
-        // Jolt.destroy(shape);
-        // Jolt.destroy(body);
         if (debugMesh) {
           scene.remove(debugMesh);
           debugMesh.geometry.dispose();
@@ -101,27 +115,17 @@ export const useCapsule = ({
         }
       },
     };
-  }, [
-    Jolt,
-    bodyInterface,
-    debug,
-    height,
-    layers,
-    mass,
-    material,
-    motionType,
-    position,
-    radius,
-    rotation,
-    scene,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
+    const { api, cleanup } = init();
+    setApi(api);
     return cleanup;
-  }, [cleanup]);
+  }, [init]);
 
   useFrame(() => {
-    if (!api.body) return;
+    if (!api) return;
 
     if (ref.current) {
       ref.current.position.copy(
@@ -178,6 +182,6 @@ export const useCapsule = ({
         Material | Material[],
         Object3DEventMap
       > | null;
-    }
+    },
   ];
 };
