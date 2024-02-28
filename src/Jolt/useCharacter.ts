@@ -54,7 +54,6 @@ export const useCharacter = ({
     enableInertia: boolean;
     enableStairStep: boolean;
     enableStickToFloor: boolean;
-    velocityUpdater?: (velocity: Vector3) => Vector3;
   };
   position: [number, number, number];
   rotation?: [number, number, number, number];
@@ -212,6 +211,31 @@ export const useCharacter = ({
 
     character.SetListener(characterContactListener);
 
+    const characterUp = new Vector3(
+      character.GetUp().GetX(),
+      character.GetUp().GetY(),
+      character.GetUp().GetZ()
+    );
+
+    if (options.enableStickToFloor) {
+      updateSettings.mStickToFloorStepDown = Jolt.Vec3.prototype.sZero();
+    } else {
+      const vec = characterUp
+        .clone()
+        .multiplyScalar(-updateSettings.mStickToFloorStepDown.Length());
+      updateSettings.mStickToFloorStepDown.Set(vec.x, vec.y, vec.z);
+    }
+
+    if (!options.enableStairStep) {
+      updateSettings.mWalkStairsStepUp = Jolt.Vec3.prototype.sZero();
+    } else {
+      const vec = characterUp
+        .clone()
+        .multiplyScalar(updateSettings.mWalkStairsStepUp.Length());
+
+      updateSettings.mWalkStairsStepUp.Set(vec.x, vec.y, vec.z);
+    }
+
     const tempVec3 = new Jolt.Vec3();
 
     let debugMesh: Mesh | null = null;
@@ -227,7 +251,8 @@ export const useCharacter = ({
     const update = (
       direction: THREE.Vector3,
       jump: boolean,
-      deltaTime: number
+      deltaTime: number,
+      overrideUpdate?: (velocity: Vector3, up: Vector3) => Vector3
     ) => {
       const characterUp = new Vector3(
         character.GetUp().GetX(),
@@ -331,31 +356,13 @@ export const useCharacter = ({
         );
       }
 
-      if (options.velocityUpdater) {
-        newVelocity = options.velocityUpdater(newVelocity);
+      if (overrideUpdate) {
+        newVelocity = overrideUpdate(newVelocity, characterUp);
       }
 
       tempVec3.Set(newVelocity.x, newVelocity.y, newVelocity.z);
 
       character.SetLinearVelocity(tempVec3);
-
-      if (options.enableStickToFloor) {
-        updateSettings.mStickToFloorStepDown = Jolt.Vec3.prototype.sZero();
-      } else {
-        const vec = characterUp
-          .clone()
-          .multiplyScalar(-updateSettings.mStickToFloorStepDown.Length());
-        updateSettings.mStickToFloorStepDown.Set(vec.x, vec.y, vec.z);
-      }
-
-      if (!options.enableStairStep) {
-        updateSettings.mWalkStairsStepUp = Jolt.Vec3.prototype.sZero();
-      } else {
-        const vec = characterUp
-          .clone()
-          .multiplyScalar(updateSettings.mWalkStairsStepUp.Length());
-        updateSettings.mWalkStairsStepUp.Set(vec.x, vec.y, vec.z);
-      }
 
       characterUp.multiplyScalar(-physicsSystem.GetGravity().Length());
       character.ExtendedUpdate(
@@ -376,7 +383,6 @@ export const useCharacter = ({
         Jolt.destroy(characterPosition);
         Jolt.destroy(characterRotation);
         Jolt.destroy(tempVec3);
-        Jolt.destroy(character);
         if (debugMesh) {
           scene.remove(debugMesh);
           debugMesh.geometry.dispose();
@@ -421,7 +427,12 @@ export const useCharacter = ({
   return [api] as [
     {
       character: Jolt.CharacterVirtual;
-      update: (direction: Vector3, jump: boolean, deltaTime: number) => void;
+      update: (
+        direction: Vector3,
+        jump: boolean,
+        deltaTime: number,
+        overrideUpdate?: (velocity: Vector3, up: Vector3) => Vector3
+      ) => void;
       debugMesh: Mesh | null;
     }
   ];
