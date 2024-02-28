@@ -17,7 +17,7 @@ export declare const Physics: MemoExoticComponent<({ gravity, children, }: {
     children: React.ReactNode;
 }) => JSX_2.Element | null>;
 
-export declare const useBox: ({ size, position, rotation, motionType, debug, mass, material, }: {
+export declare const useBox: ({ size, position, rotation, motionType, debug, mass, material, bodySettingsOverride, }: {
     size: [number, number, number];
     position: [number, number, number];
     rotation?: [number, number, number, number] | undefined;
@@ -28,13 +28,14 @@ export declare const useBox: ({ size, position, rotation, motionType, debug, mas
         friction?: number | undefined;
         restitution?: number | undefined;
     } | undefined;
+    bodySettingsOverride?: ((settings: Jolt.BodyCreationSettings) => void) | undefined;
 }) => [RefObject<Mesh<BufferGeometry<NormalBufferAttributes>, Material | Material[], Object3DEventMap>>, {
     body: Jolt.Body;
     shape: Jolt.BoxShape;
     debugMesh: Mesh<BufferGeometry<NormalBufferAttributes>, Material | Material[], Object3DEventMap> | null;
 }];
 
-export declare const useCapsule: ({ height, radius, position, rotation, motionType, debug, mass, material, }: {
+export declare const useCapsule: ({ height, radius, position, rotation, motionType, debug, mass, material, bodySettingsOverride, }: {
     height: number;
     radius: number;
     position: [number, number, number];
@@ -46,6 +47,7 @@ export declare const useCapsule: ({ height, radius, position, rotation, motionTy
         friction?: number | undefined;
         restitution?: number | undefined;
     } | undefined;
+    bodySettingsOverride?: ((settings: Jolt.BodyCreationSettings) => void) | undefined;
 }) => [RefObject<Mesh<BufferGeometry<NormalBufferAttributes>, Material | Material[], Object3DEventMap>>, {
     body: Jolt.Body;
     shape: Jolt.CapsuleShape;
@@ -66,7 +68,6 @@ export declare const useCharacter: ({ options, position, rotation, debug, mass, 
         enableInertia: boolean;
         enableStairStep: boolean;
         enableStickToFloor: boolean;
-        velocityUpdater?: ((velocity: Vector3) => Vector3) | undefined;
     };
     position: [number, number, number];
     rotation?: [number, number, number, number] | undefined;
@@ -74,11 +75,11 @@ export declare const useCharacter: ({ options, position, rotation, debug, mass, 
     mass?: number | undefined;
 }) => [{
     character: Jolt.CharacterVirtual;
-    update: (direction: Vector3, jump: boolean, deltaTime: number) => void;
+    update: (direction: Vector3, jump: boolean, deltaTime: number, overrideUpdate?: ((velocity: Vector3, up: Vector3) => Vector3) | undefined) => void;
     debugMesh: Mesh | null;
 }];
 
-export declare const useCompound: ({ shapes, position, rotation, motionType, debug, mass, material, }: {
+export declare const useCompound: ({ shapes, position, rotation, motionType, debug, mass, material, bodySettingsOverride, }: {
     shapes: {
         type: "box" | "capsule" | "cylinder" | "sphere" | "taperedCapsule" | "convex";
         position: [number, number, number];
@@ -99,6 +100,7 @@ export declare const useCompound: ({ shapes, position, rotation, motionType, deb
         friction?: number | undefined;
         restitution?: number | undefined;
     } | undefined;
+    bodySettingsOverride?: ((settings: Jolt.BodyCreationSettings) => void) | undefined;
 }) => [RefObject<Mesh<BufferGeometry<NormalBufferAttributes>, Material | Material[], Object3DEventMap>>, {
     body: Jolt.Body;
     shape: Jolt.Shape;
@@ -106,7 +108,7 @@ export declare const useCompound: ({ shapes, position, rotation, motionType, deb
     geometry: BufferGeometry<NormalBufferAttributes>;
 }];
 
-export declare const useConvex: ({ vertices, position, rotation, motionType, debug, mass, material, }: {
+export declare const useConvex: ({ vertices, position, rotation, motionType, debug, mass, material, bodySettingsOverride, }: {
     vertices: number[][];
     position: [number, number, number];
     rotation?: [number, number, number, number] | undefined;
@@ -117,14 +119,15 @@ export declare const useConvex: ({ vertices, position, rotation, motionType, deb
         friction?: number | undefined;
         restitution?: number | undefined;
     } | undefined;
+    bodySettingsOverride?: ((settings: Jolt.BodyCreationSettings) => void) | undefined;
 }) => [RefObject<Mesh<BufferGeometry<NormalBufferAttributes>, Material | Material[], Object3DEventMap>>, {
     body: Jolt.Body;
-    shape: Jolt.ConvexShape;
+    shape: Jolt.Shape;
     debugMesh: Mesh<BufferGeometry<NormalBufferAttributes>, Material | Material[], Object3DEventMap> | null;
     geometry: BufferGeometry<NormalBufferAttributes>;
 }];
 
-export declare const useCylinder: ({ height, radius, position, rotation, motionType, debug, mass, material, }: {
+export declare const useCylinder: ({ height, radius, position, rotation, motionType, debug, mass, material, bodySettingsOverride, }: {
     height: number;
     radius: number;
     position: [number, number, number];
@@ -136,6 +139,7 @@ export declare const useCylinder: ({ height, radius, position, rotation, motionT
         friction?: number | undefined;
         restitution?: number | undefined;
     } | undefined;
+    bodySettingsOverride?: ((settings: Jolt.BodyCreationSettings) => void) | undefined;
 }) => [RefObject<Mesh<BufferGeometry<NormalBufferAttributes>, Material | Material[], Object3DEventMap>>, {
     body: Jolt.Body;
     shape: Jolt.CylinderShape;
@@ -153,7 +157,7 @@ export declare const useJolt: () => {
     };
 };
 
-export declare const useSphere: ({ radius, position, rotation, motionType, debug, mass, material, }: {
+export declare const useSphere: ({ radius, position, rotation, motionType, debug, mass, material, bodySettingsOverride, }: {
     radius: number;
     position: [number, number, number];
     rotation?: [number, number, number, number] | undefined;
@@ -164,13 +168,14 @@ export declare const useSphere: ({ radius, position, rotation, motionType, debug
         friction?: number | undefined;
         restitution?: number | undefined;
     } | undefined;
+    bodySettingsOverride?: ((settings: Jolt.BodyCreationSettings) => void) | undefined;
 }) => [RefObject<Mesh<BufferGeometry<NormalBufferAttributes>, Material | Material[], Object3DEventMap>>, {
     body: Jolt.Body;
     shape: Jolt.SphereShape;
     debugMesh: Mesh<BufferGeometry<NormalBufferAttributes>, Material | Material[], Object3DEventMap> | null;
 }];
 
-export declare const useTaperedCapsule: ({ topRadius, bottomRadius, height, position, rotation, motionType, debug, mass, material, }: {
+export declare const useTaperedCapsule: ({ topRadius, bottomRadius, height, position, rotation, motionType, debug, mass, material, bodySettingsOverride, }: {
     topRadius: number;
     bottomRadius: number;
     height: number;
@@ -183,6 +188,7 @@ export declare const useTaperedCapsule: ({ topRadius, bottomRadius, height, posi
         friction?: number | undefined;
         restitution?: number | undefined;
     } | undefined;
+    bodySettingsOverride?: ((settings: Jolt.BodyCreationSettings) => void) | undefined;
 }) => [RefObject<Mesh<BufferGeometry<NormalBufferAttributes>, Material | Material[], Object3DEventMap>>, {
     body: Jolt.Body;
     shape: Jolt.Shape;
@@ -190,7 +196,7 @@ export declare const useTaperedCapsule: ({ topRadius, bottomRadius, height, posi
     geometry: BufferGeometry<NormalBufferAttributes>;
 }];
 
-export declare const useTrimesh: ({ mesh, position, debug, material, }: {
+export declare const useTrimesh: ({ mesh, position, debug, material, bodySettingsOverride, }: {
     mesh: {
         position: BufferAttribute | InterleavedBufferAttribute;
         index: TypedArray;
@@ -201,6 +207,7 @@ export declare const useTrimesh: ({ mesh, position, debug, material, }: {
         friction?: number | undefined;
         restitution?: number | undefined;
     } | undefined;
+    bodySettingsOverride?: ((settings: Jolt.BodyCreationSettings) => void) | undefined;
 }) => [RefObject<Mesh<BufferGeometry<NormalBufferAttributes>, Material | Material[], Object3DEventMap>>, {
     body: Jolt.Body;
     shape: Jolt.Shape;
