@@ -8,3 +8,4 @@ tsconfig.node.json
 vite.config.ts
 yarn.lock
 index.html
+dist-demo
