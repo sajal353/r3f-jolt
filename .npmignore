@@ -9,3 +9,4 @@ vite.config.ts
 yarn.lock
 index.html
 dist-demo
+vite.demo.config.ts
