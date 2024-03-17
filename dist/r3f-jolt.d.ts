@@ -79,6 +79,18 @@ export declare const useCharacter: ({ options, position, rotation, debug, mass, 
     debugMesh: Mesh | null;
 }];
 
+export declare const useClosestHitRaycaster: ({ origin, direction, }: {
+    origin: [number, number, number];
+    direction: [number, number, number];
+}) => [{
+    ray: Jolt.RRayCast;
+    cast: (origin: Vector3 | undefined) => {
+        collector: Jolt.CastRayClosestHitCollisionCollector;
+        distance: number;
+        hit: boolean;
+    };
+}];
+
 export declare const useCompound: ({ shapes, position, rotation, motionType, debug, mass, material, bodySettingsOverride, }: {
     shapes: {
         type: "box" | "capsule" | "cylinder" | "sphere" | "taperedCapsule" | "convex";
