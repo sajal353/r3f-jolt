@@ -10,3 +10,4 @@ yarn.lock
 index.html
 dist-demo
 vite.demo.config.ts
+package-lock.json
