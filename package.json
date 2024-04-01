@@ -30,7 +30,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "jolt-physics": "^0.17.0"
+    "jolt-physics": "^0.19.0"
   },
   "peerDependencies": {
     "@react-three/drei": ">=9.96.5",

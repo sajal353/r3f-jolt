@@ -179,12 +179,15 @@ const Scene = () => {
     options: {
       height: {
         standing: 1,
+        crouching: 0.5,
       },
       radius: {
         standing: 0.4,
+        crouching: 0.4,
       },
       moveDuringJump: true,
       moveSpeed: 5,
+      crouchMoveSpeedRatio: 0.5,
       jumpSpeed: 10,
       enableInertia: true,
       enableStairStep: true,
@@ -201,6 +204,7 @@ const Scene = () => {
     characterApi &&
       characterApi.update(
         new Vector3(Math.sin(et), 0, Math.cos(et)),
+        false,
         false,
         delta
       );

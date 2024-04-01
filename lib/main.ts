@@ -10,3 +10,4 @@ export { useTaperedCapsule } from "@/Jolt/useTaperedCapsule";
 export { useTrimesh } from "@/Jolt/useTrimesh";
 export { useCharacter } from "@/Jolt/useCharacter";
 export { useClosestHitRaycaster } from "@/Jolt/useClosestHitRaycaster";
+export { useCar } from "@/Jolt/useCar";

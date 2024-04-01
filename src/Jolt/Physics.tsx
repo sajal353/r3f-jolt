@@ -91,9 +91,13 @@ export const Physics = memo(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [api]);
 
-    useFrame(() => {
+    useFrame((_, delta) => {
       if (api) {
-        api.joltInterface.Step(1 / 60, 1);
+        const deltaTime = Math.min(delta, 1.0 / 30.0);
+
+        const numSteps = deltaTime > 1.0 / 55.0 ? 2 : 1;
+
+        api.joltInterface.Step(deltaTime, numSteps);
       }
     });
 

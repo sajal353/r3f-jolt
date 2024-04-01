@@ -14,7 +14,10 @@ export const useClosestHitRaycaster = ({
 
   const [api, setApi] = useState<{
     ray: Jolt.RRayCast;
-    cast: (origin: Vector3 | undefined) => {
+    cast: (
+      origin?: Vector3,
+      direction?: Vector3
+    ) => {
       collector: Jolt.CastRayClosestHitCollisionCollector;
       distance: number;
       hit: boolean;
@@ -49,10 +52,15 @@ export const useClosestHitRaycaster = ({
 
     const hitCollector = new Jolt.CastRayClosestHitCollisionCollector();
 
-    const cast = (origin: Vector3 | undefined) => {
+    const cast = (origin?: Vector3, direction?: Vector3) => {
       if (origin) {
         tempVec3.Set(origin.x, origin.y, origin.z);
         ray.mOrigin = tempVec3;
+      }
+
+      if (direction) {
+        tempVec3.Set(direction.x, direction.y, direction.z);
+        ray.mDirection = tempVec3;
       }
 
       physicsSystem
@@ -72,7 +80,7 @@ export const useClosestHitRaycaster = ({
 
       if (hitCollector.HadHit()) {
         hit = true;
-        distance = hitCollector.mHit.mFraction * 1000;
+        distance = hitCollector.mHit.mFraction;
       }
 
       hitCollector.Reset();
@@ -109,11 +117,14 @@ export const useClosestHitRaycaster = ({
   return [api] as [
     {
       ray: Jolt.RRayCast;
-      cast: (origin: Vector3 | undefined) => {
+      cast: (
+        origin?: Vector3,
+        direction?: Vector3
+      ) => {
         collector: Jolt.CastRayClosestHitCollisionCollector;
         distance: number;
         hit: boolean;
       };
-    },
+    }
   ];
 };

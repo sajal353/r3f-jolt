@@ -21,6 +21,7 @@ export const useTrimesh = ({
   position,
   debug = false,
   material,
+  initialVelocity,
   bodySettingsOverride,
 }: {
   mesh: {
@@ -33,6 +34,7 @@ export const useTrimesh = ({
     friction?: number;
     restitution?: number;
   };
+  initialVelocity?: [number, number, number];
   bodySettingsOverride?: (settings: Jolt.BodyCreationSettings) => void;
 }) => {
   const ref = useRef<Mesh>(null);
@@ -106,6 +108,16 @@ export const useTrimesh = ({
 
     if (material?.restitution) {
       body.SetRestitution(material.restitution);
+    }
+
+    if (initialVelocity) {
+      body.SetLinearVelocity(
+        new Jolt.Vec3(
+          initialVelocity[0],
+          initialVelocity[1],
+          initialVelocity[2]
+        )
+      );
     }
 
     Jolt.destroy(bodySettings);

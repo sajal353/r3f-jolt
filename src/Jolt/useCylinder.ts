@@ -23,6 +23,7 @@ export const useCylinder = ({
   debug = false,
   mass = 1000,
   material,
+  initialVelocity,
   bodySettingsOverride,
 }: {
   height: number;
@@ -36,12 +37,13 @@ export const useCylinder = ({
     friction?: number;
     restitution?: number;
   };
+  initialVelocity?: [number, number, number];
   bodySettingsOverride?: (settings: Jolt.BodyCreationSettings) => void;
 }) => {
   const ref = useRef<Mesh>(null);
 
   const { Jolt, bodyInterface, layers } = useJolt();
-  const scene = useThree(state => state.scene);
+  const scene = useThree((state) => state.scene);
 
   const [api, setApi] = useState<{
     body: Jolt.Body;
@@ -80,6 +82,16 @@ export const useCylinder = ({
 
     if (material?.restitution) {
       body.SetRestitution(material.restitution);
+    }
+
+    if (initialVelocity) {
+      body.SetLinearVelocity(
+        new Jolt.Vec3(
+          initialVelocity[0],
+          initialVelocity[1],
+          initialVelocity[2]
+        )
+      );
     }
 
     Jolt.destroy(bodySettings);
@@ -187,6 +199,6 @@ export const useCylinder = ({
         Material | Material[],
         Object3DEventMap
       > | null;
-    },
+    }
   ];
 };
