@@ -97,16 +97,19 @@ A hook for creating a static or dynamic capsule-shaped physics body.
 
 A hook for creating a physics-enabled character.
 
-#### Parameters
+### Parameters
 
 - `options`: An object containing various options for configuring the character's behavior and physical properties:
 
   - `height`: Object specifying the height of the character in different states.
     - `standing`: Height of the character while standing.
+    - `crouching`: Height of the character while crouching.
   - `radius`: Object specifying the radius of the character in different states.
     - `standing`: Radius of the character while standing.
+    - `crouching`: Radius of the character while crouching.
   - `moveDuringJump`: Boolean indicating whether the character can move while jumping.
   - `moveSpeed`: Speed of horizontal movement.
+  - `crouchMoveSpeedRatio`: Ratio of movement speed while crouching relative to standing. Default is 0.5.
   - `jumpSpeed`: Speed of jumping.
   - `enableInertia`: Boolean indicating whether to enable inertia for smoother movement.
   - `enableStairStep`: Boolean indicating whether the character can step up stairs.
@@ -117,14 +120,15 @@ A hook for creating a physics-enabled character.
 - `debug` (optional): Enable debugging visualization. Default is `false`.
 - `mass` (optional): Mass of the character. Default is 1000.
 
-#### Returns
+### Returns
 
 `[api]`
 
 - `api`: An object containing the following properties:
   - `character`: Instance of `Jolt.CharacterVirtual` representing the character.
-  - `update`: Function to update the character's movement and behavior. Accepts parameters for movement direction, jump, delta time, and an optional override function for custom velocity updates.
-  - `debugMesh`: Optional mesh for debugging visualization.
+  - `update`: Function to update the character's movement and behavior. Accepts parameters for movement direction, jump, crouch state, delta time, an optional parameter to ignore horizontal movement lock, and an optional override function for custom velocity updates.
+  - `debugMeshStanding`: Optional mesh for debugging visualization while standing.
+  - `debugMeshCrouching`: Optional mesh for debugging visualization while crouching.
 
 ## `useCompound`
 
@@ -323,3 +327,57 @@ A hook for casting a ray and detecting the closest hit collision.
     - `collector`: An instance of `Jolt.CastRayClosestHitCollisionCollector`, collecting collision data.
     - `distance`: The distance to the closest hit.
     - `hit`: A boolean indicating whether a hit occurred.
+
+## `useCar`
+
+A hook to create a physics-enabled car.
+
+#### Parameters
+
+- `position`: Initial position of the car in 3D space.
+- `rotation` (optional): Initial rotation of the car as a quaternion.
+- `castType` (optional): Type of collision casting to use for the car's physics. Can be "cylinder", "sphere", or undefined.
+- `wheelSettings`: Configuration for the car's wheels.
+  - `radius`: Radius of the wheels.
+  - `width`: Width of the wheels.
+  - `offsetHorizontal`: Horizontal offset of the wheels.
+  - `offsetVertical`: Vertical offset of the wheels.
+- `vehicleSize`: Dimensions of the car.
+  - `length`: Length of the car.
+  - `width`: Width of the car.
+  - `height`: Height of the car.
+- `suspension` (optional): Suspension settings for the car.
+  - `minLength`: Minimum length of the suspension.
+  - `maxLength`: Maximum length of the suspension.
+- `maxSteerAngle` (optional): Maximum steering angle of the wheels in degrees.
+- `maxPitchRollAngle` (optional): Maximum pitch and roll angle of the car in degrees.
+- `driveType` (optional): Type of drive for the car. Can be "rwd" (rear-wheel drive), "fwd" (front-wheel drive), or "awd" (all-wheel drive).
+- `frontBackLimitedSlipRatio` (optional): Limited slip ratio for the front and back wheels.
+- `leftRightLimitedSlipRatio` (optional): Limited slip ratio for the left and right wheels.
+- `antiRollbar` (optional): Boolean indicating whether anti-roll bars should be enabled.
+- `mass` (optional): Mass of the car.
+- `maxTorque` (optional): Maximum torque of the car's engine.
+- `clutchStrength` (optional): Strength of the car's clutch.
+- `debug` (optional): Boolean indicating whether to enable debugging visualization.
+
+#### Returns
+
+- `carBody`: Instance of `Jolt.Body` representing the car body.
+- `update`: Function to update the car's movement and behavior. Accepts the following input:
+
+  - `forward`: Boolean indicating whether to move forward.
+  - `backward`: Boolean indicating whether to move backward.
+  - `left`: Boolean indicating whether to steer left.
+  - `right`: Boolean indicating whether to steer right.
+  - `handbrake`: Boolean indicating whether to apply the handbrake.
+  - `modifier`: Boolean indicating whether to apply the modifier (half speed).
+
+  Returns an object containing:
+
+  - `position`: Current position of the car.
+  - `rotation`: Current rotation of the car.
+  - `velocity`: Current velocity of the car.
+  - `wheels`: Array containing the current position and rotation of each wheel.
+
+- `debugGroup`: Optional Three.js `Group` containing debugging visualizations for the car.
+- `geometry`: Three.js `BufferGeometry` representing the car's geometry.
