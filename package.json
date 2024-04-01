@@ -1,6 +1,6 @@
 {
   "name": "r3f-jolt",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "type": "module",
   "main": "dist/r3f-jolt.js",
   "keywords": [
