@@ -1,343 +1,165 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useJolt } from "./useJolt";
-import {
-  BufferAttribute,
-  BufferGeometry,
-  Material,
-  Mesh,
-  MeshBasicMaterial,
-  NormalBufferAttributes,
-  Object3DEventMap,
-  Quaternion,
-  Vector3,
-} from "three";
-import { useFrame, useThree } from "@react-three/fiber";
-import Jolt from "jolt-physics";
+import type Jolt from "jolt-physics";
+import { finishShape, useBody, type BodyOptions } from "./internal/useBody";
+import { shapeToGeometry } from "./internal/shapeToGeometry";
+import { defaultConvexRadius } from "./useBox";
+import type { JoltModule, QuatTuple, Vec3Tuple } from "./types";
 
-export const useCompound = ({
-  shapes,
-  position,
-  rotation = [0, 0, 0, 1],
-  motionType,
-  debug = false,
-  mass = 1000,
-  material,
-  initialVelocity,
-  bodySettingsOverride,
-}: {
-  shapes: {
-    type:
-      | "box"
-      | "capsule"
-      | "cylinder"
-      | "sphere"
-      | "taperedCapsule"
-      | "convex";
-    position: [number, number, number];
-    rotation?: [number, number, number, number];
-    size?: [number, number, number];
-    height?: number;
-    radius?: number;
-    topRadius?: number;
-    bottomRadius?: number;
-    vertices?: number[][];
-  }[];
-  position: [number, number, number];
-  rotation?: [number, number, number, number];
-  motionType: "static" | "dynamic";
-  debug?: boolean;
-  mass?: number;
-  material?: {
-    friction?: number;
-    restitution?: number;
-  };
-  initialVelocity?: [number, number, number];
-  bodySettingsOverride?: (settings: Jolt.BodyCreationSettings) => void;
-}) => {
-  const ref = useRef<Mesh>(null);
+export type CompoundChild =
+  | { type: "box"; position: Vec3Tuple; rotation?: QuatTuple; size: Vec3Tuple; convexRadius?: number }
+  | { type: "sphere"; position: Vec3Tuple; rotation?: QuatTuple; radius: number }
+  | { type: "capsule"; position: Vec3Tuple; rotation?: QuatTuple; height: number; radius: number }
+  | {
+      type: "cylinder";
+      position: Vec3Tuple;
+      rotation?: QuatTuple;
+      height: number;
+      radius: number;
+      convexRadius?: number;
+    }
+  | {
+      type: "taperedCapsule";
+      position: Vec3Tuple;
+      rotation?: QuatTuple;
+      height: number;
+      topRadius: number;
+      bottomRadius: number;
+    }
+  | { type: "convex"; position: Vec3Tuple; rotation?: QuatTuple; vertices: number[][] };
 
-  const { Jolt, bodyInterface, layers } = useJolt();
-  const scene = useThree((state) => state.scene);
+export interface UseCompoundOptions extends BodyOptions {
+  shapes: CompoundChild[];
+}
 
-  const [api, setApi] = useState<{
-    body: Jolt.Body;
-    shape: Jolt.Shape;
-    debugMesh: Mesh<
-      BufferGeometry<NormalBufferAttributes>,
-      Material | Material[],
-      Object3DEventMap
-    > | null;
-    geometry: BufferGeometry<NormalBufferAttributes>;
-  }>();
-
-  const init = useCallback(() => {
-    const compound = new Jolt.StaticCompoundShapeSettings();
-
-    for (const shape of shapes) {
-      const position = new Jolt.Vec3(
-        shape.position[0],
-        shape.position[1],
-        shape.position[2]
+const createChildSettings = (
+  jolt: JoltModule,
+  child: CompoundChild,
+): Jolt.ShapeSettings => {
+  switch (child.type) {
+    case "box": {
+      const halfExtent = new jolt.Vec3(
+        child.size[0] * 0.5,
+        child.size[1] * 0.5,
+        child.size[2] * 0.5,
       );
-      const rotation = shape.rotation
-        ? new Jolt.Quat(
-            shape.rotation[0],
-            shape.rotation[1],
-            shape.rotation[2],
-            shape.rotation[3]
-          )
-        : new Jolt.Quat(0, 0, 0, 1);
+      const settings = new jolt.BoxShapeSettings(
+        halfExtent,
+        child.convexRadius ?? defaultConvexRadius(child.size),
+        undefined,
+      );
+      jolt.destroy(halfExtent);
+      return settings;
+    }
+    case "sphere":
+      return new jolt.SphereShapeSettings(child.radius, undefined);
+    case "capsule":
+      return new jolt.CapsuleShapeSettings(
+        child.height * 0.5,
+        child.radius,
+        undefined,
+      );
+    case "cylinder":
+      return new jolt.CylinderShapeSettings(
+        child.height * 0.5,
+        child.radius,
+        child.convexRadius ??
+          defaultConvexRadius([child.height, child.radius * 2]),
+        undefined,
+      );
+    case "taperedCapsule":
+      return new jolt.TaperedCapsuleShapeSettings(
+        child.height * 0.5,
+        child.topRadius,
+        child.bottomRadius,
+        undefined,
+      );
+    case "convex": {
+      const settings = new jolt.ConvexHullShapeSettings();
+      const point = new jolt.Vec3();
 
-      let shapeSettings;
-
-      switch (shape.type) {
-        case "box":
-          if (!shape.size) {
-            console.error("Size is required for box shape");
-            break;
-          }
-          shapeSettings = new Jolt.BoxShapeSettings(
-            new Jolt.Vec3(
-              shape.size[0] * 0.5,
-              shape.size[1] * 0.5,
-              shape.size[2] * 0.5
-            ),
-            0.05,
-            undefined
-          );
-          break;
-        case "capsule":
-          if (!shape.height || !shape.radius) {
-            console.error("Height and radius are required for capsule shape");
-            break;
-          }
-          shapeSettings = new Jolt.CapsuleShapeSettings(
-            shape.height * 0.5,
-            shape.radius,
-            undefined
-          );
-          break;
-        case "cylinder":
-          if (!shape.height || !shape.radius) {
-            console.error("Height and radius are required for cylinder shape");
-            break;
-          }
-          shapeSettings = new Jolt.CylinderShapeSettings(
-            shape.height * 0.5,
-            shape.radius,
-            0.05,
-            undefined
-          );
-          break;
-        case "sphere":
-          if (!shape.radius) {
-            console.error("Radius is required for sphere shape");
-            break;
-          }
-          shapeSettings = new Jolt.SphereShapeSettings(shape.radius, undefined);
-          break;
-        case "taperedCapsule":
-          if (!shape.height || !shape.topRadius || !shape.bottomRadius) {
-            console.error(
-              "Height, topRadius, and bottomRadius are required for taperedCapsule shape"
-            );
-            break;
-          }
-          shapeSettings = new Jolt.TaperedCapsuleShapeSettings(
-            shape.height * 0.5,
-            shape.topRadius,
-            shape.bottomRadius,
-            undefined
-          );
-          break;
-        case "convex":
-          if (!shape.vertices) {
-            console.error("Vertices are required for convex shape");
-            break;
-          }
-          shapeSettings = new Jolt.ConvexHullShapeSettings();
-          for (let i = 0; i < shape.vertices.length; i++) {
-            shapeSettings.mPoints.push_back(
-              new Jolt.Vec3(
-                shape.vertices[i][0],
-                shape.vertices[i][1],
-                shape.vertices[i][2]
-              )
-            );
-          }
-          break;
-        default:
-          console.error("Invalid shape type");
-          break;
+      for (const vertex of child.vertices) {
+        point.Set(vertex[0], vertex[1], vertex[2]);
+        settings.mPoints.push_back(point);
       }
-      compound.AddShape(
-        position,
-        rotation,
-        shapeSettings as Jolt.ShapeSettings,
-        0
-      );
-      Jolt.destroy(position);
-      Jolt.destroy(rotation);
-      // Jolt.destroy(shapeSettings);
+
+      jolt.destroy(point);
+      return settings;
     }
+  }
+};
 
-    const shape = compound.Create().Get();
-    Jolt.destroy(compound);
+const describeInvalid = (child: CompoundChild): string | null => {
+  switch (child.type) {
+    case "box":
+      return child.size ? null : "`size` is required";
+    case "sphere":
+      return child.radius !== undefined ? null : "`radius` is required";
+    case "capsule":
+    case "cylinder":
+      return child.height !== undefined && child.radius !== undefined
+        ? null
+        : "`height` and `radius` are required";
+    case "taperedCapsule":
+      return child.height !== undefined &&
+        child.topRadius !== undefined &&
+        child.bottomRadius !== undefined
+        ? null
+        : "`height`, `topRadius` and `bottomRadius` are required";
+    case "convex":
+      return child.vertices?.length ? null : "`vertices` is required";
+    default:
+      return "unknown shape type";
+  }
+};
 
-    const bodySettings = new Jolt.BodyCreationSettings(
-      shape,
-      new Jolt.Vec3(position[0], position[1], position[2]),
-      new Jolt.Quat(rotation[0], rotation[1], rotation[2], rotation[3]),
-      motionType === "dynamic"
-        ? Jolt.EMotionType_Dynamic
-        : Jolt.EMotionType_Static,
-      motionType === "dynamic" ? layers.LAYER_MOVING : layers.LAYER_NON_MOVING
-    );
+export const useCompound = (options: UseCompoundOptions) => {
+  const { shapes } = options;
 
-    if (bodySettingsOverride) {
-      bodySettingsOverride(bodySettings);
-    }
+  return useBody<Jolt.Shape>(
+    (jolt) => {
+      const compound = new jolt.StaticCompoundShapeSettings();
+      const position = new jolt.Vec3();
+      const rotation = new jolt.Quat();
 
-    const body = bodyInterface.CreateBody(bodySettings);
+      for (const [index, child] of shapes.entries()) {
+        const problem = describeInvalid(child);
 
-    body.GetMotionProperties().SetInverseMass(1 / mass);
-
-    if (material?.friction) {
-      body.SetFriction(material.friction);
-    }
-
-    if (material?.restitution) {
-      body.SetRestitution(material.restitution);
-    }
-
-    if (initialVelocity) {
-      body.SetLinearVelocity(
-        new Jolt.Vec3(
-          initialVelocity[0],
-          initialVelocity[1],
-          initialVelocity[2]
-        )
-      );
-    }
-
-    Jolt.destroy(bodySettings);
-
-    bodyInterface.AddBody(body.GetID(), Jolt.EActivation_Activate);
-
-    let debugMesh: Mesh | null = null;
-
-    const meshShape = Jolt.castObject(shape, Jolt.MeshShape);
-    const shapeScale = new Jolt.Vec3(1, 1, 1);
-    const geometryTris = new Jolt.ShapeGetTriangles(
-      meshShape,
-      Jolt.AABox.prototype.sBiggest(),
-      shape.GetCenterOfMass(),
-      Jolt.Quat.prototype.sIdentity(),
-      shapeScale
-    );
-    Jolt.destroy(shapeScale);
-    const geometryVertices = new Float32Array(
-      Jolt.HEAPF32.buffer,
-      geometryTris.GetVerticesData(),
-      geometryTris.GetVerticesSize() / Float32Array.BYTES_PER_ELEMENT
-    );
-    const buffer = new BufferAttribute(geometryVertices, 3).clone();
-    Jolt.destroy(geometryTris);
-    const geometry = new BufferGeometry();
-    geometry.setAttribute("position", buffer);
-    geometry.computeVertexNormals();
-
-    if (debug) {
-      const meshMesh = new Mesh(
-        geometry,
-        new MeshBasicMaterial({ color: "crimson", wireframe: true })
-      );
-      debugMesh = meshMesh;
-      scene.add(meshMesh);
-    }
-
-    return {
-      api: { body, shape, debugMesh, geometry },
-      cleanup: () => {
-        bodyInterface.RemoveBody(body.GetID());
-        bodyInterface.DestroyBody(body.GetID());
-        if (debugMesh) {
-          scene.remove(debugMesh);
-          debugMesh.geometry.dispose();
-          if (debugMesh.material instanceof MeshBasicMaterial) {
-            debugMesh.material.dispose();
-          }
+        if (problem) {
+          console.error(
+            `[r3f-jolt] useCompound: skipping child ${index} (${child.type}) — ${problem}.`,
+          );
+          continue;
         }
-      },
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
-  useEffect(() => {
-    const { api, cleanup } = init();
-    setApi(api);
-    return cleanup;
-  }, [init]);
+        position.Set(child.position[0], child.position[1], child.position[2]);
+        rotation.Set(
+          child.rotation?.[0] ?? 0,
+          child.rotation?.[1] ?? 0,
+          child.rotation?.[2] ?? 0,
+          child.rotation?.[3] ?? 1,
+        );
 
-  useFrame(() => {
-    if (!api) return;
+        compound.AddShape(
+          position,
+          rotation,
+          createChildSettings(jolt, child),
+          0,
+        );
+      }
 
-    if (ref.current) {
-      ref.current.position.copy(
-        new Vector3(
-          api.body.GetPosition().GetX(),
-          api.body.GetPosition().GetY(),
-          api.body.GetPosition().GetZ()
-        )
-      );
+      jolt.destroy(position);
+      jolt.destroy(rotation);
 
-      ref.current.quaternion.copy(
-        new Quaternion(
-          api.body.GetRotation().GetX(),
-          api.body.GetRotation().GetY(),
-          api.body.GetRotation().GetZ(),
-          api.body.GetRotation().GetW()
-        )
-      );
-    }
+      const result = compound.Create();
+      const shape = finishShape(result.Get());
+      result.Clear();
 
-    if (api.debugMesh) {
-      api.debugMesh.position.copy(
-        new Vector3(
-          api.body.GetPosition().GetX(),
-          api.body.GetPosition().GetY(),
-          api.body.GetPosition().GetZ()
-        )
-      );
+      // AddShape takes a reference to each child, so destroying the compound
+      // releases them. Destroying a child by hand is a double free.
+      jolt.destroy(compound);
 
-      api.debugMesh.quaternion.copy(
-        new Quaternion(
-          api.body.GetRotation().GetX(),
-          api.body.GetRotation().GetY(),
-          api.body.GetRotation().GetZ(),
-          api.body.GetRotation().GetW()
-        )
-      );
-    }
-  });
-
-  return [ref, api] as [
-    React.RefObject<
-      Mesh<
-        BufferGeometry<NormalBufferAttributes>,
-        Material | Material[],
-        Object3DEventMap
-      >
-    >,
-    {
-      body: Jolt.Body;
-      shape: Jolt.Shape;
-      debugMesh: Mesh<
-        BufferGeometry<NormalBufferAttributes>,
-        Material | Material[],
-        Object3DEventMap
-      > | null;
-      geometry: BufferGeometry<NormalBufferAttributes>;
-    }
-  ];
+      return { shape, geometry: shapeToGeometry(jolt, shape) };
+    },
+    options,
+    "compound",
+  );
 };

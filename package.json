@@ -1,8 +1,8 @@
 {
   "name": "r3f-jolt",
-  "version": "0.1.11",
+  "version": "0.2.0",
   "type": "module",
-  "main": "dist/r3f-jolt.js",
+  "description": "Jolt Physics Hooks for React-Three-Fiber",
   "keywords": [
     "jolt",
     "three",
@@ -11,7 +11,6 @@
     "r3f",
     "physics"
   ],
-  "description": "Jolt Physics Hooks for React-Three-Fiber",
   "author": {
     "name": "Sajal",
     "email": "sajalbiswas353@gmail.com"
@@ -22,36 +21,65 @@
     "url": "https://github.com/sajal353/r3f-jolt"
   },
   "license": "MIT",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "build-demo": "tsc && vite build -c vite.demo.config.ts",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
+  "sideEffects": false,
+  "main": "./dist/r3f-jolt.js",
+  "module": "./dist/r3f-jolt.js",
+  "types": "./dist/r3f-jolt.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/r3f-jolt.d.ts",
+      "import": "./dist/r3f-jolt.js",
+      "default": "./dist/r3f-jolt.js"
+    },
+    "./package.json": "./package.json"
   },
-  "dependencies": {
-    "jolt-physics": "^0.19.0"
+  "files": [
+    "dist"
+  ],
+  "packageManager": "pnpm@10.20.0",
+  "scripts": {
+    "dev": "vite -c vite.demo.config.ts",
+    "build": "tsc -b && vite build",
+    "build:demo": "tsc -b && vite build -c vite.demo.config.ts",
+    "preview": "vite preview -c vite.demo.config.ts",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "peerDependencies": {
-    "@react-three/drei": ">=9.96.5",
-    "@react-three/fiber": ">=8.15.15",
-    "react": ">=18.0.0",
-    "react-dom": ">=18.0.0",
-    "three": ">=0.160.1"
+    "@react-three/fiber": "^9.0.0",
+    "jolt-physics": "^1.1.0",
+    "react": ">=19 <19.3",
+    "react-dom": ">=19 <19.3",
+    "three": ">=0.156"
   },
   "devDependencies": {
-    "@types/react": "^18.2.43",
-    "@types/react-dom": "^18.2.17",
-    "@types/three": "^0.160.0",
-    "@typescript-eslint/eslint-plugin": "^6.14.0",
-    "@typescript-eslint/parser": "^6.14.0",
-    "@vitejs/plugin-react": "^4.2.1",
-    "eslint": "^8.55.0",
-    "eslint-plugin-react-hooks": "^4.6.0",
-    "eslint-plugin-react-refresh": "^0.4.5",
-    "typescript": "^5.2.2",
-    "vite": "^5.0.8",
-    "vite-plugin-dts": "^3.7.2",
-    "vite-tsconfig-paths": "^4.3.1"
+    "@eslint/js": "^10.0.1",
+    "@microsoft/api-extractor": "^7.58.12",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
+    "@react-three/test-renderer": "^9.1.0",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.185.1",
+    "@vitejs/plugin-react": "^6.0.5",
+    "eslint": "^10.8.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.8.0",
+    "jolt-physics": "^1.1.0",
+    "jsdom": "^30.0.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "three": "^0.185.1",
+    "three-stdlib": "^2.36.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0",
+    "vite": "^8.2.0",
+    "vite-plugin-dts": "^5.0.3",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.10"
   }
 }
