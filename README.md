@@ -1,383 +1,434 @@
-# Jolt Physics Hooks for React-Three-Fiber
+# r3f-jolt
+
+Jolt Physics hooks for React Three Fiber.
 
 [![Version](https://img.shields.io/npm/v/r3f-jolt?style=flat)](https://www.npmjs.com/package/r3f-jolt)
 [![Downloads](https://img.shields.io/npm/dt/r3f-jolt.svg?style=flat)](https://www.npmjs.com/package/r3f-jolt)
 
+## Requirements
+
+| Peer                  | Range          |
+| --------------------- | -------------- |
+| `react` / `react-dom` | `>=19 <19.3`   |
+| `@react-three/fiber`  | `^9`           |
+| `three`               | `>=0.156`      |
+| `jolt-physics`        | `^1.1.0`       |
+
+React 19 and R3F 9 are required — R3F 8 cannot run on React 19.
+
+## Install
+
+`jolt-physics` is a **peer** dependency, so you install it yourself. That is what lets you pick the WASM build (see [Choosing a Jolt build](#choosing-a-jolt-build)).
+
 ```bash
-npm install r3f-jolt
+pnpm add r3f-jolt jolt-physics
 ```
 
-You can find a very basic usage example [`here`](https://github.com/sajal353/r3f-jolt/blob/main/src/Scene.tsx).
+## Quick start
 
-## `Physics`
+```tsx
+import { Canvas } from "@react-three/fiber";
+import { Physics, useBox } from "r3f-jolt";
 
-A component for setting up the Jolt Physics environment and managing physics simulation.
+const Floor = () => {
+  const [ref] = useBox({
+    size: [50, 1, 50],
+    position: [0, -0.5, 0],
+    motionType: "static",
+  });
 
-#### Props
+  return (
+    <mesh ref={ref}>
+      <boxGeometry args={[50, 1, 50]} />
+      <meshStandardMaterial />
+    </mesh>
+  );
+};
 
-- `gravity` (optional): The gravity vector applied to the physics simulation, specified as an array [x, y, z]. Default is `[0, -9.81, 0]`.
-- `children`: React nodes representing the objects in the scene that will be affected by physics simulation.
+const Crate = () => {
+  const [ref] = useBox({
+    size: [1, 1, 1],
+    position: [0, 8, 0],
+    motionType: "dynamic",
+    mass: 20,
+  });
 
-#### Usage
+  return (
+    <mesh ref={ref}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshNormalMaterial />
+    </mesh>
+  );
+};
 
-Wrap your scene with the `Physics` component to enable physics simulation.
+export default () => (
+  <Canvas>
+    <ambientLight />
+    <Physics>
+      <Floor />
+      <Crate />
+    </Physics>
+  </Canvas>
+);
+```
 
-## `useJolt`
+Every body hook returns `[ref, api]`. Attach `ref` to the mesh you want driven by the body; `api` is `undefined` on the first render and populated once the body exists.
 
-A hook for accessing Jolt Physics context.
+## Concepts
 
-#### Returns
+Read this section once — it explains most of the surprises.
 
-An object containing references to Jolt Physics entities.
+### Props are read at mount
 
-- `Jolt`: Reference to the Jolt Physics library.
-- `joltInterface`: Instance of `Jolt.JoltInterface` providing access to various Jolt functionalities.
-- `physicsSystem`: Instance of `Jolt.PhysicsSystem` representing the physics system.
-- `bodyInterface`: Instance of `Jolt.BodyInterface` providing access to body-related functionalities.
-- `layers`: An object containing layer constants for categorizing physics bodies.
-  - `LAYER_NON_MOVING`: Constant representing the non-moving layer.
-  - `LAYER_MOVING`: Constant representing the moving layer.
+Body hooks create a Jolt body when they mount and **ignore later prop changes**. Creating a body is expensive, and silently rebuilding one mid-flight loses its velocity and contacts. To rebuild a body from new props, change the component's `key`:
 
-## `useBox`
+```tsx
+<Crate key={size.join(",")} size={size} />
+```
 
-A hook for creating a static or dynamic box-shaped physics body.
+Anything you want to change at runtime lives on the `api` or on `<Physics>` (`gravity`, `paused`, `debug`).
 
-#### Parameters
+### `api` is `undefined` on the first render
 
-- `size`: The dimensions of the box as an array [x, y, z].
-- `position`: The initial position of the box in 3D space, specified as an array [x, y, z].
-- `rotation` (optional): The initial rotation of the box as a quaternion, specified as an array [x, y, z, w]. Default is [0, 0, 0, 1].
-- `motionType`: The type of motion, either "static" or "dynamic".
-- `debug` (optional): Enable debugging visualization. Default is `false`.
-- `mass` (optional): The mass of the box. Default is 1000.
-- `material` (optional): Material properties for friction and restitution.
-  - `friction`: Friction coefficient.
-  - `restitution`: Restitution coefficient.
-- `bodySettingsOverride` (optional): A function to override Jolt body creation settings.
+The body is created in an effect, so guard on it:
 
-#### Returns
+```tsx
+const [ref, api] = useConvex({ vertices, position: [0, 5, 0], motionType: "dynamic" });
 
-`[ref, api]`
+useFrame(() => {
+  if (!api) return;
+  // …
+});
 
-- `ref`: Reference to the box mesh.
-- `api`: An object containing the following properties:
-  - `body`: Instance of `Jolt.Body` representing the physics body of the box shape.
-  - `shape`: Instance of `Jolt.BoxShape` representing the shape of the box body.
-  - `debugMesh`: Optional mesh for debugging visualization.
+return api ? <mesh ref={ref} geometry={api.geometry} /> : null;
+```
 
-## `useCapsule`
+### `<Physics>` renders nothing until the WASM module resolves
 
-A hook for creating a static or dynamic capsule-shaped physics body.
+Loading Jolt is asynchronous. `<Physics>` returns `null` until the module is ready, so its children never mount early and no hook inside it runs against a missing world. It does not suspend, so it needs no `<Suspense>` boundary — but anything of yours that *does* suspend (`useGLTF`) still needs its own.
 
-#### Parameters
+### Stepping happens before syncing
 
-- `height`: The height of the capsule.
-- `radius`: The radius of the capsule.
-- `position`: The initial position of the capsule in 3D space, specified as an array [x, y, z].
-- `rotation` (optional): The initial rotation of the capsule as a quaternion, specified as an array [x, y, z, w]. Default is [0, 0, 0, 1].
-- `motionType`: The type of motion, either "static" or "dynamic".
-- `debug` (optional): Enable debugging visualization. Default is `false`.
-- `mass` (optional): The mass of the capsule. Default is 1000.
-- `material` (optional): Material properties for friction and restitution.
-  - `friction`: Friction coefficient.
-  - `restitution`: Restitution coefficient.
-- `bodySettingsOverride` (optional): A function to override Jolt body creation settings.
+`<Physics>` steps the world on `useFrame` with priority `-1`, which runs ahead of every body's transform sync at the default priority, so meshes always show post-step transforms. The priority stays negative on purpose: R3F hands rendering over to a subscriber only when priority is greater than zero.
 
-#### Returns
+### Fixed timestep
 
-`[ref, api]`
+The world advances in fixed `timeStep` increments (default `1/60`) drawn from an accumulator, so simulation is independent of frame rate. At most `maxSubSteps` (default `4`) steps run per frame; beyond that the accumulator is dropped rather than spiralling. Pass `timeStep="vary"` for frame-delta stepping.
 
-- `ref`: Reference to the capsule mesh.
-- `api`: An object containing the following properties:
-  - `body`: Instance of `Jolt.Body` representing the physics body of the capsule shape.
-  - `shape`: Instance of `Jolt.Shape` representing the shape of the capsule body.
-  - `debugMesh`: Optional mesh for debugging visualization.
+### Units
+
+Jolt is tuned for metres, kilograms and seconds. A 1-unit cube weighing 20 is a sensible crate. Very small or very large shapes need solver tuning; prefer scaling your world to metres.
+
+## `<Physics>`
+
+| Prop                | Default           | Notes                                             |
+| ------------------- | ----------------- | ------------------------------------------------- |
+| `gravity`           | `[0, -9.81, 0]`   | Live — changing it calls `SetGravity`             |
+| `paused`            | `false`           | Stops stepping; bodies stay alive                 |
+| `debug`             | `false`           | Default for every child hook's `debug`            |
+| `timeStep`          | `1/60`            | Or `"vary"` for frame-delta stepping              |
+| `maxSubSteps`       | `4`               | Fixed steps allowed per frame                     |
+| `collisionSteps`    | `1`               | Collision sub-steps passed to `Step`              |
+| `broadPhaseLayers`  | static + moving   | See [Collision groups](#collision-groups-and-masks) |
+| `module`            | —                 | An already-initialised Jolt module                |
+| `init`              | `wasm-compat`     | A custom module initialiser                       |
+| `settingsOverride`  | —                 | `(settings, jolt) => void`, for `mMaxBodies` etc. |
+
+## Collision groups and masks
+
+Jolt object layers are built from a **group** and a **mask**, which map directly onto rapier's `interactionGroups` and cannon's `collisionFilterGroup` / `collisionFilterMask`.
+
+```tsx
+const PLAYER = 1 << 2;
+const ENEMY = 1 << 3;
+
+useCapsule({
+  height: 1.8,
+  radius: 0.35,
+  position: [0, 4, 0],
+  motionType: "dynamic",
+  group: PLAYER,
+  mask: ENEMY, // collide with enemies only
+});
+```
+
+Two bodies collide when each one's group appears in the other's mask. Omit `group`/`mask` and bodies use the default static/moving split. `layer` sets a raw object layer if you have built one yourself.
+
+> **Group and mask are 16 bits each**, not 32 — the object layer packs them as `(mask << 16) | group`, so you get 16 collision groups. Porting a 32-bit rapier `interactionGroups` value will silently lose the high half.
+
+Broad-phase layers are configured on `<Physics>`, one entry per layer:
+
+```tsx
+<Physics broadPhaseLayers={[{ include: STATIC }, { include: PLAYER | ENEMY }]} />
+```
+
+## Choosing a Jolt build
+
+`jolt-physics` ships several builds. The default is `wasm-compat`, which works everywhere. Override it with `init` (lazy) or `module` (already initialised):
+
+```tsx
+import initJolt from "jolt-physics/wasm";
+
+<Physics init={() => initJolt()}>…</Physics>;
+```
+
+| Entry point                     | Use for                                                              |
+| ------------------------------- | -------------------------------------------------------------------- |
+| `jolt-physics/wasm-compat`      | Default; broadest bundler and browser support                        |
+| `jolt-physics/wasm`             | Smaller and faster, needs a bundler that emits the `.wasm` asset     |
+| `jolt-physics/asm`              | No WASM at all; slow, last resort                                    |
+| `jolt-physics/debug-wasm-compat`| Assertions on. Catches double frees and bad parameters — use in tests |
+| `…-multithread` variants        | Multithreaded, see below                                             |
+
+The multithreaded builds need `SharedArrayBuffer`, which requires **COOP/COEP headers** on the host:
+
+```
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+Many static hosts do not set these, and without them the multithreaded build will not start. Cap worker threads with `settingsOverride`:
+
+```tsx
+<Physics settingsOverride={(settings) => (settings.mMaxWorkerThreads = 2)} />
+```
+
+Modules are cached per initialiser, so mounting several `<Physics>` trees instantiates the WASM once.
+
+## Body hooks
+
+`useBox` · `useSphere` · `useCapsule` · `useCylinder` · `useTaperedCapsule` · `useConvex` · `useCompound` · `useTrimesh`
+
+All of them take these options and return `[ref, api]`.
+
+### Shared options
+
+| Option                     | Default                     | Notes                                              |
+| -------------------------- | --------------------------- | -------------------------------------------------- |
+| `position`                 | —                           | `[x, y, z]`                                        |
+| `rotation`                 | `[0, 0, 0, 1]`              | Quaternion                                         |
+| `motionType`               | —                           | `"static"` or `"dynamic"`                          |
+| `mass`                     | Jolt's density-derived mass | Dynamic bodies only; ignored on static ones        |
+| `material`                 | —                           | `{ friction?, restitution? }`; `0` is respected    |
+| `initialVelocity`          | —                           | `[x, y, z]`, applied at creation                   |
+| `debug`                    | `<Physics debug>`           | Wireframe of the real collider                     |
+| `enabled`                  | `true`                      | `false` creates the body without adding it         |
+| `userData`                 | —                           | 32-bit uint, readable in contact handlers          |
+| `shapeUserData`            | —                           | 32-bit uint, set on the shape                      |
+| `motionQuality`            | `"discrete"`                | `"linearCast"` for fast movers                     |
+| `group` / `mask` / `layer` | static/moving split         | See [Collision groups](#collision-groups-and-masks) |
+| `bodySettingsOverride`     | —                           | `(settings) => void` before the body is created    |
+
+`userData` is **32-bit** — Jolt narrowed it from 64-bit because WebIDL could not marshal 64-bit integers. Larger ids truncate; the library warns in development.
+
+### Shape-specific options
+
+| Hook                | Options                                          |
+| ------------------- | ------------------------------------------------ |
+| `useBox`            | `size: [x, y, z]`, `convexRadius?`               |
+| `useSphere`         | `radius`, `segments?`                            |
+| `useCapsule`        | `height`, `radius`, `segments?`                  |
+| `useCylinder`       | `height`, `radius`, `convexRadius?`, `segments?` |
+| `useTaperedCapsule` | `topRadius`, `bottomRadius`, `height`            |
+| `useConvex`         | `vertices: number[][]`                           |
+| `useCompound`       | `shapes: CompoundChild[]`                        |
+| `useTrimesh`        | `mesh: BufferGeometry \| { position, index? }`   |
+
+`convexRadius` defaults to a value derived from the shape's size rather than a fixed `0.05`, which was wrong on small shapes.
+
+`useTrimesh` accepts a `BufferGeometry` directly and derives the index when the geometry is non-indexed. **A trimesh body is always static** — Jolt mesh shapes cannot be dynamic.
+
+`useCompound` children are `{ type, position, rotation?, … }` where `type` is `box`, `sphere`, `capsule`, `cylinder`, `taperedCapsule` or `convex`. An invalid child is skipped with a console error and the rest of the compound still builds.
+
+### Returned api
+
+| Field       | Notes                                                     |
+| ----------- | --------------------------------------------------------- |
+| `body`      | `Jolt.Body`                                               |
+| `shape`     | The created shape                                         |
+| `geometry`  | A `BufferGeometry` matching the collider, disposed on unmount |
+| `debugMesh` | The wireframe mesh, or `null`                             |
+| `kill()`    | Removes the body from the simulation without unmounting   |
+| `revive()`  | Adds it back                                              |
 
 ## `useCharacter`
 
-A hook for creating a physics-enabled character.
+A character controller built on `CharacterVirtual`.
 
-### Parameters
+```tsx
+const [api] = useCharacter({
+  position: [0, 4, 0],
+  options: {
+    height: { standing: 1.8, crouching: 0.9 },
+    radius: { standing: 0.35, crouching: 0.35 },
+    moveSpeed: 6,
+    jumpSpeed: 7,
+  },
+});
 
-- `options`: An object containing various options for configuring the character's behavior and physical properties:
+useFrame((_, delta) => {
+  api?.update(direction, jump, crouch, Math.min(delta, 1 / 30));
+});
+```
 
-  - `height`: Object specifying the height of the character in different states.
-    - `standing`: Height of the character while standing.
-    - `crouching`: Height of the character while crouching.
-  - `radius`: Object specifying the radius of the character in different states.
-    - `standing`: Radius of the character while standing.
-    - `crouching`: Radius of the character while crouching.
-  - `moveDuringJump`: Boolean indicating whether the character can move while jumping.
-  - `moveSpeed`: Speed of horizontal movement.
-  - `crouchMoveSpeedRatio`: Ratio of movement speed while crouching relative to standing. Default is 0.5.
-  - `jumpSpeed`: Speed of jumping.
-  - `enableInertia`: Boolean indicating whether to enable inertia for smoother movement.
-  - `enableStairStep`: Boolean indicating whether the character can step up stairs.
-  - `enableStickToFloor`: Boolean indicating whether the character sticks to the floor.
+`update(direction, jump, crouched, deltaTime, options?)` — `direction` is a world-space `Vector3` and is **not** mutated. The trailing options are `{ ignoreHorizontalMovementLock?, addToVelocity?, overrideUpdate? }`.
 
-- `position`: Initial position of the character in 3D space, specified as an array [x, y, z].
-- `rotation` (optional): Initial rotation of the character as a quaternion, specified as an array [x, y, z, w]. Default is [0, 0, 0, 1].
-- `debug` (optional): Enable debugging visualization. Default is `false`.
-- `mass` (optional): Mass of the character. Default is 1000.
+`options` is optional and deep-merged with the defaults. Alongside the movement settings it exposes `maxSlopeAngle`, `maxStrength`, `characterPadding`, `penetrationRecoverySpeed` and `predictiveContactDistance`. A non-vertical `up` is supported at the top level.
 
-### Returns
-
-`[api]`
-
-- `api`: An object containing the following properties:
-  - `character`: Instance of `Jolt.CharacterVirtual` representing the character.
-  - `update`: Function to update the character's movement and behavior. Accepts parameters for movement direction, jump, crouch state, delta time, an optional parameter to ignore horizontal movement lock, and an optional override function for custom velocity updates.
-  - `debugMeshStanding`: Optional mesh for debugging visualization while standing.
-  - `debugMeshCrouching`: Optional mesh for debugging visualization while crouching.
-
-## `useCompound`
-
-A hook for creating a compound physics body composed of multiple shapes.
-
-#### Parameters
-
-- `shapes`: An array of objects, each defining a shape within the compound body. Each shape object has the following properties:
-  - `type`: The type of shape, which can be one of: "box", "capsule", "cylinder", "sphere", "taperedCapsule", or "convex".
-  - `position`: The position of the shape within the compound body, specified as an array [x, y, z].
-  - `rotation` (optional): The rotation of the shape as a quaternion, specified as an array [x, y, z, w]. Default is [0, 0, 0, 1].
-  - Additional properties depending on the shape type:
-    - For "box": `size` - The size of the box as an array [width, height, depth].
-    - For "capsule": `height` - The height of the capsule, and `radius` - The radius of the capsule.
-    - For "cylinder": `height` - The height of the cylinder, and `radius` - The radius of the cylinder.
-    - For "sphere": `radius` - The radius of the sphere.
-    - For "taperedCapsule": `height`, `topRadius`, and `bottomRadius`.
-    - For "convex": `vertices` - An array of vertices defining the shape of the convex body. Each vertex is specified as an array [x, y, z].
-- `position`: The initial position of the compound body in 3D space, specified as an array [x, y, z].
-- `rotation` (optional): The initial rotation of the compound body as a quaternion, specified as an array [x, y, z, w]. Default is [0, 0, 0, 1].
-- `motionType`: The type of motion, either "static" or "dynamic".
-- `debug` (optional): Enable debugging visualization. Default is `false`.
-- `mass` (optional): The mass of the compound body. Default is 1000.
-- `material` (optional): Material properties for friction and restitution.
-  - `friction`: Friction coefficient.
-  - `restitution`: Restitution coefficient.
-- `bodySettingsOverride` (optional): A function to override Jolt body creation settings.
-
-#### Returns
-
-`[ref, api]`
-
-- `ref`: React ref object for accessing the Three.js mesh.
-- `api`: An object containing the following properties:
-  - `body`: Instance of `Jolt.Body` representing the physics body of the compound shape.
-  - `shape`: Instance of `Jolt.Shape` representing the shape of the compound body.
-  - `debugMesh`: Optional mesh for debugging visualization.
-  - `geometry`: BufferGeometry representing the geometry of the compound body.
-
-## `useConvex`
-
-A hook for creating a physics-enabled convex shape.
-
-#### Parameters
-
-- `vertices`: An array of vertices defining the shape of the convex body. Each vertex is specified as an array [x, y, z].
-- `position`: The initial position of the convex body in 3D space, specified as an array [x, y, z].
-- `rotation` (optional): The initial rotation of the convex body as a quaternion, specified as an array [x, y, z, w]. Default is [0, 0, 0, 1].
-- `motionType`: The type of motion, either "static" or "dynamic".
-- `debug` (optional): Enable debugging visualization. Default is `false`.
-- `mass` (optional): The mass of the convex body. Default is 1000.
-- `material` (optional): Material properties for friction and restitution.
-  - `friction`: Friction coefficient.
-  - `restitution`: Restitution coefficient.
-- `bodySettingsOverride` (optional): A function to override Jolt body creation settings.
-
-#### Returns
-
-`[ref, api]`
-
-- `ref`: React ref object for accessing the Three.js mesh.
-- `api`: An object containing the following properties:
-  - `body`: Instance of `Jolt.Body` representing the physics body of the convex shape.
-  - `shape`: Instance of `Jolt.Shape` representing the shape of the convex body.
-  - `debugMesh`: Optional mesh for debugging visualization.
-  - `geometry`: BufferGeometry representing the geometry of the convex body.
-
-## `useCylinder`
-
-A hook for creating a static or dynamic cylinder-shaped physics body.
-
-#### Parameters
-
-- `height`: The height of the cylinder.
-- `radius`: The radius of the cylinder.
-- `position`: The initial position of the cylinder in 3D space, specified as an array [x, y, z].
-- `rotation` (optional): The initial rotation of the cylinder as a quaternion, specified as an array [x, y, z, w]. Default is [0, 0, 0, 1].
-- `motionType`: The type of motion, either "static" or "dynamic".
-- `debug` (optional): Enable debugging visualization. Default is `false`.
-- `mass` (optional): The mass of the cylinder. Default is 1000.
-- `material` (optional): Material properties for friction and restitution.
-  - `friction`: Friction coefficient.
-  - `restitution`: Restitution coefficient.
-- `bodySettingsOverride` (optional): A function to override Jolt body creation settings.
-
-#### Returns
-
-`[ref, api]`
-
-- `ref`: React ref object for accessing the Three.js mesh.
-- `api`: An object containing the following properties:
-  - `body`: Instance of `Jolt.Body` representing the physics body of the cylinder.
-  - `shape`: Instance of `Jolt.CylinderShape` representing the shape of the cylinder.
-  - `debugMesh`: Optional mesh for debugging visualization.
-
-## `useSphere`
-
-A hook for creating a static or dynamic sphere-shaped physics body.
-
-#### Parameters
-
-- `radius`: The radius of the sphere.
-- `position`: The initial position of the sphere in 3D space, specified as an array [x, y, z].
-- `rotation` (optional): The initial rotation of the sphere as a quaternion, specified as an array [x, y, z, w]. Default is [0, 0, 0, 1].
-- `motionType`: The type of motion, either "static" or "dynamic".
-- `debug` (optional): Enable debugging visualization. Default is `false`.
-- `mass` (optional): The mass of the sphere. Default is 1000.
-- `material` (optional): Material properties for friction and restitution.
-  - `friction`: Friction coefficient.
-  - `restitution`: Restitution coefficient.
-- `bodySettingsOverride` (optional): A function to override Jolt body creation settings.
-
-#### Returns
-
-`[ref, api]`
-
-- `ref`: React ref object for accessing the Three.js mesh.
-- `api`: An object containing the following properties:
-  - `body`: Instance of `Jolt.Body` representing the physics body of the sphere.
-  - `shape`: Instance of `Jolt.SphereShape` representing the shape of the sphere.
-  - `debugMesh`: Optional mesh for debugging visualization.
-
-## `useTaperedCapsule`
-
-A hook for creating a static or dynamic tapered capsule-shaped physics body.
-
-#### Parameters
-
-- `topRadius`: The top radius of the tapered capsule.
-- `bottomRadius`: The bottom radius of the tapered capsule.
-- `height`: The height of the tapered capsule.
-- `position`: The initial position of the tapered capsule in 3D space, specified as an array [x, y, z].
-- `rotation` (optional): The initial rotation of the tapered capsule as a quaternion, specified as an array [x, y, z, w]. Default is [0, 0, 0, 1].
-- `motionType`: The type of motion, either "static" or "dynamic".
-- `debug` (optional): Enable debugging visualization. Default is `false`.
-- `mass` (optional): The mass of the tapered capsule. Default is 1000.
-- `material` (optional): Material properties for friction and restitution.
-  - `friction`: Friction coefficient.
-  - `restitution`: Restitution coefficient.
-- `bodySettingsOverride` (optional): A function to override Jolt body creation settings.
-
-#### Returns
-
-`[ref, api]`
-
-- `ref`: React ref object for accessing the Three.js mesh.
-- `api`: An object containing the following properties:
-  - `body`: Instance of `Jolt.Body` representing the physics body of the tapered capsule.
-  - `shape`: Instance of `Jolt.Shape` representing the shape of the tapered capsule.
-  - `debugMesh`: Optional mesh for debugging visualization.
-  - `geometry`: Buffer geometry representing the geometry of the tapered capsule.
-
-## `useTrimesh`
-
-A hook for creating a physics-enabled trimesh.
-
-#### Parameters
-
-- `mesh`: An object containing position and index data for the trimesh.
-  - `position`: Buffer attribute or interleaved buffer attribute representing the vertices' positions.
-  - `index`: Typed array representing the indices of the trimesh.
-- `position`: The initial position of the trimesh in 3D space, specified as an array [x, y, z].
-- `debug` (optional): A boolean indicating whether to enable debugging visualization. Default is `false`.
-- `material` (optional): Material properties for friction and restitution.
-  - `friction`: Friction coefficient.
-  - `restitution`: Restitution coefficient.
-- `bodySettingsOverride` (optional): A function to override Jolt body creation settings.
-
-#### Returns
-
-`[ref, api]`
-
-- `ref`: React ref object for accessing the Three.js mesh.
-- `api`: An object containing the following properties:
-  - `body`: Instance of `Jolt.Body` representing the physics body of the trimesh.
-  - `shape`: Instance of `Jolt.Shape` representing the shape of the trimesh.
-  - `debugMesh`: Optional mesh for debugging visualization.
-  - `geometry`: Buffer geometry representing the geometry of the trimesh.
-
-## `useClosestHitRaycaster`
-
-A hook for casting a ray and detecting the closest hit collision.
-
-#### Parameters
-
-- `origin`: The origin point of the ray in 3D space, specified as an array [x, y, z].
-- `direction`: The direction vector of the ray, specified as an array [x, y, z].
-
-#### Returns
-
-`[api]`
-
-- `api`: An object containing the following properties:
-  - `ray`: An instance of `Jolt.RRayCast`, representing the ray used for casting.
-  - `cast`: A function that accepts an optional `origin` parameter (a Three.js `Vector3` instance) and casts the ray from that origin. It returns an object with the following properties:
-    - `collector`: An instance of `Jolt.CastRayClosestHitCollisionCollector`, collecting collision data.
-    - `distance`: The distance to the closest hit.
-    - `hit`: A boolean indicating whether a hit occurred.
+The character's position is its **feet**, so a settled character on a floor whose top face is `y = 0` reports `y ≈ 0`. The shape is swapped only when the crouch state actually changes, and debug meshes track the character every frame whether or not you call `update`.
 
 ## `useCar`
 
-A hook to create a physics-enabled car.
+A wheeled vehicle built on `VehicleConstraint`.
 
-#### Parameters
+```tsx
+const [api] = useCar({
+  position: [0, 2, 0],
+  driveType: "awd",
+  vehicleSize: { length: 4, width: 1.8, height: 1 },
+  wheelSettings: { radius: 0.35, width: 0.28, offsetForward: 1.4, offsetDown: 0.3 },
+});
 
-- `position`: Initial position of the car in 3D space.
-- `rotation` (optional): Initial rotation of the car as a quaternion.
-- `castType` (optional): Type of collision casting to use for the car's physics. Can be "cylinder", "sphere", or undefined.
-- `wheelSettings`: Configuration for the car's wheels.
-  - `radius`: Radius of the wheels.
-  - `width`: Width of the wheels.
-  - `offsetHorizontal`: Horizontal offset of the wheels.
-  - `offsetVertical`: Vertical offset of the wheels.
-- `vehicleSize`: Dimensions of the car.
-  - `length`: Length of the car.
-  - `width`: Width of the car.
-  - `height`: Height of the car.
-- `suspension` (optional): Suspension settings for the car.
-  - `minLength`: Minimum length of the suspension.
-  - `maxLength`: Maximum length of the suspension.
-- `maxSteerAngle` (optional): Maximum steering angle of the wheels in degrees.
-- `maxPitchRollAngle` (optional): Maximum pitch and roll angle of the car in degrees.
-- `driveType` (optional): Type of drive for the car. Can be "rwd" (rear-wheel drive), "fwd" (front-wheel drive), or "awd" (all-wheel drive).
-- `frontBackLimitedSlipRatio` (optional): Limited slip ratio for the front and back wheels.
-- `leftRightLimitedSlipRatio` (optional): Limited slip ratio for the left and right wheels.
-- `antiRollbar` (optional): Boolean indicating whether anti-roll bars should be enabled.
-- `mass` (optional): Mass of the car.
-- `maxTorque` (optional): Maximum torque of the car's engine.
-- `clutchStrength` (optional): Strength of the car's clutch.
-- `debug` (optional): Boolean indicating whether to enable debugging visualization.
+const state = api?.update({ forward, backward, left, right, handbrake, modifier });
+```
 
-#### Returns
+`update` returns `{ position, rotation, velocity, wheels }`. **The returned object and its vectors are reused between calls** — copy anything you need to keep.
 
-- `carBody`: Instance of `Jolt.Body` representing the car body.
-- `update`: Function to update the car's movement and behavior. Accepts the following input:
+Wheel offsets are named for their axes: `offsetForward` is `+Z` to the front axle, `offsetDown` is the drop from the body centre to the wheel centres. `castType` is `"cylinder"` (default), `"sphere"` or `"ray"`.
 
-  - `forward`: Boolean indicating whether to move forward.
-  - `backward`: Boolean indicating whether to move backward.
-  - `left`: Boolean indicating whether to steer left.
-  - `right`: Boolean indicating whether to steer right.
-  - `handbrake`: Boolean indicating whether to apply the handbrake.
-  - `modifier`: Boolean indicating whether to apply the modifier (half speed).
+### Braking
 
-  Returns an object containing:
+Braking is independent of `driveType`. The service brake acts on all four wheels, biased towards the front because weight transfers forward under deceleration; the handbrake acts on the **rear axle only**.
 
-  - `position`: Current position of the car.
-  - `rotation`: Current rotation of the car.
-  - `velocity`: Current velocity of the car.
-  - `wheels`: Array containing the current position and rotation of each wheel.
+| Option            | Default | Notes                                                  |
+| ----------------- | ------- | ------------------------------------------------------ |
+| `brakeTorque`     | `6000`  | Total service-brake torque, split across both axles    |
+| `brakeBias`       | `0.8`   | Fraction of `brakeTorque` sent to the front axle       |
+| `handBrakeTorque` | `8000`  | Total handbrake torque, applied to the rear axle only  |
 
-- `debugGroup`: Optional Three.js `Group` containing debugging visualizations for the car.
-- `geometry`: Three.js `BufferGeometry` representing the car's geometry.
+Each axle's share is split evenly between its two wheels, so the defaults give 2400 per front wheel, 600 per rear wheel, and 4000 of handbrake per rear wheel. `brakeBias: 0.5` is a balanced setup; `1` is front-only.
+
+## `useClosestHitRaycaster`
+
+```tsx
+const [raycaster] = useClosestHitRaycaster();
+
+useFrame(() => {
+  const hit = raycaster?.cast(origin, direction);
+  if (hit?.hit) console.log(hit.point, hit.normal, hit.bodyID);
+});
+```
+
+`cast(origin?, direction?)` accepts `Vector3`s or tuples and returns `{ hit, fraction, distance, point, normal, bodyID }`. `fraction` is along the ray; `distance` is `fraction × |direction|`, so the ray's length is meaningful. The result object is reused between casts.
+
+Pass `layer` to cast against something other than the moving layer.
+
+## Contact events
+
+Jolt allows exactly **one** contact listener per physics system, its callbacks run *inside* the step, and the `Body` / `ContactManifold` pointers are valid only for the duration of the call. Both hooks below hide that.
+
+### `useBodyContacts` — the common case
+
+Filtered to one body, with data copied out of the manifold and **delivery deferred to the next frame**, so calling `setState` in a handler is safe.
+
+```tsx
+const [ref, api] = useSphere({ radius: 0.4, position: [0, 5, 0], motionType: "dynamic" });
+
+useBodyContacts(api?.body, {
+  onEnter: (contact) => {
+    if (contact.userData === HAZARD) api?.kill();
+  },
+});
+```
+
+A `ContactInfo` is `{ bodyID, userData, shapeUserData, point, normal, penetrationDepth }` describing **the other** body. It is pooled — copy anything you keep past the handler. On `onExit` only `bodyID` and `userData` are meaningful, because the manifold is already gone.
+
+### `useContactListener` — raw
+
+Every contact, delivered synchronously inside the step, with arguments already `wrapPointer`ed.
+
+```tsx
+useContactListener({
+  onContactValidate: (body1, body2) => body1.GetUserData() !== body2.GetUserData(),
+  onContactAdded: (body1, body2, manifold, settings) => {
+    settings.mCombinedRestitution = 0.9;
+  },
+});
+```
+
+Many components can subscribe; the library multiplexes them onto Jolt's single listener. `onContactValidate` accepts by default and handlers run in registration order — the first `false` rejects the pair.
+
+Inside these handlers: **do not** retain a `Body` or manifold past the call, **do not** call `setState`, and **do not** create or destroy bodies. Use `useBodyContacts` when you need any of that.
+
+### Subscribing a store
+
+`useJolt().contacts` exposes `subscribe(cb) => unsubscribe` and `getSnapshot()`, so you can drive `useSyncExternalStore` or a zustand store from contact activity without the library owning your state.
+
+## `useJolt`
+
+Returns the physics context: `Jolt` (the module), `joltInterface`, `physicsSystem`, `bodyInterface`, `layers`, `groups`, `objectLayer(group, mask)`, `contacts`, `debug` and `state`. Use it to reach anything the hooks do not wrap.
+
+## State management
+
+The library holds no store. Transforms are written straight onto `mesh.position` / `mesh.quaternion` inside `useFrame`, never through React state — pushing 60 Hz physics data through state or context re-renders the subtree every frame, which is the single biggest performance mistake in a React physics integration. Contact events are the exception, and they are deferred to a frame boundary so `setState` is safe.
+
+## Debug colours
+
+`debug` overlays a wireframe of the real collider. Colours come from the exported `debugColors`, so you can match them in your own UI.
+
+| Hook                     | Colour                       |
+| ------------------------ | ---------------------------- |
+| `useBox`                 | violet                       |
+| `useSphere`              | yellow                       |
+| `useCapsule`             | blue                         |
+| `useCylinder`            | green                        |
+| `useTaperedCapsule`      | orange                       |
+| `useConvex`              | magenta                      |
+| `useCompound`            | crimson                      |
+| `useTrimesh`             | hotpink                      |
+| `useCharacter`           | black                        |
+| `useCar` body / wheels   | lawngreen / mediumslateblue  |
+
+## Migrating from 0.1.x
+
+- **Peers changed.** React 19, R3F 9, and `jolt-physics` is now a peer you install yourself.
+- **`useCar` wheel options renamed.** `offsetHorizontal` → `offsetForward`, `offsetVertical` → `offsetDown`.
+- **`useCar` braking is no longer tied to `driveType`** and is configurable via `brakeTorque`, `brakeBias` and `handBrakeTorque`. The handbrake is rear-axle only.
+- **`useCar().update` returns reused objects.** It used to allocate fresh ones every call.
+- **`useClosestHitRaycaster().cast` returns hit data**, not just a collector: `{ hit, fraction, distance, point, normal, bodyID }`. `distance` previously held the fraction.
+- **`useCharacter().update` trailing arguments** moved into an options object.
+- **`useCharacter({ options })` is optional** and deep-merged with defaults.
+- **`useTrimesh` takes a `BufferGeometry`** (the `{ position, index }` form still works).
+- **`mass` no longer defaults to `1000`.** Omit it for Jolt's density-derived mass. It is ignored on static bodies, where it previously corrupted the heap.
+- **`material.friction: 0` now works.** Falsy values used to be dropped.
+- **Every hook returns a `geometry`**, and it is disposed on unmount.
+- **`<Physics>` is no longer wrapped in `memo`** and gains `paused`, `debug`, `timeStep`, `maxSubSteps`, `collisionSteps`, `broadPhaseLayers`, `module`, `init` and `settingsOverride`.
+
+## Troubleshooting
+
+**Bodies fall through thin floors.** Fast movers tunnel. Set `motionQuality: "linearCast"` on the moving body, or make the floor thicker than the distance travelled in one step.
+
+**Nothing renders and there are no errors.** `<Physics>` renders `null` until the WASM module resolves. If it never resolves, your bundler is probably not serving the `.wasm` asset — use the default `wasm-compat` entry point.
+
+**`SharedArrayBuffer is not defined`.** You selected a multithreaded build without COOP/COEP headers. See [Choosing a Jolt build](#choosing-a-jolt-build).
+
+**Changing a prop does nothing.** Body props are read once at mount. Change the component's `key` to rebuild.
+
+**A body's visual sits inside the floor.** The mesh and collider disagree. Turn on `debug` — the wireframe is the collider, and geometry whose origin is not at its centre needs the same offset applied to the mesh.
+
+**Contact handlers crash or corrupt memory.** You retained a `Body` or manifold past the handler, or created/destroyed a body inside one. Use `useBodyContacts`, which copies the data out and defers delivery.
+
+**Memory grows over time.** Run against `jolt-physics/debug-wasm-compat`, which asserts on double frees and invalid parameters, and compare `JoltInterface.prototype.sGetFreeMemory()` across mount/unmount cycles.
+
+## Demo
+
+```bash
+pnpm install
+pnpm dev
+```
+
+Scenes for shapes, character, car, raycasting and contacts, with `debug` and `paused` toggles. Switching scenes remounts the whole world, which doubles as the mount/unmount stress test.
+
+## License
+
+MIT

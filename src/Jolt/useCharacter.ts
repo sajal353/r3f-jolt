@@ -1,243 +1,263 @@
-/* eslint-disable @typescript-eslint/ban-ts-comment */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
+import { CapsuleGeometry, Mesh, Quaternion, Vector3 } from "three";
+import type Jolt from "jolt-physics";
 import { useJolt } from "./useJolt";
-import {
-  CapsuleGeometry,
-  Mesh,
-  MeshBasicMaterial,
-  Quaternion,
-  Vector3,
-} from "three";
-import { useThree } from "@react-three/fiber";
-import Jolt from "jolt-physics";
+import { createDebugMaterial, disposeDebugMaterial } from "./internal/debugMaterial";
+import { finishShape } from "./internal/useBody";
+import type { QuatTuple, Vec3Tuple } from "./types";
 
-const DegreesToRadians = (deg: number) => deg * (Math.PI / 180.0);
+const degreesToRadians = (degrees: number) => degrees * (Math.PI / 180);
 
-const upRotationX = 0;
-const upRotationZ = 0;
-const maxSlopeAngle = DegreesToRadians(45.0);
-const maxStrength = 100.0;
-const characterPadding = 0.02;
-const penetrationRecoverySpeed = 1.0;
-const predictiveContactDistance = 0.1;
+export interface CharacterShapeOptions {
+  height: { standing: number; crouching: number };
+  radius: { standing: number; crouching: number };
+  moveDuringJump: boolean;
+  moveSpeed: number;
+  crouchMoveSpeedRatio: number;
+  jumpSpeed: number;
+  enableInertia: boolean;
+  enableStairStep: boolean;
+  enableStickToFloor: boolean;
+  maxSlopeAngle: number;
+  maxStrength: number;
+  characterPadding: number;
+  penetrationRecoverySpeed: number;
+  predictiveContactDistance: number;
+}
 
-export const useCharacter = ({
-  options = {
-    height: {
-      standing: 2,
-      crouching: 1,
-    },
-    radius: {
-      standing: 1,
-      crouching: 0.8,
-    },
-    moveDuringJump: true,
-    moveSpeed: 6,
-    crouchMoveSpeedRatio: 0.5,
-    jumpSpeed: 15,
-    enableInertia: true,
-    enableStairStep: true,
-    enableStickToFloor: true,
-  },
-  position,
-  rotation = [0, 0, 0, 1],
-  debug = false,
-  mass = 1000,
-}: {
-  options: {
-    height: {
-      standing: number;
-      crouching: number;
-    };
-    radius: {
-      standing: number;
-      crouching: number;
-    };
-    moveDuringJump: boolean;
-    moveSpeed: number;
-    crouchMoveSpeedRatio: number;
-    jumpSpeed: number;
-    enableInertia: boolean;
-    enableStairStep: boolean;
-    enableStickToFloor: boolean;
-  };
-  position: [number, number, number];
-  rotation?: [number, number, number, number];
+export const defaultCharacterOptions: CharacterShapeOptions = {
+  height: { standing: 2, crouching: 1 },
+  radius: { standing: 1, crouching: 0.8 },
+  moveDuringJump: true,
+  moveSpeed: 6,
+  crouchMoveSpeedRatio: 0.5,
+  jumpSpeed: 15,
+  enableInertia: true,
+  enableStairStep: true,
+  enableStickToFloor: true,
+  maxSlopeAngle: degreesToRadians(45),
+  maxStrength: 100,
+  characterPadding: 0.02,
+  penetrationRecoverySpeed: 1,
+  predictiveContactDistance: 0.1,
+};
+
+export interface CharacterUpdateOptions {
+  ignoreHorizontalMovementLock?: boolean;
+  addToVelocity?: Vector3;
+  overrideUpdate?: (velocity: Vector3, up: Vector3) => Vector3;
+}
+
+export interface UseCharacterOptions {
+  position: Vec3Tuple;
+  rotation?: QuatTuple;
+  up?: Vec3Tuple;
   debug?: boolean;
   mass?: number;
-}) => {
-  const { Jolt, joltInterface, physicsSystem, layers } = useJolt();
+  layer?: number;
+  options?: Partial<CharacterShapeOptions>;
+}
+
+export interface CharacterApi {
+  character: Jolt.CharacterVirtual;
+  update: (
+    direction: Vector3,
+    jump: boolean,
+    crouched: boolean,
+    deltaTime: number,
+    updateOptions?: CharacterUpdateOptions,
+  ) => void;
+  debugMeshStanding: Mesh | null;
+  debugMeshCrouching: Mesh | null;
+}
+
+const mergeOptions = (
+  overrides: Partial<CharacterShapeOptions> | undefined,
+): CharacterShapeOptions => ({
+  ...defaultCharacterOptions,
+  ...overrides,
+  height: { ...defaultCharacterOptions.height, ...overrides?.height },
+  radius: { ...defaultCharacterOptions.radius, ...overrides?.radius },
+});
+
+export const useCharacter = (hookOptions: UseCharacterOptions) => {
+  const api = useJolt();
   const scene = useThree((state) => state.scene);
 
-  const [api, setApi] = useState<{
-    character: Jolt.CharacterVirtual;
-    update: (
-      direction: Vector3,
-      jump: boolean,
-      crouched: boolean,
-      deltaTime: number,
-      ignoreHorizontalMovementLock?: boolean,
-      overrideUpdate?: (velocity: Vector3, up: Vector3) => Vector3
-    ) => void;
-    debugMeshStanding: Mesh | null;
-    debugMeshCrouching: Mesh | null;
-  }>();
-
-  const characterRef = useRef({
+  const stateRef = useRef({
     shouldSlide: true,
     desiredVelocity: new Vector3(),
+    crouched: false,
   });
 
-  const init = useCallback(() => {
-    const updateSettings = new Jolt.ExtendedUpdateSettings();
+  const [characterApi, setCharacterApi] = useState<CharacterApi>();
 
-    const objectVsBroadPhaseLayerFilter =
-      joltInterface.GetObjectVsBroadPhaseLayerFilter();
-    const objectLayerPairFilter = joltInterface.GetObjectLayerPairFilter();
+  // Init-once, like the body hooks: snapshot at mount, rebuild with `key`.
+  const [mount] = useState(() => hookOptions);
 
-    const movingBPFilter = new Jolt.DefaultBroadPhaseLayerFilter(
-      objectVsBroadPhaseLayerFilter,
-      layers.LAYER_MOVING
+  useEffect(() => {
+    const {
+      Jolt: jolt,
+      joltInterface,
+      physicsSystem,
+      layers,
+      state,
+      debug: debugDefault,
+    } = api;
+
+    const {
+      position,
+      rotation = [0, 0, 0, 1],
+      up = [0, 1, 0],
+      debug = debugDefault,
+      mass = 1000,
+      layer = layers.LAYER_MOVING,
+    } = mount;
+
+    const options = mergeOptions(mount.options);
+
+    const broadPhaseFilter = new jolt.DefaultBroadPhaseLayerFilter(
+      joltInterface.GetObjectVsBroadPhaseLayerFilter(),
+      layer,
     );
-    const movingLayerFilter = new Jolt.DefaultObjectLayerFilter(
-      objectLayerPairFilter,
-      layers.LAYER_MOVING
+    const layerFilter = new jolt.DefaultObjectLayerFilter(
+      joltInterface.GetObjectLayerPairFilter(),
+      layer,
     );
-    const bodyFilter = new Jolt.BodyFilter();
-    const shapeFilter = new Jolt.ShapeFilter();
+    const bodyFilter = new jolt.BodyFilter();
+    const shapeFilter = new jolt.ShapeFilter();
 
-    const characterPosition = new Jolt.Vec3(
-      0,
-      0.5 * options.height.standing + options.radius.standing,
-      0
-    );
+    const shapeRotation = new jolt.Quat(0, 0, 0, 1);
 
-    let characterRotation: Jolt.Quat;
-
-    if (rotation) {
-      characterRotation = new Jolt.Quat(
-        rotation[0],
-        rotation[1],
-        rotation[2],
-        rotation[3]
+    // A Jolt capsule is centred on its own origin, and a CharacterVirtual's
+    // position is its feet, so each shape has to be lifted by its *own* half
+    // height plus radius. Sharing one offset sinks the shorter shape into the
+    // floor by the difference.
+    const buildShape = (halfHeight: number, radius: number) => {
+      const offset = new jolt.Vec3(0, halfHeight + radius, 0);
+      const settings = new jolt.RotatedTranslatedShapeSettings(
+        offset,
+        shapeRotation,
+        new jolt.CapsuleShapeSettings(halfHeight, radius),
       );
-    } else {
-      characterRotation = new Jolt.Quat();
-    }
+      const result = settings.Create();
+      const shape = finishShape(result.Get());
+      result.Clear();
+      jolt.destroy(settings);
+      jolt.destroy(offset);
+      return shape;
+    };
 
-    Jolt.Quat.prototype.sIdentity();
-
-    const standingShape = new Jolt.RotatedTranslatedShapeSettings(
-      characterPosition,
-      characterRotation,
-      new Jolt.CapsuleShapeSettings(
-        0.5 * options.height.standing,
-        options.radius.standing
-      )
-    )
-      .Create()
-      .Get();
+    const standingShape = buildShape(
+      0.5 * options.height.standing,
+      options.radius.standing,
+    );
+    const crouchingShape = buildShape(
+      0.5 * options.height.crouching,
+      options.radius.crouching,
+    );
 
     const standingGeometry = new CapsuleGeometry(
       options.radius.standing,
       options.height.standing,
       4,
-      8
+      8,
     ).translate(0, 0.5 * options.height.standing + options.radius.standing, 0);
-
-    const crouchingShape = new Jolt.RotatedTranslatedShapeSettings(
-      characterPosition,
-      characterRotation,
-      new Jolt.CapsuleShapeSettings(
-        0.5 * options.height.crouching,
-        options.radius.crouching
-      )
-    )
-      .Create()
-      .Get();
 
     const crouchingGeometry = new CapsuleGeometry(
       options.radius.crouching,
       options.height.crouching,
       4,
-      8
+      8,
     ).translate(
       0,
       0.5 * options.height.crouching + options.radius.crouching,
-      0
+      0,
     );
 
-    const settings = new Jolt.CharacterVirtualSettings();
+    const settings = new jolt.CharacterVirtualSettings();
     settings.mMass = mass;
-    settings.mMaxSlopeAngle = maxSlopeAngle;
-    settings.mMaxStrength = maxStrength;
+    settings.mMaxSlopeAngle = options.maxSlopeAngle;
+    settings.mMaxStrength = options.maxStrength;
     settings.mShape = standingShape;
-    settings.mBackFaceMode = Jolt.EBackFaceMode_CollideWithBackFaces;
-    settings.mCharacterPadding = characterPadding;
-    settings.mPenetrationRecoverySpeed = penetrationRecoverySpeed;
-    settings.mPredictiveContactDistance = predictiveContactDistance;
-    settings.mSupportingVolume = new Jolt.Plane(
-      Jolt.Vec3.prototype.sAxisY(),
-      -options.radius.standing
+    settings.mBackFaceMode = jolt.EBackFaceMode_CollideWithBackFaces;
+    settings.mCharacterPadding = options.characterPadding;
+    settings.mPenetrationRecoverySpeed = options.penetrationRecoverySpeed;
+    settings.mPredictiveContactDistance = options.predictiveContactDistance;
+
+    const supportingPlaneNormal = new jolt.Vec3(up[0], up[1], up[2]);
+    const supportingVolume = new jolt.Plane(
+      supportingPlaneNormal,
+      -options.radius.standing,
+    );
+    settings.mSupportingVolume = supportingVolume;
+    jolt.destroy(supportingVolume);
+    jolt.destroy(supportingPlaneNormal);
+
+    const startPosition = new jolt.RVec3(position[0], position[1], position[2]);
+    const startRotation = new jolt.Quat(
+      rotation[0],
+      rotation[1],
+      rotation[2],
+      rotation[3],
     );
 
-    const character = new Jolt.CharacterVirtual(
+    const character = new jolt.CharacterVirtual(
       settings,
-      new Jolt.Vec3(position[0], position[1], position[2]),
-      Jolt.Quat.prototype.sIdentity(),
-      physicsSystem
+      startPosition,
+      startRotation,
+      physicsSystem,
     );
 
-    const characterContactListener = new Jolt.CharacterContactListenerJS();
-    characterContactListener.OnAdjustBodyVelocity = (
-      _character,
-      _body2,
-      _linearVelocity,
-      _angularVelocity
-    ) => {};
-    characterContactListener.OnContactValidate = (
-      _character,
-      _bodyID2,
-      _subShapeID2
-    ) => {
-      return true;
-    };
-    characterContactListener.OnContactAdded = (
-      _character,
-      _bodyID2,
-      _subShapeID2,
-      _contactPosition,
-      _contactNormal,
-      _settings
-    ) => {};
-    characterContactListener.OnContactSolve = (
-      character,
+    const upVector = new jolt.Vec3(up[0], up[1], up[2]);
+    character.SetUp(upVector);
+
+    // The Emscripten binding rejects a partially implemented JSImplementation,
+    // so every callback must be present even when it does nothing.
+    const contactListener = new jolt.CharacterContactListenerJS();
+    contactListener.OnAdjustBodyVelocity = () => {};
+    contactListener.OnContactValidate = () => true;
+    contactListener.OnCharacterContactValidate = () => true;
+    contactListener.OnContactAdded = () => {};
+    contactListener.OnContactPersisted = () => {};
+    contactListener.OnContactRemoved = () => {};
+    contactListener.OnCharacterContactAdded = () => {};
+    contactListener.OnCharacterContactPersisted = () => {};
+    contactListener.OnCharacterContactRemoved = () => {};
+    contactListener.OnCharacterContactSolve = () => {};
+    contactListener.OnContactSolve = (
+      inCharacter,
       _bodyID2,
       _subShapeID2,
       _contactPosition,
-      contactNormal,
-      contactVelocity,
+      inContactNormal,
+      inContactVelocity,
       _contactMaterial,
       _characterVelocity,
-      newCharacterVelocity
+      inNewCharacterVelocity,
     ) => {
-      // @ts-ignore
-      character = Jolt.wrapPointer(character, Jolt.CharacterVirtual);
-      // @ts-ignore
-      contactVelocity = Jolt.wrapPointer(contactVelocity, Jolt.Vec3);
-
-      newCharacterVelocity = Jolt.wrapPointer(
-        // @ts-ignore
-        newCharacterVelocity,
-        Jolt.Vec3
+      const self = jolt.wrapPointer(
+        inCharacter as unknown as number,
+        jolt.CharacterVirtual,
       );
-      // @ts-ignore
-      contactNormal = Jolt.wrapPointer(contactNormal, Jolt.Vec3);
+      const contactVelocity = jolt.wrapPointer(
+        inContactVelocity as unknown as number,
+        jolt.Vec3,
+      );
+      const contactNormal = jolt.wrapPointer(
+        inContactNormal as unknown as number,
+        jolt.Vec3,
+      );
+      const newCharacterVelocity = jolt.wrapPointer(
+        inNewCharacterVelocity as unknown as number,
+        jolt.Vec3,
+      );
 
       if (
-        !characterRef.current.shouldSlide &&
+        !stateRef.current.shouldSlide &&
         contactVelocity.IsNearZero() &&
-        !character.IsSlopeTooSteep(contactNormal)
+        !self.IsSlopeTooSteep(contactNormal)
       ) {
         newCharacterVelocity.SetX(0);
         newCharacterVelocity.SetY(0);
@@ -245,34 +265,39 @@ export const useCharacter = ({
       }
     };
 
-    character.SetListener(characterContactListener);
+    character.SetListener(contactListener);
 
-    const characterUp = new Vector3(
-      character.GetUp().GetX(),
-      character.GetUp().GetY(),
-      character.GetUp().GetZ()
+    const characterUp = new Vector3(up[0], up[1], up[2]).normalize();
+    const upRotation = new Quaternion().setFromUnitVectors(
+      new Vector3(0, 1, 0),
+      characterUp,
     );
 
+    const updateSettings = new jolt.ExtendedUpdateSettings();
+
     if (options.enableStickToFloor) {
-      updateSettings.mStickToFloorStepDown = Jolt.Vec3.prototype.sZero();
+      updateSettings.mStickToFloorStepDown = jolt.Vec3.prototype.sZero();
     } else {
-      const vec = characterUp
-        .clone()
-        .multiplyScalar(-updateSettings.mStickToFloorStepDown.Length());
-      updateSettings.mStickToFloorStepDown.Set(vec.x, vec.y, vec.z);
+      const length = updateSettings.mStickToFloorStepDown.Length();
+      updateSettings.mStickToFloorStepDown.Set(
+        -characterUp.x * length,
+        -characterUp.y * length,
+        -characterUp.z * length,
+      );
     }
 
-    if (!options.enableStairStep) {
-      updateSettings.mWalkStairsStepUp = Jolt.Vec3.prototype.sZero();
+    if (options.enableStairStep) {
+      const length = updateSettings.mWalkStairsStepUp.Length();
+      updateSettings.mWalkStairsStepUp.Set(
+        characterUp.x * length,
+        characterUp.y * length,
+        characterUp.z * length,
+      );
     } else {
-      const vec = characterUp
-        .clone()
-        .multiplyScalar(updateSettings.mWalkStairsStepUp.Length());
-
-      updateSettings.mWalkStairsStepUp.Set(vec.x, vec.y, vec.z);
+      updateSettings.mWalkStairsStepUp = jolt.Vec3.prototype.sZero();
     }
 
-    const tempVec3 = new Jolt.Vec3();
+    const tempVec3 = new jolt.Vec3();
 
     let debugMeshStanding: Mesh | null = null;
     let debugMeshCrouching: Mesh | null = null;
@@ -280,259 +305,201 @@ export const useCharacter = ({
     if (debug) {
       debugMeshStanding = new Mesh(
         standingGeometry,
-        new MeshBasicMaterial({ color: "black", wireframe: true })
+        createDebugMaterial("character"),
       );
-      scene.add(debugMeshStanding);
-
       debugMeshCrouching = new Mesh(
         crouchingGeometry,
-        new MeshBasicMaterial({ color: "black", wireframe: true })
+        createDebugMaterial("character"),
       );
+      debugMeshCrouching.visible = false;
+      scene.add(debugMeshStanding);
       scene.add(debugMeshCrouching);
     }
 
+    const linearVelocity = new Vector3();
+    const verticalVelocity = new Vector3();
+    const groundVelocity = new Vector3();
+    const gravity = new Vector3();
+    const newVelocity = new Vector3();
+    const scratch = new Vector3();
+
     const update = (
-      direction: THREE.Vector3,
+      direction: Vector3,
       jump: boolean,
       crouched: boolean,
       deltaTime: number,
-      ignoreHorizontalMovementLock = false,
-      overrideUpdate?: (velocity: Vector3, up: Vector3) => Vector3
+      updateOptions: CharacterUpdateOptions = {},
     ) => {
-      if (crouched) {
+      if (state.destroyed) return;
+
+      const { ignoreHorizontalMovementLock = false, addToVelocity, overrideUpdate } =
+        updateOptions;
+
+      if (crouched !== stateRef.current.crouched) {
+        stateRef.current.crouched = crouched;
         character.SetShape(
-          crouchingShape,
+          crouched ? crouchingShape : standingShape,
           1.5 * physicsSystem.GetPhysicsSettings().mPenetrationSlop,
-          movingBPFilter,
-          movingLayerFilter,
+          broadPhaseFilter,
+          layerFilter,
           bodyFilter,
           shapeFilter,
-          joltInterface.GetTempAllocator()
+          joltInterface.GetTempAllocator(),
         );
-      } else {
-        character.SetShape(
-          standingShape,
-          1.5 * physicsSystem.GetPhysicsSettings().mPenetrationSlop,
-          movingBPFilter,
-          movingLayerFilter,
-          bodyFilter,
-          shapeFilter,
-          joltInterface.GetTempAllocator()
-        );
+
+        if (debugMeshStanding) debugMeshStanding.visible = !crouched;
+        if (debugMeshCrouching) debugMeshCrouching.visible = crouched;
       }
 
-      const characterUp = new Vector3(
-        character.GetUp().GetX(),
-        character.GetUp().GetY(),
-        character.GetUp().GetZ()
-      );
+      const moveSpeed = crouched
+        ? options.moveSpeed * options.crouchMoveSpeedRatio
+        : options.moveSpeed;
 
-      const enableHorizontalMovement =
-        options.moveDuringJump || character.IsSupported();
+      const canMove = options.moveDuringJump || character.IsSupported();
 
-      if (enableHorizontalMovement || ignoreHorizontalMovementLock) {
-        characterRef.current.shouldSlide = !(direction.length() < 1.0e-12);
+      if (canMove || ignoreHorizontalMovementLock) {
+        stateRef.current.shouldSlide = direction.lengthSq() >= 1.0e-24;
 
         if (options.enableInertia) {
-          characterRef.current.desiredVelocity
-            .multiplyScalar(0.75)
-            .add(
-              direction.multiplyScalar(
-                0.25 *
-                  (crouched
-                    ? options.moveSpeed * options.crouchMoveSpeedRatio
-                    : options.moveSpeed)
-              )
-            );
+          scratch.copy(direction).multiplyScalar(0.25 * moveSpeed);
+          stateRef.current.desiredVelocity.multiplyScalar(0.75).add(scratch);
         } else {
-          characterRef.current.desiredVelocity
+          stateRef.current.desiredVelocity
             .copy(direction)
-            .multiplyScalar(
-              crouched
-                ? options.moveSpeed * options.crouchMoveSpeedRatio
-                : options.moveSpeed
-            );
+            .multiplyScalar(moveSpeed);
         }
       } else {
-        characterRef.current.shouldSlide = true;
+        stateRef.current.shouldSlide = true;
       }
-
-      tempVec3.Set(upRotationX, 0, upRotationZ);
-
-      const characterUpRotation = Jolt.Quat.prototype.sEulerAngles(tempVec3);
-      character.SetUp(characterUpRotation.RotateAxisY());
-      character.SetRotation(characterUpRotation);
-
-      const upRotation = new Quaternion(
-        characterUpRotation.GetX(),
-        characterUpRotation.GetY(),
-        characterUpRotation.GetZ(),
-        characterUpRotation.GetW()
-      );
 
       character.UpdateGroundVelocity();
 
-      const linearVelocity = new Vector3(
-        character.GetLinearVelocity().GetX(),
-        character.GetLinearVelocity().GetY(),
-        character.GetLinearVelocity().GetZ()
-      );
+      const velocity = character.GetLinearVelocity();
+      linearVelocity.set(velocity.GetX(), velocity.GetY(), velocity.GetZ());
 
-      const verticalVelocity = characterUp
-        .clone()
+      verticalVelocity
+        .copy(characterUp)
         .multiplyScalar(linearVelocity.dot(characterUp));
 
-      const groundVelocity = new Vector3(
-        character.GetGroundVelocity().GetX(),
-        character.GetGroundVelocity().GetY(),
-        character.GetGroundVelocity().GetZ()
-      );
-      const gravity = new Vector3(
-        physicsSystem.GetGravity().GetX(),
-        physicsSystem.GetGravity().GetY(),
-        physicsSystem.GetGravity().GetZ()
-      );
+      const ground = character.GetGroundVelocity();
+      groundVelocity.set(ground.GetX(), ground.GetY(), ground.GetZ());
 
-      let newVelocity = new Vector3();
+      const worldGravity = physicsSystem.GetGravity();
+      gravity.set(
+        worldGravity.GetX(),
+        worldGravity.GetY(),
+        worldGravity.GetZ(),
+      );
 
       const movingTowardsGround = verticalVelocity.y - groundVelocity.y < 0.1;
-
-      if (
-        character.GetGroundState() == Jolt.EGroundState_OnGround &&
+      const onGround =
+        character.GetGroundState() === jolt.EGroundState_OnGround &&
         (options.enableInertia
           ? movingTowardsGround
-          : !character.IsSlopeTooSteep(character.GetGroundNormal()))
-      ) {
-        newVelocity = groundVelocity;
+          : !character.IsSlopeTooSteep(character.GetGroundNormal()));
+
+      if (onGround) {
+        newVelocity.copy(groundVelocity);
 
         if (jump && movingTowardsGround && !crouched) {
-          newVelocity.add(characterUp.multiplyScalar(options.jumpSpeed));
+          scratch.copy(characterUp).multiplyScalar(options.jumpSpeed);
+          newVelocity.add(scratch);
         }
       } else {
-        newVelocity = verticalVelocity.clone();
+        newVelocity.copy(verticalVelocity);
       }
 
-      newVelocity.add(
-        gravity.multiplyScalar(deltaTime).applyQuaternion(upRotation)
-      );
+      scratch.copy(gravity).multiplyScalar(deltaTime).applyQuaternion(upRotation);
+      newVelocity.add(scratch);
 
-      newVelocity.add(
-        characterRef.current.desiredVelocity.clone().applyQuaternion(upRotation)
-      );
+      scratch
+        .copy(stateRef.current.desiredVelocity)
+        .applyQuaternion(upRotation);
+      newVelocity.add(scratch);
 
-      if (overrideUpdate) {
-        newVelocity = overrideUpdate(newVelocity, characterUp);
+      if (addToVelocity) {
+        newVelocity.add(addToVelocity);
       }
 
-      tempVec3.Set(newVelocity.x, newVelocity.y, newVelocity.z);
+      const finalVelocity = overrideUpdate
+        ? overrideUpdate(newVelocity, characterUp)
+        : newVelocity;
 
+      tempVec3.Set(finalVelocity.x, finalVelocity.y, finalVelocity.z);
       character.SetLinearVelocity(tempVec3);
-
-      characterUp.multiplyScalar(-physicsSystem.GetGravity().Length());
 
       character.ExtendedUpdate(
         deltaTime,
         character.GetUp(),
         updateSettings,
-        movingBPFilter,
-        movingLayerFilter,
+        broadPhaseFilter,
+        layerFilter,
         bodyFilter,
         shapeFilter,
-        joltInterface.GetTempAllocator()
+        joltInterface.GetTempAllocator(),
       );
-
-      if (crouched) {
-        debugMeshStanding && (debugMeshStanding.visible = false);
-        debugMeshCrouching && (debugMeshCrouching.visible = true);
-      } else {
-        debugMeshStanding && (debugMeshStanding.visible = true);
-        debugMeshCrouching && (debugMeshCrouching.visible = false);
-      }
-
-      if (debugMeshStanding && debugMeshStanding.visible) {
-        debugMeshStanding.position.copy(
-          new Vector3(
-            character.GetPosition().GetX(),
-            character.GetPosition().GetY(),
-            character.GetPosition().GetZ()
-          )
-        );
-
-        debugMeshStanding.quaternion.copy(
-          new Quaternion(
-            character.GetRotation().GetX(),
-            character.GetRotation().GetY(),
-            character.GetRotation().GetZ(),
-            character.GetRotation().GetW()
-          )
-        );
-      }
-
-      if (debugMeshCrouching && debugMeshCrouching.visible) {
-        debugMeshCrouching.position.copy(
-          new Vector3(
-            character.GetPosition().GetX(),
-            character.GetPosition().GetY(),
-            character.GetPosition().GetZ()
-          )
-        );
-
-        debugMeshCrouching.quaternion.copy(
-          new Quaternion(
-            character.GetRotation().GetX(),
-            character.GetRotation().GetY(),
-            character.GetRotation().GetZ(),
-            character.GetRotation().GetW()
-          )
-        );
-      }
     };
 
-    return {
-      api: { character, update, debugMeshStanding, debugMeshCrouching },
-      cleanup: () => {
-        Jolt.destroy(character);
-        Jolt.destroy(characterPosition);
-        Jolt.destroy(characterRotation);
-        Jolt.destroy(tempVec3);
-        if (debugMeshStanding) {
-          scene.remove(debugMeshStanding);
-          debugMeshStanding.geometry.dispose();
-          if (debugMeshStanding.material instanceof MeshBasicMaterial) {
-            debugMeshStanding.material.dispose();
-          }
-        }
-        if (debugMeshCrouching) {
-          scene.remove(debugMeshCrouching);
-          debugMeshCrouching.geometry.dispose();
-          if (debugMeshCrouching.material instanceof MeshBasicMaterial) {
-            debugMeshCrouching.material.dispose();
-          }
-        }
-      },
+    setCharacterApi({
+      character,
+      update,
+      debugMeshStanding,
+      debugMeshCrouching,
+    });
+
+    return () => {
+      setCharacterApi(undefined);
+
+      for (const mesh of [debugMeshStanding, debugMeshCrouching]) {
+        if (!mesh) continue;
+        scene.remove(mesh);
+        disposeDebugMaterial(mesh);
+      }
+
+      standingGeometry.dispose();
+      crouchingGeometry.dispose();
+
+      if (state.destroyed) return;
+
+      character.SetListener(null as unknown as Jolt.CharacterContactListener);
+      jolt.destroy(contactListener);
+      jolt.destroy(character);
+      jolt.destroy(settings);
+
+      standingShape.Release();
+      crouchingShape.Release();
+
+      jolt.destroy(updateSettings);
+      jolt.destroy(tempVec3);
+      jolt.destroy(upVector);
+      jolt.destroy(startPosition);
+      jolt.destroy(startRotation);
+      jolt.destroy(shapeRotation);
+      jolt.destroy(shapeFilter);
+      jolt.destroy(bodyFilter);
+      jolt.destroy(layerFilter);
+      jolt.destroy(broadPhaseFilter);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [api, mount, scene]);
 
-  useEffect(() => {
-    const { api, cleanup } = init();
-    setApi(api);
-    return cleanup;
-  }, [init]);
+  useFrame(() => {
+    if (!characterApi) return;
 
-  return [api] as [
-    {
-      character: Jolt.CharacterVirtual;
-      update: (
-        direction: Vector3,
-        jump: boolean,
-        crouched: boolean,
-        deltaTime: number,
-        ignoreHorizontalMovementLock?: boolean,
-        overrideUpdate?: (velocity: Vector3, up: Vector3) => Vector3
-      ) => void;
-      debugMeshStanding: Mesh | null;
-      debugMeshCrouching: Mesh | null;
+    const { character, debugMeshStanding, debugMeshCrouching } = characterApi;
+    const position = character.GetPosition();
+    const rotation = character.GetRotation();
+
+    for (const mesh of [debugMeshStanding, debugMeshCrouching]) {
+      if (!mesh || !mesh.visible) continue;
+      mesh.position.set(position.GetX(), position.GetY(), position.GetZ());
+      mesh.quaternion.set(
+        rotation.GetX(),
+        rotation.GetY(),
+        rotation.GetZ(),
+        rotation.GetW(),
+      );
     }
-  ];
+  });
+
+  return [characterApi] as [CharacterApi | undefined];
 };

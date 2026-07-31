@@ -65,7 +65,7 @@ Both competitors ship 6–7 joint hooks. r3f-jolt has **none**, though Jolt supp
 - [ ] Heightfield hook → `HeightFieldShapeSettings` (both competitors have one)
 - [ ] Tapered-cylinder hook → `TaperedCylinderShapeSettings` (upstream's name; also how you get a cone)
 - [ ] `EmptyShape` → `EmptyShapeSettings` — a body with no collision, for markers and attachment points
-- [ ] Shape `scale` support → `ScaledShapeSettings`
+- [ ] Shape `scale` support at creation → `ScaledShapeSettings` (runtime `api.setScale` ships earlier, in 0.2.1)
 - [ ] Full mass properties (density, centre of mass, inertia tensor) via `mMassPropertiesOverride` — today only a scalar `mass`
 - [ ] `MeshShapeSettings.mBuildQuality` — trade mesh build time against runtime query speed, which matters when streaming terrain
 - [ ] Per-triangle user data on `MeshShape` — how you get surface types out of a collision, for footstep audio and per-surface tire grip

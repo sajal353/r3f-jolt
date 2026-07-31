@@ -1,243 +1,90 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useJolt } from "./useJolt";
-import {
-  BufferAttribute,
-  BufferGeometry,
-  InterleavedBufferAttribute,
-  Material,
-  Mesh,
-  MeshBasicMaterial,
-  NormalBufferAttributes,
-  Object3DEventMap,
-  Quaternion,
-  TypedArray,
-  Vector3,
-} from "three";
-import { useFrame, useThree } from "@react-three/fiber";
-import Jolt from "jolt-physics";
+import type { BufferAttribute, BufferGeometry, InterleavedBufferAttribute } from "three";
+import type Jolt from "jolt-physics";
+import { finishShape, useBody, type BodyOptions } from "./internal/useBody";
+import { shapeToGeometry } from "./internal/shapeToGeometry";
 
-export const useTrimesh = ({
-  mesh,
-  position,
-  debug = false,
-  material,
-  initialVelocity,
-  bodySettingsOverride,
-}: {
-  mesh: {
-    position: BufferAttribute | InterleavedBufferAttribute;
-    index: TypedArray;
-  };
-  position: [number, number, number];
-  debug?: boolean;
-  material?: {
-    friction?: number;
-    restitution?: number;
-  };
-  initialVelocity?: [number, number, number];
-  bodySettingsOverride?: (settings: Jolt.BodyCreationSettings) => void;
-}) => {
-  const ref = useRef<Mesh>(null);
-
-  const { Jolt, bodyInterface, layers } = useJolt();
-  const scene = useThree((state) => state.scene);
-
-  const [api, setApi] = useState<{
-    body: Jolt.Body;
-    shape: Jolt.Shape;
-    debugMesh: Mesh<
-      BufferGeometry<NormalBufferAttributes>,
-      Material | Material[],
-      Object3DEventMap
-    > | null;
-    geometry: BufferGeometry<NormalBufferAttributes>;
-  }>();
-
-  const init = useCallback(() => {
-    const verts = new Jolt.VertexList();
-
-    for (let i = 0; i < mesh.position.count; i++) {
-      verts.push_back(
-        new Jolt.Float3(
-          mesh.position.getX(i),
-          mesh.position.getY(i),
-          mesh.position.getZ(i)
-        )
-      );
-    }
-
-    const tris = new Jolt.IndexedTriangleList();
-
-    for (let i = 0; i < mesh.index.length; i += 3) {
-      tris.push_back(
-        new Jolt.IndexedTriangle(
-          mesh.index[i],
-          mesh.index[i + 1],
-          mesh.index[i + 2],
-          0
-        )
-      );
-    }
-
-    const mats = new Jolt.PhysicsMaterialList();
-    mats.push_back(new Jolt.PhysicsMaterial());
-
-    const shape = new Jolt.MeshShapeSettings(verts, tris, mats).Create().Get();
-
-    Jolt.destroy(verts);
-    Jolt.destroy(tris);
-    Jolt.destroy(mats);
-
-    const bodySettings = new Jolt.BodyCreationSettings(
-      shape,
-      new Jolt.Vec3(position[0], position[1], position[2]),
-      new Jolt.Quat(0, 0, 0, 1),
-      Jolt.EMotionType_Static,
-      layers.LAYER_NON_MOVING
-    );
-
-    if (bodySettingsOverride) {
-      bodySettingsOverride(bodySettings);
-    }
-
-    const body = bodyInterface.CreateBody(bodySettings);
-
-    if (material?.friction) {
-      body.SetFriction(material.friction);
-    }
-
-    if (material?.restitution) {
-      body.SetRestitution(material.restitution);
-    }
-
-    if (initialVelocity) {
-      body.SetLinearVelocity(
-        new Jolt.Vec3(
-          initialVelocity[0],
-          initialVelocity[1],
-          initialVelocity[2]
-        )
-      );
-    }
-
-    Jolt.destroy(bodySettings);
-
-    bodyInterface.AddBody(body.GetID(), Jolt.EActivation_Activate);
-
-    let debugMesh: Mesh | null = null;
-
-    const meshShape = Jolt.castObject(shape, Jolt.MeshShape);
-    const shapeScale = new Jolt.Vec3(1, 1, 1);
-    const geometryTris = new Jolt.ShapeGetTriangles(
-      meshShape,
-      Jolt.AABox.prototype.sBiggest(),
-      shape.GetCenterOfMass(),
-      Jolt.Quat.prototype.sIdentity(),
-      shapeScale
-    );
-    Jolt.destroy(shapeScale);
-    const geometryVertices = new Float32Array(
-      Jolt.HEAPF32.buffer,
-      geometryTris.GetVerticesData(),
-      geometryTris.GetVerticesSize() / Float32Array.BYTES_PER_ELEMENT
-    );
-    const buffer = new BufferAttribute(geometryVertices, 3).clone();
-    Jolt.destroy(geometryTris);
-    const geometry = new BufferGeometry();
-    geometry.setAttribute("position", buffer);
-    geometry.computeVertexNormals();
-
-    if (debug) {
-      const meshMesh = new Mesh(
-        geometry,
-        new MeshBasicMaterial({ color: "hotpink", wireframe: true })
-      );
-      debugMesh = meshMesh;
-      scene.add(meshMesh);
-    }
-
-    return {
-      api: { body, shape, debugMesh, geometry },
-      cleanup: () => {
-        bodyInterface.RemoveBody(body.GetID());
-        bodyInterface.DestroyBody(body.GetID());
-        if (debugMesh) {
-          scene.remove(debugMesh);
-          debugMesh.geometry.dispose();
-          if (debugMesh.material instanceof MeshBasicMaterial) {
-            debugMesh.material.dispose();
-          }
-        }
-      },
+export type TrimeshSource =
+  | BufferGeometry
+  | {
+      position: BufferAttribute | InterleavedBufferAttribute;
+      index?: ArrayLike<number>;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
-  useEffect(() => {
-    const { api, cleanup } = init();
-    setApi(api);
-    return cleanup;
-  }, [init]);
+export interface UseTrimeshOptions extends Omit<BodyOptions, "motionType"> {
+  mesh: TrimeshSource;
+  motionType?: "static";
+}
 
-  useFrame(() => {
-    if (!api) return;
+const readSource = (mesh: TrimeshSource) => {
+  const position =
+    "position" in mesh
+      ? mesh.position
+      : (mesh.getAttribute("position") as BufferAttribute);
 
-    if (ref.current) {
-      ref.current.position.copy(
-        new Vector3(
-          api.body.GetPosition().GetX(),
-          api.body.GetPosition().GetY(),
-          api.body.GetPosition().GetZ()
-        )
+  const index =
+    "position" in mesh ? mesh.index : (mesh.getIndex()?.array ?? undefined);
+
+  if (!position) {
+    throw new Error("[r3f-jolt] useTrimesh: the mesh has no position attribute");
+  }
+
+  return { position, index };
+};
+
+export const useTrimesh = (options: UseTrimeshOptions) => {
+  const { mesh } = options;
+
+  return useBody<Jolt.Shape>(
+    (jolt) => {
+      const { position, index } = readSource(mesh);
+
+      const vertexList = new jolt.VertexList();
+      vertexList.reserve(position.count);
+
+      const vertex = new jolt.Float3(0, 0, 0);
+      for (let i = 0; i < position.count; i += 1) {
+        vertex.x = position.getX(i);
+        vertex.y = position.getY(i);
+        vertex.z = position.getZ(i);
+        vertexList.push_back(vertex);
+      }
+      jolt.destroy(vertex);
+
+      const indexCount = index ? index.length : position.count;
+      const triangleList = new jolt.IndexedTriangleList();
+      triangleList.reserve(indexCount / 3);
+
+      const triangle = new jolt.IndexedTriangle();
+      triangle.mMaterialIndex = 0;
+
+      for (let i = 0; i < indexCount; i += 3) {
+        triangle.set_mIdx(0, index ? index[i] : i);
+        triangle.set_mIdx(1, index ? index[i + 1] : i + 1);
+        triangle.set_mIdx(2, index ? index[i + 2] : i + 2);
+        triangleList.push_back(triangle);
+      }
+      jolt.destroy(triangle);
+
+      const materials = new jolt.PhysicsMaterialList();
+      materials.push_back(new jolt.PhysicsMaterial());
+
+      const settings = new jolt.MeshShapeSettings(
+        vertexList,
+        triangleList,
+        materials,
       );
+      const result = settings.Create();
+      const shape = finishShape(result.Get());
+      result.Clear();
 
-      ref.current.quaternion.copy(
-        new Quaternion(
-          api.body.GetRotation().GetX(),
-          api.body.GetRotation().GetY(),
-          api.body.GetRotation().GetZ(),
-          api.body.GetRotation().GetW()
-        )
-      );
-    }
+      jolt.destroy(settings);
+      jolt.destroy(materials);
+      jolt.destroy(triangleList);
+      jolt.destroy(vertexList);
 
-    if (api.debugMesh) {
-      api.debugMesh.position.copy(
-        new Vector3(
-          api.body.GetPosition().GetX(),
-          api.body.GetPosition().GetY(),
-          api.body.GetPosition().GetZ()
-        )
-      );
-
-      api.debugMesh.quaternion.copy(
-        new Quaternion(
-          api.body.GetRotation().GetX(),
-          api.body.GetRotation().GetY(),
-          api.body.GetRotation().GetZ(),
-          api.body.GetRotation().GetW()
-        )
-      );
-    }
-  });
-
-  return [ref, api] as [
-    React.RefObject<
-      Mesh<
-        BufferGeometry<NormalBufferAttributes>,
-        Material | Material[],
-        Object3DEventMap
-      >
-    >,
-    {
-      body: Jolt.Body;
-      shape: Jolt.Shape;
-      debugMesh: Mesh<
-        BufferGeometry<NormalBufferAttributes>,
-        Material | Material[],
-        Object3DEventMap
-      > | null;
-      geometry: BufferGeometry<NormalBufferAttributes>;
-    }
-  ];
+      return { shape, geometry: shapeToGeometry(jolt, shape) };
+    },
+    { ...options, motionType: "static" },
+    "trimesh",
+  );
 };

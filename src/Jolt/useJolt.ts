@@ -1,30 +1,13 @@
 import { useContext } from "react";
 import { joltContext } from "./context";
-import Jolt from "jolt-physics";
+import type { JoltApi } from "./types";
 
-export const useJolt = () => {
+export const useJolt = (): JoltApi => {
   const api = useContext(joltContext);
 
   if (api === null) {
-    throw new Error("Jolt hooks must be used within a Jolt Physics Provider");
+    throw new Error("Jolt hooks must be used within a <Physics> provider");
   }
 
-  const { Jolt, joltInterface, physicsSystem, bodyInterface, layers } = api;
-
-  return {
-    Jolt,
-    joltInterface,
-    physicsSystem,
-    bodyInterface,
-    layers,
-  } as {
-    Jolt: typeof Jolt;
-    joltInterface: Jolt.JoltInterface;
-    physicsSystem: Jolt.PhysicsSystem;
-    bodyInterface: Jolt.BodyInterface;
-    layers: {
-      LAYER_NON_MOVING: number;
-      LAYER_MOVING: number;
-    };
-  };
+  return api;
 };

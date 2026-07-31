@@ -2,19 +2,20 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import dts from "vite-plugin-dts";
 import tsconfigPaths from "vite-tsconfig-paths";
-import { dependencies, peerDependencies } from "./package.json";
+import { peerDependencies } from "./package.json";
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     dts({
-      rollupTypes: true,
+      bundleTypes: true,
+      tsconfigPath: "./tsconfig.lib.json",
     }),
     tsconfigPaths(),
   ],
   build: {
     emptyOutDir: true,
+    sourcemap: true,
     lib: {
       entry: "lib/main.ts",
       name: "r3f-jolt",
@@ -23,8 +24,9 @@ export default defineConfig({
     },
     rollupOptions: {
       external: [
-        ...Object.keys(dependencies),
         ...Object.keys(peerDependencies),
+        /^jolt-physics(\/.*)?$/,
+        "react/jsx-runtime",
       ],
     },
   },
