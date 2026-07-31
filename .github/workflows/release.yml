@@ -22,8 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # npm provenance. Drop this and --provenance if the repository is
-      # private, where provenance is rejected.
+      # Trusted publishing authenticates over OIDC and generates provenance
+      # automatically; no NPM_TOKEN is involved.
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -32,9 +32,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
+
+      - name: Use an npm that supports trusted publishing
+        run: npm install -g npm@latest
 
       - run: pnpm install --frozen-lockfile
 
@@ -48,9 +51,7 @@ jobs:
         run: pnpm version ${{ steps.version.outputs.version }} --no-git-tag-version
 
       - name: Publish
-        run: pnpm publish --tag next --no-git-checks --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --tag next
 
       - name: Summary
         run: |
@@ -79,9 +80,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           registry-url: https://registry.npmjs.org
+
+      - name: Use an npm that supports trusted publishing
+        run: npm install -g npm@latest
 
       - run: pnpm install --frozen-lockfile
 
@@ -109,9 +113,7 @@ jobs:
 
       - name: Publish
         if: steps.check.outputs.published == 'false'
-        run: pnpm publish --tag latest --no-git-checks --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --tag latest
 
       - name: Tag and draft the GitHub release
         if: steps.check.outputs.published == 'false'
