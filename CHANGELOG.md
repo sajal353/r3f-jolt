@@ -1,5 +1,72 @@
 # Changelog
 
+## 0.2.1
+
+Feature parity with `@react-three/rapier` and `@react-three/cannon` wherever Jolt already supported it, plus manual body control. **Purely additive** — no existing signature changed.
+
+### Kinematic bodies
+
+- **`motionType: "kinematic"`.** Bodies you move yourself that still push dynamic bodies out of the way — moving platforms, lifts, doors, carried objects.
+- **`api.moveKinematic(position, rotation, deltaTime?)`** is the correct way to drive one. `setPositionAndRotation` teleports with zero velocity, so a platform moved that way carries nothing standing on it.
+- `deltaTime` defaults to the world's step duration. Passing `useFrame`'s render delta instead is a mistake that _compounds_ rather than merely scaling: the body overshoots, the next correction is computed from the overshot position, and the drive runs away.
+
+### Imperative body api
+
+`applyForce` · `applyTorque` · `applyForceAndTorque` · `applyImpulse` · `applyAngularImpulse` · `setLinearVelocity` · `setAngularVelocity` · `setVelocities` · `setPositionAndRotation` · `setMotionType` · `setLayer` · `setGravityFactor` · `sleep` · `wake` · `isSleeping` · `setEnabled` · `resetSleepTimer`
+
+- Jolt spells the force family `Add*`; the rapier/cannon-familiar `apply*` names are used here and map one-to-one.
+- All of them take a three `Vector3`/`Quaternion` or a tuple, and convert into pooled Jolt temporaries — **no allocation per call**, so they are safe in a `useFrame`.
+- All of them no-op once the body is killed or the world is disposed.
+- `setMotionType` **refuses** to promote a static body created without `allowDynamicOrKinematic` and warns instead. Jolt asserts on this in a debug build; a release build corrupts memory quietly.
+
+### Picking things up
+
+- **`api.grab()` / `moveTo()` / `release()` / `isGrabbed()`.** `grab` switches to kinematic remembering what the body was, `release` restores it. The throw is free: the velocity the carry accumulated is already on the body, so `release` applies no impulse of its own.
+- **`api.setScale(scale, updateMassProperties?)`.** Jolt shapes are immutable, so this swaps the collider for a `ScaledShape`. Always rebuilt from the base shape, so repeated calls replace rather than compound. Non-uniform scale is refused on spheres and capsules with a warning naming Jolt's suggested valid scale. An explicit `mass` survives the swap, which it does not through a raw `SetShape`.
+- The library owns no input: these are the calls an XR controller, a pointer or a gamepad would drive. New `Grab` demo scene.
+
+### New body options
+
+`allowDynamicOrKinematic` · `sensor` · `linearDamping` · `angularDamping` · `gravityFactor` · `allowSleeping` · `initialAngularVelocity` · `allowedDOFs` (plus `lockRotations` / `lockTranslations` / `enabledRotations` / `enabledTranslations`) · `enhancedInternalEdgeRemoval` · `applyGyroscopicForce` · `collideKinematicVsNonDynamic` · `maxLinearVelocity` · `maxAngularVelocity` · `numVelocityStepsOverride` · `numPositionStepsOverride`
+
+DOF locks are **world**-space, not local-space — Jolt changed this in 0.18.0 to match other engines.
+
+### Sleep and wake events
+
+- `onWake` / `onSleep` on every body hook, plus `api.isSleeping()`.
+- Delivered after the step rather than from inside it, where touching the world is unsafe — the same deferral contact events use. The listener is only installed while some body asks for it.
+
+### Raycasting
+
+- **`useAnyHitRaycaster`** — stops at the first hit found rather than comparing distances. The cheapest of the three; the hit it reports is not necessarily the nearest.
+- **`useAllHitsRaycaster`** — every body along the ray, sorted nearest-first.
+- All three now share one internal implementation of the filter set and the reset-then-cast discipline, and return the same hit shape.
+
+### Interpolation
+
+- **`<Physics interpolate>`, on by default.** Bodies render between physics steps instead of snapping to the last one, which is what stops a fixed timestep juddering when the frame rate is not a multiple of it. Costs one step of latency; pass `interpolate={false}` to opt out.
+- Forced off for `timeStep="vary"`, which already lands one step per frame. Static bodies are never interpolated, and a teleport snaps instead of sliding in from the old position.
+
+### `<PhysicsDebug />`
+
+- Draws a wireframe for **every** body in the world, including ones created directly through `useJolt()` — which the per-hook `debug` flag cannot see, since it only knows about bodies it built itself.
+- Coloured by motion type (`debugMotionColors`, overridable via `colors`), geometry cached per shape so bodies sharing a shape share one `BufferGeometry`.
+- The per-hook `debug` flag still works and is still the better choice for looking at one body.
+
+### Fixes
+
+- **`useCompound` no longer crashes on an invalid child.** A dimension was only checked for being _present_, so `radius: -1` reached Jolt, `Create()` failed, and the failed `ShapeResult` was dereferenced. Children are now checked for a positive finite number and skipped with a console error, as documented.
+- **A failed `ShapeResult` is never dereferenced.** Every shape built through settings — compound, convex, tapered capsule, trimesh, character, car — reads its result through one guard that raises a JS error carrying Jolt's own reason. A release build previously corrupted memory here instead of asserting.
+- **A box's `convexRadius` is now visible in debug.** Jolt's triangulation reports the sharp box whatever the radius, so the debug mesh gets purpose-built geometry for the real rounded collider. The `geometry` the hook returns is unchanged: it is still a plain `BoxGeometry`, and the debug version is built lazily, only when `debug` is on.
+- **Debug wireframes draw as an overlay** (`depthTest: false` and a high render order). A collider that sits _inside_ the mesh drawn for it — which is exactly what a rounded box is — was hidden by the very thing it describes.
+
+`<PhysicsDebug />` still draws boxes sharp: `BoxShape` binds `GetHalfExtent()` but no `GetConvexRadius()`, so only the hook that created the body knows the radius.
+
+### Internal
+
+- `JoltApi` gained `timing` (`stepDelta`, `stepCount`, `alpha`, `interpolate`), `activation`, and `temps` — a shared pool of Jolt temporaries that keeps the imperative api allocation-free.
+- `BodyApi.shape` is now documented as the **base** shape the hook owns. After a `setScale` the body runs on a `ScaledShape` wrapping it, so it is no longer the body's own shape. The hook holds its reference for the body's lifetime instead of handing sole ownership to Jolt, because every rescale rebuilds from it.
+
 ## 0.2.0
 
 A correctness and compatibility release. Everything below is a breaking change, a bug fix, or both.
@@ -12,7 +79,7 @@ A correctness and compatibility release. Everything below is a breaking change, 
 
 ### Crashes and memory corruption
 
-- **Static bodies with a `mass` prop corrupted the heap.** `GetMotionProperties()` returns a null pointer for a static body, and every hook called `SetInverseMass(1 / mass)` on it unconditionally. Since `mass` defaulted to `1000`, this fired for *every* static body. Mass is now applied only to dynamic bodies, via `ScaleToMass`, which scales the inertia tensor too.
+- **Static bodies with a `mass` prop corrupted the heap.** `GetMotionProperties()` returns a null pointer for a static body, and every hook called `SetInverseMass(1 / mass)` on it unconditionally. Since `mass` defaulted to `1000`, this fired for _every_ static body. Mass is now applied only to dynamic bodies, via `ScaleToMass`, which scales the inertia tensor too.
 - **Invalid `useCompound` children passed a null pointer into WASM.** Validation failures `break` out of the `switch` and then reached `AddShape(..., undefined, 0)`. Invalid children are now skipped with a console error and the rest of the compound still builds.
 - **Unmount order caused a use-after-free.** React runs a parent's cleanup before its children's, so `<Physics>` destroyed the `JoltInterface` while body hooks were still about to call `RemoveBody`. `<Physics>` now flags the world as disposed synchronously and defers the destroy to a microtask, so the whole commit — children included — tears down against a live world.
 - **`useCharacter` was entirely broken on jolt-physics 1.1.** `CharacterContactListenerJS` gained new callbacks, and the Emscripten binding rejects a partially implemented interface. All eleven are now provided.

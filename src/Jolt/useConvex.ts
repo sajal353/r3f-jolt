@@ -1,5 +1,5 @@
 import type Jolt from "jolt-physics";
-import { finishShape, useBody, type BodyOptions } from "./internal/useBody";
+import { shapeFromResult, useBody, type BodyOptions } from "./internal/useBody";
 import { shapeToGeometry } from "./internal/shapeToGeometry";
 
 export interface UseConvexOptions extends BodyOptions {
@@ -22,9 +22,8 @@ export const useConvex = (options: UseConvexOptions) => {
       jolt.destroy(point);
 
       const result = settings.Create();
-      const shape = finishShape(result.Get());
-      result.Clear();
       jolt.destroy(settings);
+      const shape = shapeFromResult<Jolt.Shape>(result, "useConvex");
 
       return { shape, geometry: shapeToGeometry(jolt, shape) };
     },

@@ -3,8 +3,11 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { CapsuleGeometry, Mesh, Quaternion, Vector3 } from "three";
 import type Jolt from "jolt-physics";
 import { useJolt } from "./useJolt";
-import { createDebugMaterial, disposeDebugMaterial } from "./internal/debugMaterial";
-import { finishShape } from "./internal/useBody";
+import {
+  createDebugMaterial,
+  disposeDebugMaterial,
+} from "./internal/debugMaterial";
+import { shapeFromResult } from "./internal/useBody";
 import type { QuatTuple, Vec3Tuple } from "./types";
 
 const degreesToRadians = (degrees: number) => degrees * (Math.PI / 180);
@@ -142,11 +145,9 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         new jolt.CapsuleShapeSettings(halfHeight, radius),
       );
       const result = settings.Create();
-      const shape = finishShape(result.Get());
-      result.Clear();
       jolt.destroy(settings);
       jolt.destroy(offset);
-      return shape;
+      return shapeFromResult<Jolt.Shape>(result, "useCharacter");
     };
 
     const standingShape = buildShape(
@@ -332,8 +333,11 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     ) => {
       if (state.destroyed) return;
 
-      const { ignoreHorizontalMovementLock = false, addToVelocity, overrideUpdate } =
-        updateOptions;
+      const {
+        ignoreHorizontalMovementLock = false,
+        addToVelocity,
+        overrideUpdate,
+      } = updateOptions;
 
       if (crouched !== stateRef.current.crouched) {
         stateRef.current.crouched = crouched;
@@ -409,7 +413,10 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         newVelocity.copy(verticalVelocity);
       }
 
-      scratch.copy(gravity).multiplyScalar(deltaTime).applyQuaternion(upRotation);
+      scratch
+        .copy(gravity)
+        .multiplyScalar(deltaTime)
+        .applyQuaternion(upRotation);
       newVelocity.add(scratch);
 
       scratch

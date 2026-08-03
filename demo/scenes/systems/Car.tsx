@@ -101,7 +101,10 @@ const Vehicle = () => {
             wheelRefs.current[index] = node;
           }}
         >
-          <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
+          {/* No rotation of our own: `useCar` asks Jolt for the wheel transform
+              with the model's axle along +Y, which is where a three cylinder
+              already has it. Turning the mesh as well rotates it twice. */}
+          <mesh castShadow>
             <cylinderGeometry args={[0.35, 0.35, 0.28, 20]} />
             <meshStandardMaterial color="#1a1a1a" />
           </mesh>

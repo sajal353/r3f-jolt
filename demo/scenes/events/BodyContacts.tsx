@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
-import { Html } from "@react-three/drei";
+import { useFrame } from "@react-three/fiber";
+import { Hud } from "../../shared/Stage";
 import { useBox } from "@/Jolt/useBox";
 import { useSphere } from "@/Jolt/useSphere";
 import { useBodyContacts } from "@/Jolt/useBodyContacts";
@@ -79,15 +80,41 @@ const Ball = ({
   );
 };
 
-export const Contacts = () => {
+const SAMPLE_SECONDS = 0.25;
+
+/**
+ * The raw listener fires inside the step, far more often than a frame — it counts
+ * into a ref and this publishes a snapshot a few times a second.
+ */
+const Sampler = ({
+  count,
+  onSample,
+}: {
+  count: { current: number };
+  onSample: (value: number) => void;
+}) => {
+  const elapsed = useRef(0);
+
+  useFrame((_, delta) => {
+    elapsed.current += delta;
+    if (elapsed.current < SAMPLE_SECONDS) return;
+
+    elapsed.current = 0;
+    onSample(count.current);
+  });
+
+  return null;
+};
+
+export const BodyContacts = () => {
   const [balls, setBalls] = useState(() =>
     Array.from({ length: 8 }, (_, index) => ({
       id: index,
-      position: [
-        -4 + index * 1.1,
-        6 + index * 0.4,
-        Math.sin(index) * 1.5,
-      ] as [number, number, number],
+      position: [-4 + index * 1.1, 6 + index * 0.4, Math.sin(index) * 1.5] as [
+        number,
+        number,
+        number,
+      ],
     })),
   );
 
@@ -116,22 +143,11 @@ export const Contacts = () => {
           onLanded={handleLanded}
         />
       ))}
-      <Html position={[0, 8, 0]} center>
-        <div
-          style={{
-            font: "12px ui-monospace, monospace",
-            color: "#ddd",
-            background: "rgba(0,0,0,.65)",
-            padding: "4px 8px",
-            borderRadius: 4,
-            whiteSpace: "nowrap",
-          }}
-          onPointerEnter={() => setRawContacts(rawCount.current)}
-        >
-          {balls.length} balls left · {rawContacts} raw contacts (hover to
-          sample)
-        </div>
-      </Html>
+      <Sampler count={rawCount} onSample={setRawContacts} />
+
+      <Hud position={[0, 8, 0]}>
+        {balls.length} balls left · {rawContacts} raw contacts
+      </Hud>
     </>
   );
 };

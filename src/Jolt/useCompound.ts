@@ -1,13 +1,30 @@
 import type Jolt from "jolt-physics";
-import { finishShape, useBody, type BodyOptions } from "./internal/useBody";
+import { shapeFromResult, useBody, type BodyOptions } from "./internal/useBody";
 import { shapeToGeometry } from "./internal/shapeToGeometry";
 import { defaultConvexRadius } from "./useBox";
 import type { JoltModule, QuatTuple, Vec3Tuple } from "./types";
 
 export type CompoundChild =
-  | { type: "box"; position: Vec3Tuple; rotation?: QuatTuple; size: Vec3Tuple; convexRadius?: number }
-  | { type: "sphere"; position: Vec3Tuple; rotation?: QuatTuple; radius: number }
-  | { type: "capsule"; position: Vec3Tuple; rotation?: QuatTuple; height: number; radius: number }
+  | {
+      type: "box";
+      position: Vec3Tuple;
+      rotation?: QuatTuple;
+      size: Vec3Tuple;
+      convexRadius?: number;
+    }
+  | {
+      type: "sphere";
+      position: Vec3Tuple;
+      rotation?: QuatTuple;
+      radius: number;
+    }
+  | {
+      type: "capsule";
+      position: Vec3Tuple;
+      rotation?: QuatTuple;
+      height: number;
+      radius: number;
+    }
   | {
       type: "cylinder";
       position: Vec3Tuple;
@@ -24,7 +41,12 @@ export type CompoundChild =
       topRadius: number;
       bottomRadius: number;
     }
-  | { type: "convex"; position: Vec3Tuple; rotation?: QuatTuple; vertices: number[][] };
+  | {
+      type: "convex";
+      position: Vec3Tuple;
+      rotation?: QuatTuple;
+      vertices: number[][];
+    };
 
 export interface UseCompoundOptions extends BodyOptions {
   shapes: CompoundChild[];
@@ -87,28 +109,53 @@ const createChildSettings = (
   }
 };
 
-const describeInvalid = (child: CompoundChild): string | null => {
+/**
+ * Jolt refuses a shape built from a zero or negative dimension, and the whole
+ * compound fails with it — so a child is checked for a usable number, not merely
+ * a present one, and skipped before it can take the rest of the body down.
+ */
+const measures = (child: CompoundChild): Record<string, unknown> | null => {
   switch (child.type) {
     case "box":
-      return child.size ? null : "`size` is required";
+      return {
+        "size[0]": child.size?.[0],
+        "size[1]": child.size?.[1],
+        "size[2]": child.size?.[2],
+      };
     case "sphere":
-      return child.radius !== undefined ? null : "`radius` is required";
+      return { radius: child.radius };
     case "capsule":
     case "cylinder":
-      return child.height !== undefined && child.radius !== undefined
-        ? null
-        : "`height` and `radius` are required";
+      return { height: child.height, radius: child.radius };
     case "taperedCapsule":
-      return child.height !== undefined &&
-        child.topRadius !== undefined &&
-        child.bottomRadius !== undefined
-        ? null
-        : "`height`, `topRadius` and `bottomRadius` are required";
+      return {
+        height: child.height,
+        topRadius: child.topRadius,
+        bottomRadius: child.bottomRadius,
+      };
     case "convex":
-      return child.vertices?.length ? null : "`vertices` is required";
+      return {};
     default:
-      return "unknown shape type";
+      return null;
   }
+};
+
+const describeInvalid = (child: CompoundChild): string | null => {
+  const dimensions = measures(child);
+
+  if (!dimensions) return "unknown shape type";
+
+  if (child.type === "convex") {
+    return child.vertices?.length ? null : "`vertices` is required";
+  }
+
+  for (const [name, value] of Object.entries(dimensions)) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      return `\`${name}\` must be a positive number, received ${String(value)}`;
+    }
+  }
+
+  return null;
 };
 
 export const useCompound = (options: UseCompoundOptions) => {
@@ -150,12 +197,12 @@ export const useCompound = (options: UseCompoundOptions) => {
       jolt.destroy(rotation);
 
       const result = compound.Create();
-      const shape = finishShape(result.Get());
-      result.Clear();
 
       // AddShape takes a reference to each child, so destroying the compound
       // releases them. Destroying a child by hand is a double free.
       jolt.destroy(compound);
+
+      const shape = shapeFromResult<Jolt.Shape>(result, "useCompound");
 
       return { shape, geometry: shapeToGeometry(jolt, shape) };
     },

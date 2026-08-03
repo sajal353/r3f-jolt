@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { ArrowHelper, Vector3 } from "three";
 import { useFrame } from "@react-three/fiber";
-import { Html } from "@react-three/drei";
+import { Hud } from "../../shared/Stage";
 import { useBox } from "@/Jolt/useBox";
 import { useSphere } from "@/Jolt/useSphere";
 import { useClosestHitRaycaster } from "@/Jolt/useClosestHitRaycaster";
@@ -67,9 +67,7 @@ const Sweeper = () => {
 
     if (arrowRef.current) {
       arrowRef.current.position.copy(origin.current);
-      arrowRef.current.setDirection(
-        direction.current.clone().normalize(),
-      );
+      arrowRef.current.setDirection(direction.current.clone().normalize());
       arrowRef.current.setLength(hit.hit ? hit.distance : 30, 0.6, 0.3);
       arrowRef.current.setColor(hit.hit ? 0x2ecc71 : 0x777777);
     }
@@ -100,25 +98,12 @@ const Sweeper = () => {
         <sphereGeometry args={[0.12, 16, 16]} />
         <meshBasicMaterial color="#2ecc71" />
       </mesh>
-      <Html position={[0, 7, 0]} center>
-        <div
-          style={{
-            font: "12px ui-monospace, monospace",
-            color: "#ddd",
-            background: "rgba(0,0,0,.65)",
-            padding: "4px 8px",
-            borderRadius: 4,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {readout}
-        </div>
-      </Html>
+      <Hud position={[0, 7, 0]}>{readout}</Hud>
     </>
   );
 };
 
-export const Raycast = () => (
+export const ClosestHit = () => (
   <>
     <Scenery />
     <Sweeper />

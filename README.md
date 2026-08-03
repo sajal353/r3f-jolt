@@ -5,6 +5,12 @@ Jolt Physics hooks for React Three Fiber.
 [![Version](https://img.shields.io/npm/v/r3f-jolt?style=flat)](https://www.npmjs.com/package/r3f-jolt)
 [![Downloads](https://img.shields.io/npm/dt/r3f-jolt.svg?style=flat)](https://www.npmjs.com/package/r3f-jolt)
 
+Three things here have no equivalent in `@react-three/rapier` or `@react-three/cannon`, because Jolt itself provides them:
+
+- **`useCharacter`** is a full Jolt `CharacterVirtual` — stair stepping, slope limits, crouching, ground state. Rapier's character controller is far thinner; cannon has none.
+- **`useCar`** is a real `WheeledVehicleController` with an engine, transmission, differentials and anti-roll bars. Cannon's is raycast-based; rapier has no vehicle at all.
+- **`useTaperedCapsule`** exists in neither.
+
 ## Requirements
 
 | Peer                  | Range          |
@@ -103,6 +109,8 @@ useFrame(() => {
 return api ? <mesh ref={ref} geometry={api.geometry} /> : null;
 ```
 
+Once it exists, every method on it is also safe to call after the body has been killed or the world torn down — they no-op rather than reaching into a dead world. The `undefined` check is only about the first render.
+
 ### `<Physics>` renders nothing until the WASM module resolves
 
 Loading Jolt is asynchronous. `<Physics>` returns `null` until the module is ready, so its children never mount early and no hook inside it runs against a missing world. It does not suspend, so it needs no `<Suspense>` boundary — but anything of yours that *does* suspend (`useGLTF`) still needs its own.
@@ -114,6 +122,22 @@ Loading Jolt is asynchronous. `<Physics>` returns `null` until the module is rea
 ### Fixed timestep
 
 The world advances in fixed `timeStep` increments (default `1/60`) drawn from an accumulator, so simulation is independent of frame rate. At most `maxSubSteps` (default `4`) steps run per frame; beyond that the accumulator is dropped rather than spiralling. Pass `timeStep="vary"` for frame-delta stepping.
+
+### Interpolation
+
+A fixed timestep almost never lines up with the display's refresh rate: at 60 Hz physics and 144 Hz rendering, most frames have no new simulation state to show. Snapping to the last step makes a body advance on some frames and not others, which reads as judder even though the simulation itself is perfectly smooth.
+
+`interpolate` (on by default) renders each body between the last two steps instead, using the leftover accumulator as the blend factor.
+
+The cost is **one step of latency** — what you see is the world as it was up to `timeStep` seconds ago. That is invisible for scenery and physics props, but if you are drawing a crosshair on a body the player is aiming at, read `api.body.GetPosition()` directly rather than the mesh transform, or turn interpolation off:
+
+```tsx
+<Physics interpolate={false}>
+```
+
+It is forced off for `timeStep="vary"`, which already lands exactly one step on every frame and so has no gap to fill.
+
+Static bodies are never interpolated, and a body that has just been created or teleported with `setPositionAndRotation` snaps rather than sliding in from where it used to be.
 
 ### Units
 
@@ -127,6 +151,7 @@ Jolt is tuned for metres, kilograms and seconds. A 1-unit cube weighing 20 is a 
 | `paused`            | `false`           | Stops stepping; bodies stay alive                 |
 | `debug`             | `false`           | Default for every child hook's `debug`            |
 | `timeStep`          | `1/60`            | Or `"vary"` for frame-delta stepping              |
+| `interpolate`       | `true`            | Render between steps; ignored when `timeStep="vary"` |
 | `maxSubSteps`       | `4`               | Fixed steps allowed per frame                     |
 | `collisionSteps`    | `1`               | Collision sub-steps passed to `Step`              |
 | `broadPhaseLayers`  | static + moving   | See [Collision groups](#collision-groups-and-masks) |
@@ -207,19 +232,41 @@ All of them take these options and return `[ref, api]`.
 | -------------------------- | --------------------------- | -------------------------------------------------- |
 | `position`                 | —                           | `[x, y, z]`                                        |
 | `rotation`                 | `[0, 0, 0, 1]`              | Quaternion                                         |
-| `motionType`               | —                           | `"static"` or `"dynamic"`                          |
-| `mass`                     | Jolt's density-derived mass | Dynamic bodies only; ignored on static ones        |
+| `motionType`               | —                           | `"static"`, `"kinematic"` or `"dynamic"`           |
+| `mass`                     | Jolt's density-derived mass | Dynamic bodies only; ignored on the others         |
 | `material`                 | —                           | `{ friction?, restitution? }`; `0` is respected    |
 | `initialVelocity`          | —                           | `[x, y, z]`, applied at creation                   |
+| `initialAngularVelocity`   | —                           | `[x, y, z]`, applied at creation                   |
 | `debug`                    | `<Physics debug>`           | Wireframe of the real collider                     |
 | `enabled`                  | `true`                      | `false` creates the body without adding it         |
 | `userData`                 | —                           | 32-bit uint, readable in contact handlers          |
 | `shapeUserData`            | —                           | 32-bit uint, set on the shape                      |
 | `motionQuality`            | `"discrete"`                | `"linearCast"` for fast movers                     |
 | `group` / `mask` / `layer` | static/moving split         | See [Collision groups](#collision-groups-and-masks) |
+| `allowDynamicOrKinematic`  | `false`                     | Required to promote a **static** body later        |
+| `sensor`                   | `false`                     | Reports contacts, imparts no impulse               |
+| `linearDamping`            | `0.05`                      | Jolt's default; set `0` for exact impulse maths    |
+| `angularDamping`           | `0.05`                      |                                                    |
+| `gravityFactor`            | `1`                         | `0` makes a body float                             |
+| `allowSleeping`            | `true`                      |                                                    |
+| `onWake` / `onSleep`       | —                           | Delivered after the step, not from inside it       |
+| `allowedDOFs`              | all six                     | Raw `EAllowedDOFs` bit mask                        |
+| `lockRotations` / `lockTranslations` | `false`           | Ergonomic wrappers over `allowedDOFs`              |
+| `enabledRotations` / `enabledTranslations` | —         | `[x, y, z]` booleans                               |
+| `enhancedInternalEdgeRemoval` | `false`                  | Kills ghost bumps when sliding over trimesh terrain |
+| `applyGyroscopicForce`     | `false`                     | Spinning bodies precess                            |
+| `collideKinematicVsNonDynamic` | `false`                 | Lets a sensor see kinematic and static bodies      |
+| `maxLinearVelocity` / `maxAngularVelocity` | Jolt's caps | Clamps a runaway body                              |
+| `numVelocityStepsOverride` / `numPositionStepsOverride` | global | Per-body solver iterations           |
 | `bodySettingsOverride`     | —                           | `(settings) => void` before the body is created    |
 
 `userData` is **32-bit** — Jolt narrowed it from 64-bit because WebIDL could not marshal 64-bit integers. Larger ids truncate; the library warns in development.
+
+**Kinematic bodies** are moved by you, not by forces, and push dynamic bodies out of the way. Drive them with `moveKinematic` — see [Moving things by hand](#moving-things-by-hand).
+
+**DOF locks are world-space, not local-space.** Jolt changed this in 0.18.0 to match other engines. Locking rotation X locks the *world* X axis however the body happens to be oriented, which is not what most people assume.
+
+**`allowDynamicOrKinematic` cannot be added later.** A static body created without it has no `MotionProperties` at all, so nothing can promote it afterwards. `setMotionType` and `grab` refuse with a warning rather than letting Jolt corrupt memory — in a release build the assertion that catches this is compiled out.
 
 ### Shape-specific options
 
@@ -242,14 +289,128 @@ All of them take these options and return `[ref, api]`.
 
 ### Returned api
 
-| Field       | Notes                                                     |
-| ----------- | --------------------------------------------------------- |
-| `body`      | `Jolt.Body`                                               |
-| `shape`     | The created shape                                         |
-| `geometry`  | A `BufferGeometry` matching the collider, disposed on unmount |
-| `debugMesh` | The wireframe mesh, or `null`                             |
-| `kill()`    | Removes the body from the simulation without unmounting   |
-| `revive()`  | Adds it back                                              |
+`api` is `undefined` until the body exists. Once it does, every method below also no-ops if the body has been killed or the world torn down, so a handler that fires during teardown is safe.
+
+Vectors take a three `Vector3` or a `[x, y, z]` tuple; rotations take a `Quaternion` or `[x, y, z, w]`. Arguments are converted into pooled Jolt temporaries, so none of these allocate.
+
+| Field                                   | Notes                                                     |
+| --------------------------------------- | --------------------------------------------------------- |
+| `body`                                  | `Jolt.Body`                                               |
+| `shape`                                 | The **base** shape (see below)                            |
+| `geometry`                              | A `BufferGeometry` matching the collider, disposed on unmount |
+| `debugMesh`                             | The wireframe mesh, or `null`                             |
+| `kill()` / `revive()`                   | Remove from / add back to the simulation without unmounting |
+| `setEnabled(bool)`                      | The same pair, as one call                                |
+| **Forces** — Jolt spells these `Add*`   |                                                           |
+| `applyForce(force, point?)`             | Accumulates for one step                                  |
+| `applyTorque(torque)`                   |                                                           |
+| `applyForceAndTorque(force, torque)`    |                                                           |
+| `applyImpulse(impulse, point?)`         | Instant velocity change                                   |
+| `applyAngularImpulse(impulse)`          |                                                           |
+| **State**                               |                                                           |
+| `setLinearVelocity` / `setAngularVelocity` |                                                        |
+| `setVelocities(linear, angular)`        | Both in one call                                          |
+| `setPositionAndRotation(p, r, activate?)` | A **teleport** — no implied velocity                    |
+| `setMotionType(type)`                   | Refuses an illegal promotion, see above                   |
+| `setLayer(layer)` / `setGravityFactor(f)` |                                                         |
+| `sleep()` / `wake()` / `isSleeping()`   |                                                           |
+| `resetSleepTimer()`                     |                                                           |
+| **Manual control**                      | See [Picking things up](#picking-things-up)               |
+| `grab()` / `release()` / `isGrabbed()`  |                                                           |
+| `moveKinematic(p, r, deltaTime?)`       | The correct way to drive a kinematic body                 |
+| `moveTo(p, r, deltaTime?)`              | The same call, named for a grab loop                      |
+| `setScale(scale, updateMassProperties?)` | Replaces the collider with a scaled one                  |
+
+`shape` is the shape the hook built and owns. After a `setScale` the body is running on a `ScaledShape` wrapping it, so `shape` is no longer the body's own shape — read `bodyInterface.GetShape(api.body.GetID())` if you need that.
+
+## Moving things by hand
+
+There is exactly one rule, and getting it wrong is the most common way to make a physics scene feel dead:
+
+> To **move** a body under your control, use `moveKinematic`. To **teleport** it, use `setPositionAndRotation`.
+
+`setPositionAndRotation` puts the body somewhere with zero velocity. A platform moved that way carries nothing standing on it, and a body carried that way pushes nothing and drops straight down the moment you let go.
+
+`moveKinematic(target, rotation)` instead sets the velocity needed to *arrive* at the target over one step. Jolt then integrates it like any other motion, so it sweeps, pushes and collides properly — and the velocity it built up is still on the body afterwards.
+
+`deltaTime` is optional and defaults to the world's step duration, which is what makes the body land exactly on target. Pass one only to deliberately over- or undershoot, and **do not pass `useFrame`'s delta**: under a fixed timestep that is a different clock, and the error compounds rather than merely scaling — the body overshoots, the next correction is computed from the overshot position, and the drive runs away.
+
+```tsx
+const [ref, api] = useBox({ motionType: "kinematic", position: [0, 1, 0] });
+const t = useRef(0);
+
+useFrame((_, delta) => {
+  t.current += delta;
+  api?.moveKinematic([Math.sin(t.current) * 4, 1, 0], [0, 0, 0, 1]);
+});
+```
+
+## Picking things up
+
+Grabbing, carrying, resizing and throwing a body — the WebXR "pick it up" case, though nothing here is XR-specific. The library owns no input: these are the same calls a controller, a pointer or a gamepad would drive.
+
+```tsx
+const [ref, api] = useBox({ size: [1, 1, 1], position: [0, 1, 0], motionType: "dynamic", mass: 4 });
+
+// Grab: switches to kinematic, remembering what it was.
+const onSelectStart = () => api?.grab();
+
+// Carry: drive it, do not teleport it.
+useFrame(() => {
+  if (api?.isGrabbed()) api.moveTo(controllerPosition, controllerRotation);
+});
+
+// Resize while held. Jolt shapes are immutable, so this swaps the collider.
+const bigger = () => api?.setScale([1.5, 1.5, 1.5]);
+
+// Release: hands it back to the simulation.
+const onSelectEnd = () => api?.release();
+```
+
+**The throw is free.** `release()` applies no impulse. The velocity the carry accumulated is already on the body, so letting go while moving throws it in the direction of travel at the speed you were moving. If you want a stronger throw, carry faster or add an `applyImpulse` yourself.
+
+**Grabbing a static body** needs `allowDynamicOrKinematic: true` at creation. Without it `grab()` warns and does nothing.
+
+### Runtime scale
+
+Jolt shapes are immutable, so `setScale` replaces the body's collider with a `ScaledShape`. Three things follow from that:
+
+- It is **always rebuilt from the base shape**, so calls replace rather than compound: `setScale([2,2,2])` twice leaves the body at 2×, not 4×.
+- **Non-uniform scale is invalid on spheres and capsules.** `setScale([2,1,1])` on a sphere is refused with a warning naming what Jolt's `MakeScaleValid` would have suggested. Boxes, cylinders and hulls take any scale.
+- **An explicit `mass` is preserved.** `SetShape` recomputes mass from density × the new volume, silently discarding what you asked for; the hook reapplies it. Pass `setScale(s, false)` to skip the recompute entirely.
+
+Scale the collider and your mesh together — the hook mirrors the scale onto its own `debugMesh`, but your mesh is yours:
+
+```tsx
+const [scale, setScale] = useState(1);
+const resize = (next: number) => {
+  setScale(next);
+  api?.setScale([next, next, next]);
+};
+
+return <mesh ref={ref} scale={scale}>…</mesh>;
+```
+
+A `useTrimesh` body stays static however you scale it, and a negative scale component on a mesh shape flips its winding.
+
+## Sleep and wake
+
+Jolt deactivates bodies that have come to rest, and reactivates them when something disturbs them. Both are reported per body:
+
+```tsx
+const [ref, api] = useBox({
+  position: [0, 5, 0],
+  motionType: "dynamic",
+  onSleep: () => console.log("settled"),
+  onWake: () => console.log("disturbed"),
+});
+
+api?.isSleeping();
+```
+
+Handlers are read fresh on every render, so unlike the creation options they always see the current closure.
+
+Jolt reports activation from *inside* the step, where touching the world is unsafe, so events are queued and delivered right after it — the same deferral contacts use. The listener is only installed while at least one body asks for these, and `allowSleeping: false` opts a body out of sleeping entirely.
 
 ## `useCharacter`
 
@@ -308,7 +469,15 @@ Braking is independent of `driveType`. The service brake acts on all four wheels
 
 Each axle's share is split evenly between its two wheels, so the defaults give 2400 per front wheel, 600 per rear wheel, and 4000 of handbrake per rear wheel. `brakeBias: 0.5` is a balanced setup; `1` is front-only.
 
-## `useClosestHitRaycaster`
+## Raycasting
+
+Three hooks, same options and same hit shape, differing only in which hits they keep:
+
+| Hook                      | Returns              | Use it for                                        |
+| ------------------------- | -------------------- | ------------------------------------------------- |
+| `useClosestHitRaycaster`  | the nearest hit      | picking, ground checks, aiming                    |
+| `useAnyHitRaycaster`      | *a* hit, cheapest    | line of sight — "is anything in the way"          |
+| `useAllHitsRaycaster`     | every hit, nearest first | shooting through glass, listing what a beam crosses |
 
 ```tsx
 const [raycaster] = useClosestHitRaycaster();
@@ -319,9 +488,15 @@ useFrame(() => {
 });
 ```
 
-`cast(origin?, direction?)` accepts `Vector3`s or tuples and returns `{ hit, fraction, distance, point, normal, bodyID }`. `fraction` is along the ray; `distance` is `fraction × |direction|`, so the ray's length is meaningful. The result object is reused between casts.
+`cast(origin?, direction?)` accepts `Vector3`s or tuples and returns `{ hit, fraction, distance, point, normal, bodyID }`. `fraction` is along the ray; `distance` is `fraction × |direction|`, so the ray's length is meaningful.
 
-Pass `layer` to cast against something other than the moving layer.
+`useAllHitsRaycaster` returns an **array** of that shape, sorted nearest-first, and empty on a miss.
+
+Result objects and the array are reused between casts — copy anything you need to keep. Casting allocates nothing, so calling one every frame is fine.
+
+Any-hit stops at the first hit the traversal meets rather than comparing distances, which is why it is the cheapest and why the hit it reports is *not* necessarily the nearest.
+
+Pass `layer` to cast against something other than the moving layer. The default (`LAYER_MOVING`) masks both groups, so it sees static geometry too.
 
 ## Contact events
 
@@ -372,9 +547,34 @@ Returns the physics context: `Jolt` (the module), `joltInterface`, `physicsSyste
 
 The library holds no store. Transforms are written straight onto `mesh.position` / `mesh.quaternion` inside `useFrame`, never through React state — pushing 60 Hz physics data through state or context re-renders the subtree every frame, which is the single biggest performance mistake in a React physics integration. Contact events are the exception, and they are deferred to a frame boundary so `setState` is safe.
 
-## Debug colours
+## Debug rendering
 
-`debug` overlays a wireframe of the real collider. Colours come from the exported `debugColors`, so you can match them in your own UI.
+Two routes, for two different questions.
+
+### `<PhysicsDebug />` — everything in the world
+
+```tsx
+<Physics>
+  <PhysicsDebug />
+  <YourScene />
+</Physics>
+```
+
+Walks the world every frame and draws a wireframe for **every** body, including ones you created directly through `useJolt()` — which the per-hook flag cannot see, because it only knows about bodies it built itself. Reach for this when something is colliding and you cannot tell what with.
+
+Coloured by motion type rather than by shape, since it has no hook to ask:
+
+| Motion type | Colour     |
+| ----------- | ---------- |
+| `static`    | seagreen   |
+| `kinematic` | dodgerblue |
+| `dynamic`   | violet     |
+
+Override any of them with `<PhysicsDebug colors={{ static: "red" }} />`. The defaults are exported as `debugMotionColors`. Geometry is cached per shape, so a hundred bodies sharing one shape cost one `BufferGeometry` between them, and wireframes interpolate along with the bodies.
+
+### Per-hook `debug` — one body
+
+`debug` on a hook (or `<Physics debug>` for all of them) overlays a wireframe of that collider only, coloured by shape kind. Better when you are looking at one thing. Colours come from the exported `debugColors`, so you can match them in your own UI.
 
 | Hook                     | Colour                       |
 | ------------------------ | ---------------------------- |
@@ -420,6 +620,18 @@ The library holds no store. Transforms are written straight onto `mesh.position`
 
 **Memory grows over time.** Run against `jolt-physics/debug-wasm-compat`, which asserts on double frees and invalid parameters, and compare `JoltInterface.prototype.sGetFreeMemory()` across mount/unmount cycles.
 
+**A carried body pushes nothing, and drops straight down when released.** You are teleporting it with `setPositionAndRotation` instead of driving it with `moveKinematic`. See [Moving things by hand](#moving-things-by-hand).
+
+**A body driven by `moveKinematic` flies off at a wild speed.** You passed `useFrame`'s delta as `deltaTime`. Omit the argument — it defaults to the physics step, which is a different clock from the render delta.
+
+**A kinematic body passes through the static world.** It was probably given an explicit `group`/`mask` meant for a static body. Kinematic bodies default to the moving group for exactly this reason.
+
+**`setMotionType` warns and does nothing.** The body was created `static` without `allowDynamicOrKinematic: true`, so Jolt never gave it `MotionProperties`. The flag has to be set at creation.
+
+**`setScale` warns about `MakeScaleValid`.** Spheres and capsules can only scale uniformly. Pass equal components, or use a box or hull.
+
+**Meshes look smooth but the wireframes lag.** They should not — both interpolate. If you are positioning your own object from `api.body.GetPosition()`, that is the un-interpolated transform; see [Interpolation](#interpolation).
+
 ## Demo
 
 ```bash
@@ -427,7 +639,22 @@ pnpm install
 pnpm dev
 ```
 
-Scenes for shapes, character, car, raycasting and contacts, with `debug` and `paused` toggles. Switching scenes remounts the whole world, which doubles as the mount/unmount stress test.
+31 scenes in six categories, one per hook or feature:
+
+| Category         | Covers                                                                                             |
+| ---------------- | -------------------------------------------------------------------------------------------------- |
+| **Shapes**       | all 8 body hooks, one scene each                                                                   |
+| **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · motion quality |
+| **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale              |
+| **Queries**      | closest hit · any hit · all hits                                                                   |
+| **Events**       | `useBodyContacts` · `useContactListener`                                                           |
+| **Systems**      | character · car · interpolation · debug rendering                                                  |
+
+Toolbar toggles for `debug`, `<PhysicsDebug />`, `paused`, `interpolate`, and a `1/60` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
+
+Switching scenes remounts the whole world, which doubles as the mount/unmount stress test.
+
+Each scene lives in `demo/scenes/<category>/<Name>.tsx` and is written to be read — short, one idea each, commented where the behaviour is surprising rather than where the code is obvious.
 
 ## License
 

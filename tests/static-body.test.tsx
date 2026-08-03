@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { useBox } from "@/Jolt/useBox";
-import { expectNoAsserts, getApi, renderPhysics, step, unmount } from "./harness";
+import {
+  expectNoAsserts,
+  getApi,
+  renderPhysics,
+  step,
+  unmount,
+} from "./harness";
 
 const StaticBoxWithMass = () => {
   useBox({

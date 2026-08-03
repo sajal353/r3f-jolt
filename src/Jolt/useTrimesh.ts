@@ -1,6 +1,10 @@
-import type { BufferAttribute, BufferGeometry, InterleavedBufferAttribute } from "three";
+import type {
+  BufferAttribute,
+  BufferGeometry,
+  InterleavedBufferAttribute,
+} from "three";
 import type Jolt from "jolt-physics";
-import { finishShape, useBody, type BodyOptions } from "./internal/useBody";
+import { shapeFromResult, useBody, type BodyOptions } from "./internal/useBody";
 import { shapeToGeometry } from "./internal/shapeToGeometry";
 
 export type TrimeshSource =
@@ -25,7 +29,9 @@ const readSource = (mesh: TrimeshSource) => {
     "position" in mesh ? mesh.index : (mesh.getIndex()?.array ?? undefined);
 
   if (!position) {
-    throw new Error("[r3f-jolt] useTrimesh: the mesh has no position attribute");
+    throw new Error(
+      "[r3f-jolt] useTrimesh: the mesh has no position attribute",
+    );
   }
 
   return { position, index };
@@ -74,10 +80,9 @@ export const useTrimesh = (options: UseTrimeshOptions) => {
         materials,
       );
       const result = settings.Create();
-      const shape = finishShape(result.Get());
-      result.Clear();
-
       jolt.destroy(settings);
+      const shape = shapeFromResult<Jolt.Shape>(result, "useTrimesh");
+
       jolt.destroy(materials);
       jolt.destroy(triangleList);
       jolt.destroy(vertexList);

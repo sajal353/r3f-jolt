@@ -25,7 +25,10 @@ let assertHandler: Jolt.AssertFailedHandlerJS | null = null;
 
 // Built once and reused: a handler per mount would itself leak 16 bytes a cycle
 // and drown out the leak measurements these tests exist to make.
-const installAssertHandler = (settings: Jolt.JoltSettings, jolt: JoltModule) => {
+const installAssertHandler = (
+  settings: Jolt.JoltSettings,
+  jolt: JoltModule,
+) => {
   if (!assertHandler) {
     assertHandler = new jolt.AssertFailedHandlerJS();
     assertHandler.OnAssertFailed = (
@@ -66,26 +69,24 @@ export interface RenderOptions {
   strict?: boolean;
   gravity?: [number, number, number];
   timeStep?: number | "vary";
+  interpolate?: boolean;
 }
 
 export type PhysicsRenderer = Awaited<
   ReturnType<typeof ReactThreeTestRenderer.create>
 >;
 
-export const renderPhysics = async (
+const physicsTree = (
   children: ReactNode,
-  { strict = false, gravity, timeStep }: RenderOptions = {},
+  module: JoltModule,
+  { strict = false, gravity, timeStep, interpolate }: RenderOptions,
 ) => {
-  setCaptured(null);
-  takeAssertFailures();
-
-  const module = await loadDebugModule();
-
   const tree = (
     <Physics
       module={module}
       gravity={gravity}
       timeStep={timeStep}
+      interpolate={interpolate}
       settingsOverride={installAssertHandler}
     >
       <CaptureApi />
@@ -93,8 +94,36 @@ export const renderPhysics = async (
     </Physics>
   );
 
+  return strict ? <StrictMode>{tree}</StrictMode> : tree;
+};
+
+/**
+ * Re-renders inside the same `<Physics>`. `renderer.update` replaces the root,
+ * so calling it with bare children would drop the provider and throw.
+ */
+export const updatePhysics = async (
+  renderer: PhysicsRenderer,
+  children: ReactNode,
+  options: RenderOptions = {},
+) => {
+  const module = await loadDebugModule();
+
+  await ReactThreeTestRenderer.act(async () => {
+    await renderer.update(physicsTree(children, module, options));
+  });
+};
+
+export const renderPhysics = async (
+  children: ReactNode,
+  options: RenderOptions = {},
+) => {
+  setCaptured(null);
+  takeAssertFailures();
+
+  const module = await loadDebugModule();
+
   const renderer = await ReactThreeTestRenderer.create(
-    strict ? <StrictMode>{tree}</StrictMode> : tree,
+    physicsTree(children, module, options),
   );
 
   for (let attempt = 0; attempt < 20 && !capture.api; attempt += 1) {
@@ -110,14 +139,23 @@ export const renderPhysics = async (
   return renderer;
 };
 
+/**
+ * One `advanceFrames` call per frame, deliberately. Asking the test renderer for
+ * several frames at once runs each `useFrame` subscriber to completion before
+ * moving to the next, so every physics step happens before any body's callback —
+ * a body driven from `useFrame` then never sees the world respond to it. Looping
+ * restores the real frame order.
+ */
 export const step = async (
   renderer: PhysicsRenderer,
   frames = 1,
   delta = 1 / 60,
 ) => {
-  await ReactThreeTestRenderer.act(async () => {
-    await renderer.advanceFrames(frames, delta);
-  });
+  for (let frame = 0; frame < frames; frame += 1) {
+    await ReactThreeTestRenderer.act(async () => {
+      await renderer.advanceFrames(1, delta);
+    });
+  }
 };
 
 export const unmount = async (renderer: PhysicsRenderer) => {

@@ -2,116 +2,132 @@ import { Suspense, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { Physics } from "@/Jolt/Physics";
-import { Shapes } from "./scenes/Shapes";
-import { Character } from "./scenes/Character";
-import { Car } from "./scenes/Car";
-import { Raycast } from "./scenes/Raycast";
-import { Contacts } from "./scenes/Contacts";
+import { PhysicsDebug } from "@/Jolt/PhysicsDebug";
+import { categories, findScene } from "./scenes";
 
-const scenes = {
-  Shapes: {
-    Component: Shapes,
-    hint: (
-      <>
-        Every shape hook at once. Turn on <b>debug</b> to overlay the colliders
-        Jolt actually simulates.
-      </>
-    ),
-  },
-  Character: {
-    Component: Character,
-    hint: (
-      <>
-        <code>WASD</code> to move, <code>Space</code> to jump,{" "}
-        <code>Shift</code> to crouch. Movement is camera-relative — orbit, then
-        walk up the ramp or the steps.
-      </>
-    ),
-  },
-  Car: {
-    Component: Car,
-    hint: (
-      <>
-        <code>WASD</code> to drive, <code>Space</code> for handbrake,{" "}
-        <code>Shift</code> for full throttle. All-wheel drive with an anti-roll
-        bar.
-      </>
-    ),
-  },
-  Raycast: {
-    Component: Raycast,
-    hint: (
-      <>
-        A sweeping <code>useClosestHitRaycaster</code>. The readout is the hit
-        data the hook returns — body id, distance, fraction and normal.
-      </>
-    ),
-  },
-  Contacts: {
-    Component: Contacts,
-    hint: (
-      <>
-        <code>useBodyContacts</code> turns balls green on first touch and
-        removes them with <code>api.kill()</code> when they land on the red pad.
-      </>
-    ),
-  },
-} as const;
-
-type SceneName = keyof typeof scenes;
+const TIME_STEPS: { label: string; value: number | "vary" }[] = [
+  { label: "1/60", value: 1 / 60 },
+  { label: "1/15", value: 1 / 15 },
+  { label: "vary", value: "vary" },
+];
 
 const App = () => {
-  const [scene, setScene] = useState<SceneName>("Shapes");
+  const [sceneName, setSceneName] = useState(categories[0].scenes[0].name);
   const [debug, setDebug] = useState(false);
+  const [debugOverride, setDebugOverride] = useState<boolean | null>(null);
   const [paused, setPaused] = useState(false);
+  const [interpolate, setInterpolate] = useState(true);
+  const [stepOverride, setStepOverride] = useState<number | "vary" | null>(
+    null,
+  );
 
-  const { Component, hint } = scenes[scene];
+  const scene = findScene(sceneName) ?? categories[0].scenes[0];
+  const { Component, hint, hook } = scene;
+
+  // A scene states its own starting point for these; the toolbar overrides it
+  // until the next scene switch clears the override. `vary` — one step per
+  // frame — is the default because it is what most apps should ship with.
+  const globalDebug = debugOverride ?? scene.physicsDebug !== false;
+  const timeStep = stepOverride ?? scene.timeStep ?? "vary";
 
   return (
     <>
-      <div className="ui">
-        <div className="scenes">
-          {(Object.keys(scenes) as SceneName[]).map((name) => (
-            <button
-              key={name}
-              aria-pressed={name === scene}
-              onClick={() => setScene(name)}
-            >
-              {name}
-            </button>
-          ))}
+      <nav className="sidebar">
+        <div className="brand">
+          r3f-jolt<span>examples</span>
+        </div>
+
+        {categories.map((category) => (
+          <section key={category.name}>
+            <h2>{category.name}</h2>
+            {category.scenes.map((entry) => (
+              <button
+                key={entry.name}
+                aria-current={entry.name === sceneName}
+                onClick={() => {
+                  setSceneName(entry.name);
+                  setDebugOverride(null);
+                  setStepOverride(null);
+                }}
+              >
+                {entry.name}
+              </button>
+            ))}
+          </section>
+        ))}
+      </nav>
+
+      <div className="viewport">
+        <div className="toolbar">
           <button aria-pressed={debug} onClick={() => setDebug((v) => !v)}>
             debug
+          </button>
+          <button
+            aria-pressed={globalDebug}
+            onClick={() => setDebugOverride(!globalDebug)}
+          >
+            PhysicsDebug
           </button>
           <button aria-pressed={paused} onClick={() => setPaused((v) => !v)}>
             {paused ? "paused" : "running"}
           </button>
+          <button
+            aria-pressed={interpolate}
+            onClick={() => setInterpolate((v) => !v)}
+          >
+            interpolate
+          </button>
+
+          <span className="divider" />
+
+          {TIME_STEPS.map((entry) => (
+            <button
+              key={entry.label}
+              aria-pressed={timeStep === entry.value}
+              onClick={() => setStepOverride(entry.value)}
+            >
+              {entry.label}
+            </button>
+          ))}
         </div>
-        <p className="hint">{hint}</p>
+
+        <div className="caption">
+          <h1>
+            {scene.name} <code>{hook}</code>
+          </h1>
+          <p>{hint}</p>
+        </div>
+
+        <Canvas
+          shadows
+          camera={{ position: [0, 9, 20], near: 0.1, far: 500, fov: 45 }}
+        >
+          <color attach="background" args={["#111111"]} />
+          <ambientLight intensity={0.6} />
+          <directionalLight
+            position={[10, 20, 10]}
+            intensity={1.4}
+            castShadow
+            shadow-mapSize={[2048, 2048]}
+          />
+          <OrbitControls makeDefault />
+
+          {/* Keying on the scene rebuilds the whole world on every switch, which
+              is the mount/unmount stress this demo is meant to apply. */}
+          <Physics
+            key={sceneName}
+            debug={debug}
+            paused={paused}
+            interpolate={interpolate}
+            timeStep={timeStep}
+          >
+            {globalDebug && <PhysicsDebug />}
+            <Suspense fallback={null}>
+              <Component />
+            </Suspense>
+          </Physics>
+        </Canvas>
       </div>
-
-      <Canvas
-        shadows
-        camera={{ position: [0, 8, 18], near: 0.1, far: 500, fov: 45 }}
-      >
-        <color attach="background" args={["#111111"]} />
-        <ambientLight intensity={0.6} />
-        <directionalLight
-          position={[10, 20, 10]}
-          intensity={1.4}
-          castShadow
-          shadow-mapSize={[2048, 2048]}
-        />
-        <OrbitControls makeDefault />
-
-        {/* Keying on `scene` rebuilds the whole world on every switch, which is
-            the mount/unmount stress this demo is meant to apply. */}
-        <Physics key={scene} debug={debug} paused={paused}>
-          <Suspense fallback={null}>
-            <Component />
-          </Suspense>
-        </Physics>
-      </Canvas>
     </>
   );
 };

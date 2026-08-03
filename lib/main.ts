@@ -1,4 +1,5 @@
 export { Physics, type PhysicsProps } from "@/Jolt/Physics";
+export { PhysicsDebug, type PhysicsDebugProps } from "@/Jolt/PhysicsDebug";
 export { useJolt } from "@/Jolt/useJolt";
 
 export { useBox, type UseBoxOptions } from "@/Jolt/useBox";
@@ -46,11 +47,37 @@ export {
   type RaycastHit,
 } from "@/Jolt/useClosestHitRaycaster";
 
+export {
+  useAnyHitRaycaster,
+  type UseAnyHitRaycasterOptions,
+  type AnyHitRaycasterApi,
+} from "@/Jolt/useAnyHitRaycaster";
+
+export {
+  useAllHitsRaycaster,
+  type UseAllHitsRaycasterOptions,
+  type AllHitsRaycasterApi,
+} from "@/Jolt/useAllHitsRaycaster";
+
+export type { RaycasterOptions } from "@/Jolt/internal/raycast";
+
 export { useContactListener } from "@/Jolt/useContactListener";
 export { useBodyContacts } from "@/Jolt/useBodyContacts";
 
 export type { BodyOptions, BodyApi } from "@/Jolt/internal/useBody";
-export { debugColors, type DebugShapeKind } from "@/Jolt/internal/debugMaterial";
+
+/**
+ * Triangulates any Jolt shape. The body hooks hand this back as `api.geometry`;
+ * it is exported for the case where you are not using one — instancing a few
+ * thousand bodies through `useJolt()`, where a tapered capsule, a hull or a
+ * compound has no equivalent primitive in three to draw it with.
+ */
+export { shapeToGeometry } from "@/Jolt/internal/shapeToGeometry";
+export {
+  debugColors,
+  debugMotionColors,
+  type DebugShapeKind,
+} from "@/Jolt/internal/debugMaterial";
 
 export type {
   JoltApi,
@@ -58,7 +85,12 @@ export type {
   JoltInit,
   Vec3Tuple,
   QuatTuple,
+  Vec3Input,
+  QuatInput,
+  AxisTriple,
+  Temps,
   MotionType,
+  PhysicsTiming,
   BodyMaterial,
   BroadPhaseLayerConfig,
   LayerConfig,
@@ -66,4 +98,6 @@ export type {
   ContactInfo,
   ContactRegistry,
   BodyContactHandlers,
+  ActivationHandlers,
+  ActivationRegistry,
 } from "@/Jolt/types";

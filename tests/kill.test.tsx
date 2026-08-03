@@ -3,7 +3,13 @@ import { describe, expect, it } from "vitest";
 import type Jolt from "jolt-physics";
 import { useBox } from "@/Jolt/useBox";
 import type { BodyApi } from "@/Jolt/internal/useBody";
-import { expectNoAsserts, getApi, renderPhysics, step, unmount } from "./harness";
+import {
+  expectNoAsserts,
+  getApi,
+  renderPhysics,
+  step,
+  unmount,
+} from "./harness";
 
 const captured: { current?: BodyApi<Jolt.BoxShape> } = {};
 

@@ -268,7 +268,9 @@ export const createContactRegistry = (
       lastKnownUserData.clear();
 
       if (listener !== null) {
-        physicsSystem.SetContactListener(null as unknown as Jolt.ContactListener);
+        physicsSystem.SetContactListener(
+          null as unknown as Jolt.ContactListener,
+        );
         Jolt.destroy(listener);
         listener = null;
       }
