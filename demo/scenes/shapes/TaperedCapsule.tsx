@@ -1,4 +1,4 @@
-import { Floor, Tag } from "../../shared/Stage";
+import { Floor } from "../../shared/Stage";
 import { tilt } from "../../shared/helpers";
 import { useTaperedCapsule } from "@/Jolt/useTaperedCapsule";
 import type { QuatTuple } from "@/Jolt/types";
@@ -68,9 +68,5 @@ export const TaperedCapsule = () => (
       height={1}
       color="#d35400"
     />
-
-    <Tag position={[0, 9, 0]}>
-      no equivalent in rapier or cannon · equal radii is just a capsule
-    </Tag>
   </>
 );

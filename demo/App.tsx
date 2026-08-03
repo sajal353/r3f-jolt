@@ -26,7 +26,11 @@ const App = () => {
 
   // A scene states its own starting point for these; the toolbar overrides it
   // until the next scene switch clears the override. `vary` — one step per
-  // frame — is the default because it is what most apps should ship with.
+  // frame — is the default because anything driven from a `useFrame` agrees
+  // with the simulation there: `moveKinematic` is called once per render frame
+  // and times itself against the step, so at a fixed rate on a display that is
+  // not exactly 60 Hz the two diverge, and a character riding a kinematic
+  // platform slides by the difference.
   const globalDebug = debugOverride ?? scene.physicsDebug !== false;
   const timeStep = stepOverride ?? scene.timeStep ?? "vary";
 

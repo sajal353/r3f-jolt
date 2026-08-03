@@ -257,11 +257,15 @@ export const categories: Category[] = [
         name: "Motion quality",
         Component: MotionQuality,
         hook: "motionQuality",
+        // The tunnelling only happens at a step long enough to skip the pane,
+        // and `vary` on a fast display is not.
+        timeStep: 1 / 60,
         hint: (
           <>
-            Two bullets at 70 m/s into a 6 cm pane. At <code>1/60</code> that is
-            1.2 m of travel per step, so the <code>discrete</code> one is above
-            the pane on one step and below it on the next.
+            Two bullets at 70 m/s into a 6 cm pane, at a fixed{" "}
+            <code>1/60</code> — 1.2 m of travel per step, so the{" "}
+            <code>discrete</code> one is above the pane on one step and below it
+            on the next. <code>linearCast</code> sweeps the gap instead.
           </>
         ),
       },
@@ -411,12 +415,14 @@ export const categories: Category[] = [
         name: "Character",
         Component: Character,
         hook: "useCharacter",
+        physicsDebug: false,
         hint: (
           <>
             <code>WASD</code> to move, <code>Space</code> to jump,{" "}
-            <code>Shift</code> to crouch. A full Jolt{" "}
-            <code>CharacterVirtual</code> — stair stepping, slope limits, ground
-            state. Its position is its <b>feet</b>.
+            <code>Shift</code> to crouch. Green ramps are inside{" "}
+            <code>maxSlopeAngle</code> and red ones are past it — the readout
+            says which the character is on. It also climbs stairs, shoves
+            crates, and rides the platform. Its position is its <b>feet</b>.
           </>
         ),
       },
@@ -424,11 +430,12 @@ export const categories: Category[] = [
         name: "Car",
         Component: Car,
         hook: "useCar",
+        physicsDebug: false,
         hint: (
           <>
             <code>WASD</code> to drive, <code>Space</code> for handbrake,{" "}
-            <code>Shift</code> for full throttle. A real{" "}
-            <code>WheeledVehicleController</code>: engine, transmission,
+            <code>Shift</code> for full throttle, <code>R</code> to reset. A
+            real <code>WheeledVehicleController</code>: engine, transmission,
             differentials, anti-roll bars. Handbrake is rear-only; the service
             brake splits 80/20 front/rear.
           </>
@@ -462,12 +469,9 @@ export const categories: Category[] = [
             bodies, over a static trimesh, with two kinematic bodies ploughing
             through them, a sensor, a raw contact listener, all three
             raycasters, a grab/scale/throw loop, a vehicle and a character — all
-            running at the same time. The readout is live. If you switch the
-            timestep to <code>1/60</code> and bodies start jittering or sinking
-            into each other, drop it to <code>1/15</code> or go back to{" "}
-            <code>vary</code>: a frame that takes longer than one fixed step
-            leaves the world owing steps it can never catch up on, and a longer
-            step is what gives it room to.
+            running at the same time. The readout is live. Switch to a fixed{" "}
+            <code>1/60</code> and it will jitter: a frame that takes longer than
+            one step leaves the world owing steps it can never repay.
           </>
         ),
       },

@@ -276,24 +276,26 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
 
     const updateSettings = new jolt.ExtendedUpdateSettings();
 
-    if (options.enableStickToFloor) {
-      updateSettings.mStickToFloorStepDown = jolt.Vec3.prototype.sZero();
-    } else {
-      const length = updateSettings.mStickToFloorStepDown.Length();
-      updateSettings.mStickToFloorStepDown.Set(
-        -characterUp.x * length,
-        -characterUp.y * length,
-        -characterUp.z * length,
-      );
-    }
-
-    if (options.enableStairStep) {
-      const length = updateSettings.mWalkStairsStepUp.Length();
-      updateSettings.mWalkStairsStepUp.Set(
+    // Jolt switches both of these off with a zero vector, so enabling one means
+    // keeping the magnitude it was constructed with and turning it to face
+    // along the character's own up axis.
+    const alignToUp = (setting: Jolt.Vec3, sign: number) => {
+      const length = sign * setting.Length();
+      setting.Set(
         characterUp.x * length,
         characterUp.y * length,
         characterUp.z * length,
       );
+    };
+
+    if (options.enableStickToFloor) {
+      alignToUp(updateSettings.mStickToFloorStepDown, -1);
+    } else {
+      updateSettings.mStickToFloorStepDown = jolt.Vec3.prototype.sZero();
+    }
+
+    if (options.enableStairStep) {
+      alignToUp(updateSettings.mWalkStairsStepUp, 1);
     } else {
       updateSettings.mWalkStairsStepUp = jolt.Vec3.prototype.sZero();
     }

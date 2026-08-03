@@ -1,4 +1,4 @@
-import { Floor, Tag } from "../../shared/Stage";
+import { Floor } from "../../shared/Stage";
 import { tilt } from "../../shared/helpers";
 import { useCylinder } from "@/Jolt/useCylinder";
 
@@ -64,9 +64,5 @@ export const Cylinder = () => (
       radius={0.5}
       color="#d35400"
     />
-
-    <Tag position={[-3, 8.5, 0]}>topples</Tag>
-    <Tag position={[0.2, 8.5, 0]}>settles flat</Tag>
-    <Tag position={[4, 8.5, 0]}>rotated onto its side — it rolls</Tag>
   </>
 );

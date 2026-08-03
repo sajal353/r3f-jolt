@@ -1,4 +1,4 @@
-import { Floor, Tag, Wall } from "../../shared/Stage";
+import { Floor, Wall } from "../../shared/Stage";
 import { tilt } from "../../shared/helpers";
 import { useCapsule } from "@/Jolt/useCapsule";
 import type { QuatTuple } from "@/Jolt/types";
@@ -67,8 +67,6 @@ export const Capsule = () => (
       radius={0.7}
       color="#16a085"
     />
-
-    <Tag position={[0, 9, 0]}>height 2 + radius 0.3 → 2.6 tall</Tag>
 
     {/* Capsules are the shape of choice for anything that should not catch on
         seams: this one rolls down the slab and off the end rather than tipping

@@ -1,4 +1,4 @@
-import { Floor, Tag } from "../../shared/Stage";
+import { Floor } from "../../shared/Stage";
 import { tilt } from "../../shared/helpers";
 import { useConvex } from "@/Jolt/useConvex";
 import type { QuatTuple } from "@/Jolt/types";
@@ -85,10 +85,5 @@ export const Convex = () => (
       vertices={dented}
       color="#d35400"
     />
-
-    <Tag position={[3.5, 9, 0]}>
-      a centre vertex was passed too — a hull cannot be concave, so it is
-      ignored
-    </Tag>
   </>
 );

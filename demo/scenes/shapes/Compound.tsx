@@ -1,4 +1,4 @@
-import { Floor, Tag } from "../../shared/Stage";
+import { Floor } from "../../shared/Stage";
 import { tilt } from "../../shared/helpers";
 import { useCompound } from "@/Jolt/useCompound";
 import type { CompoundChild } from "@/Jolt/useCompound";
@@ -79,10 +79,5 @@ export const Compound = () => (
       shapes={withBadChild}
       color="#d35400"
     />
-
-    <Tag position={[3.5, 9, 0]}>
-      one child has radius −1 · skipped with a console error, both bars still
-      build
-    </Tag>
   </>
 );

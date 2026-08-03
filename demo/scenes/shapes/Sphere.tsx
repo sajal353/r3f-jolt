@@ -1,4 +1,4 @@
-import { Floor, Tag } from "../../shared/Stage";
+import { Floor } from "../../shared/Stage";
 import { useSphere } from "@/Jolt/useSphere";
 
 const Ball = ({
@@ -48,10 +48,5 @@ export const Sphere = () => (
       color="#27ae60"
     />
     <Ball position={[4, 8, 0]} radius={0.6} restitution={1} color="#f1c40f" />
-
-    <Tag position={[-4, 10, 0]}>0</Tag>
-    <Tag position={[-1.5, 10, 0]}>0.4</Tag>
-    <Tag position={[1.5, 10, 0]}>0.8</Tag>
-    <Tag position={[4, 10, 0]}>restitution 1</Tag>
   </>
 );

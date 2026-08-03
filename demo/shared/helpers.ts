@@ -26,6 +26,56 @@ export const tilt = (axis: Vec3Tuple, radians: number): QuatTuple => {
   ];
 };
 
+export interface RampPlacement {
+  position: Vec3Tuple;
+  rotation: QuatTuple;
+  /** The high edge, for hanging a label off or aiming the next ramp at. */
+  top: Vec3Tuple;
+}
+
+/**
+ * Places a slab so the low edge of the slope meets the floor at `foot`, at any
+ * angle. Rotating about +X drops the +z end, so a ramp is climbed from +z
+ * towards −z unless `mirror` turns it around. The sink matters: leave it out
+ * and the low edge floats half a slab above the floor, which is a lip to trip
+ * on rather than a ramp to walk up.
+ */
+export const rampPlacement = ({
+  degrees,
+  foot,
+  length,
+  x = 0,
+  thickness = 0.4,
+  mirror = false,
+}: {
+  degrees: number;
+  foot: number;
+  length: number;
+  x?: number;
+  thickness?: number;
+  mirror?: boolean;
+}): RampPlacement => {
+  const angle = degrees * (Math.PI / 180);
+  const sine = Math.sin(angle);
+  const cosine = Math.cos(angle);
+  const direction = mirror ? -1 : 1;
+
+  return {
+    position: [
+      x,
+      (length / 2) * sine - (thickness / 2) * cosine,
+      foot - direction * ((length / 2) * cosine + (thickness / 2) * sine),
+    ],
+    rotation: [
+      Math.sin((direction * angle) / 2),
+      0,
+      0,
+      Math.cos(angle / 2),
+    ],
+    top: [x, length * sine, foot - direction * length * cosine],
+  };
+};
+
 export interface Beam {
   object: Line;
   set: (from: Vector3, to: Vector3) => void;

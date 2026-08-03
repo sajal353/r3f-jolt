@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Html } from "@react-three/drei";
 import { useBox } from "@/Jolt/useBox";
+import { rampPlacement } from "./helpers";
 import type { QuatTuple } from "@/Jolt/types";
 
 export const Floor = ({
@@ -46,6 +47,55 @@ export const Wall = ({
     position,
     size,
     rotation,
+    motionType: "static",
+    material: friction === undefined ? undefined : { friction },
+  });
+
+  return (
+    <mesh ref={ref} receiveShadow>
+      <boxGeometry args={size} />
+      <meshStandardMaterial color={color} />
+    </mesh>
+  );
+};
+
+/** A static slab tilted about X, sitting flush on the floor. See `rampPlacement`. */
+export const Ramp = ({
+  degrees,
+  foot,
+  length,
+  width,
+  x = 0,
+  thickness = 0.4,
+  mirror = false,
+  friction,
+  color = "#3a3a3a",
+}: {
+  degrees: number;
+  foot: number;
+  length: number;
+  width: number;
+  x?: number;
+  thickness?: number;
+  mirror?: boolean;
+  friction?: number;
+  color?: string;
+}) => {
+  const { position, rotation } = rampPlacement({
+    degrees,
+    foot,
+    length,
+    x,
+    thickness,
+    mirror,
+  });
+
+  const size: [number, number, number] = [width, thickness, length];
+
+  const [ref] = useBox({
+    position,
+    rotation,
+    size,
     motionType: "static",
     material: friction === undefined ? undefined : { friction },
   });

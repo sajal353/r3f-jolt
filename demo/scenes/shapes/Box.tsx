@@ -1,4 +1,4 @@
-import { Floor, Tag } from "../../shared/Stage";
+import { Floor } from "../../shared/Stage";
 import { tilt } from "../../shared/helpers";
 import { useBox } from "@/Jolt/useBox";
 
@@ -49,9 +49,5 @@ export const Box = () => (
       convexRadius={0.4}
       color="#c0392b"
     />
-
-    <Tag position={[6, 8, 0]}>
-      convexRadius 0.4 — turn on <b>debug</b> to see the collider it really has
-    </Tag>
   </>
 );

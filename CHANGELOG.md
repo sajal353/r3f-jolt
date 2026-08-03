@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **`useCharacter`'s `enableStickToFloor` did the opposite of its name.** Jolt switches the feature off by zeroing `ExtendedUpdateSettings.mStickToFloorStepDown`, and the hook zeroed it when the option was `true`, restoring Jolt's default of `(0, -0.5, 0)` when it was `false`. A character walking downhill launched off the surface every step instead of being held against it, and one standing on a moving platform slid off it. Walking a character down a 25° ramp, the fix takes the frames spent off the ground from 97 in 100 to 4.
+
 ## 0.2.1
 
 Feature parity with `@react-three/rapier` and `@react-three/cannon` wherever Jolt already supported it, plus manual body control. **Purely additive** — no existing signature changed.
