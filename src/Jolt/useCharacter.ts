@@ -3,8 +3,11 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { CapsuleGeometry, Mesh, Quaternion, Vector3 } from "three";
 import type Jolt from "jolt-physics";
 import { useJolt } from "./useJolt";
-import { createDebugMaterial, disposeDebugMaterial } from "./internal/debugMaterial";
-import { finishShape } from "./internal/useBody";
+import {
+  createDebugMaterial,
+  disposeDebugMaterial,
+} from "./internal/debugMaterial";
+import { shapeFromResult } from "./internal/useBody";
 import type { QuatTuple, Vec3Tuple } from "./types";
 
 const degreesToRadians = (degrees: number) => degrees * (Math.PI / 180);
@@ -142,11 +145,9 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         new jolt.CapsuleShapeSettings(halfHeight, radius),
       );
       const result = settings.Create();
-      const shape = finishShape(result.Get());
-      result.Clear();
       jolt.destroy(settings);
       jolt.destroy(offset);
-      return shape;
+      return shapeFromResult<Jolt.Shape>(result, "useCharacter");
     };
 
     const standingShape = buildShape(
@@ -275,24 +276,26 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
 
     const updateSettings = new jolt.ExtendedUpdateSettings();
 
-    if (options.enableStickToFloor) {
-      updateSettings.mStickToFloorStepDown = jolt.Vec3.prototype.sZero();
-    } else {
-      const length = updateSettings.mStickToFloorStepDown.Length();
-      updateSettings.mStickToFloorStepDown.Set(
-        -characterUp.x * length,
-        -characterUp.y * length,
-        -characterUp.z * length,
-      );
-    }
-
-    if (options.enableStairStep) {
-      const length = updateSettings.mWalkStairsStepUp.Length();
-      updateSettings.mWalkStairsStepUp.Set(
+    // Jolt switches both of these off with a zero vector, so enabling one means
+    // keeping the magnitude it was constructed with and turning it to face
+    // along the character's own up axis.
+    const alignToUp = (setting: Jolt.Vec3, sign: number) => {
+      const length = sign * setting.Length();
+      setting.Set(
         characterUp.x * length,
         characterUp.y * length,
         characterUp.z * length,
       );
+    };
+
+    if (options.enableStickToFloor) {
+      alignToUp(updateSettings.mStickToFloorStepDown, -1);
+    } else {
+      updateSettings.mStickToFloorStepDown = jolt.Vec3.prototype.sZero();
+    }
+
+    if (options.enableStairStep) {
+      alignToUp(updateSettings.mWalkStairsStepUp, 1);
     } else {
       updateSettings.mWalkStairsStepUp = jolt.Vec3.prototype.sZero();
     }
@@ -332,8 +335,11 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     ) => {
       if (state.destroyed) return;
 
-      const { ignoreHorizontalMovementLock = false, addToVelocity, overrideUpdate } =
-        updateOptions;
+      const {
+        ignoreHorizontalMovementLock = false,
+        addToVelocity,
+        overrideUpdate,
+      } = updateOptions;
 
       if (crouched !== stateRef.current.crouched) {
         stateRef.current.crouched = crouched;
@@ -409,7 +415,10 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         newVelocity.copy(verticalVelocity);
       }
 
-      scratch.copy(gravity).multiplyScalar(deltaTime).applyQuaternion(upRotation);
+      scratch
+        .copy(gravity)
+        .multiplyScalar(deltaTime)
+        .applyQuaternion(upRotation);
       newVelocity.add(scratch);
 
       scratch

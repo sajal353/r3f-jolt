@@ -9,7 +9,7 @@ Where this library is going, and why. Jolt Physics exposes far more than `r3f-jo
 | Release   | Contents                                                                                                                                                                                                                                                                      |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **0.2.0** | React 19 / R3F 9 / jolt-physics 1.1, a large batch of bug, leak and lifecycle fixes, contact events, reworked demo, rewritten docs, first tests                                                                                                                               |
-| **0.2.1** | Feature parity with `@react-three/rapier` and `@react-three/cannon` where Jolt already supports it — kinematic bodies, sensors, damping, DOF locks, sleep control, any/all raycasts, an imperative force/impulse api, interpolation, a global debug renderer. Purely additive |
+| **0.2.1** | Everything Jolt already supported that the hooks had not yet reached — kinematic bodies, sensors, damping, DOF locks, sleep control, any/all raycasts, an imperative force/impulse api, interpolation, a global debug renderer. Purely additive |
 | **0.3.0** | Foundations — constraints + motors, instancing, auto-colliders, shape/point queries, before/after-step hooks                                                                                                                                                                  |
 | **0.4.0** | Character & water systems — ragdolls (active + passive), skinned-model binding, water volumes with flow, soft bodies & cloth                                                                                                                                                  |
 | **0.5.0** | Advanced vehicles, destruction & dynamic worlds, determinism / save-load / netcode                                                                                                                                                                                            |
@@ -29,7 +29,7 @@ Where this library is going, and why. Jolt Physics exposes far more than `r3f-jo
 
 ### Constraints — the single biggest functional gap
 
-Both competitors ship 6–7 joint hooks. r3f-jolt has **none**, though Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, Path, Pulley, Gear and RackAndPinion. No ragdoll, door, chain or lift is buildable today.
+Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, Path, Pulley, Gear and RackAndPinion. r3f-jolt exposes **none** of them, so no ragdoll, door, chain or lift is buildable today.
 
 - [ ] `useFixedConstraint`
 - [ ] `usePointConstraint`
@@ -57,12 +57,12 @@ Both competitors ship 6–7 joint hooks. r3f-jolt has **none**, though Jolt supp
 - [ ] `SpecifiedBroadPhaseLayerFilter` alongside the default filters, for querying one specific broadphase layer
 - [ ] `OrientedBox.OverlapsAABox` / `OverlapsOrientedBox` exposed as cheap CPU-side overlap helpers
 - [ ] Sensor/intersection events (`onIntersectionEnter`/`Exit`) building on 0.2.1's `sensor`
-- [ ] Contact force payload (`totalForceMagnitude`, `maxForceDirection`) from the manifold, as rapier's `onContactForce`
+- [ ] Contact force payload (`totalForceMagnitude`, `maxForceDirection`) read from the manifold, so a consumer can tell a scrape from an impact
 
 ### Shapes
 
-- [ ] `usePlane` → `PlaneShapeSettings(plane, material?, halfExtent?)` — an infinite ground plane, the most common static collider there is. Cannon ships `usePlane`; we have no equivalent
-- [ ] Heightfield hook → `HeightFieldShapeSettings` (both competitors have one)
+- [ ] `usePlane` → `PlaneShapeSettings(plane, material?, halfExtent?)` — an infinite ground plane, the most common static collider there is, and today it has to be faked with a very wide box
+- [ ] Heightfield hook → `HeightFieldShapeSettings` — terrain without paying trimesh cost
 - [ ] Tapered-cylinder hook → `TaperedCylinderShapeSettings` (upstream's name; also how you get a cone)
 - [ ] `EmptyShape` → `EmptyShapeSettings` — a body with no collision, for markers and attachment points
 - [ ] Shape `scale` support at creation → `ScaledShapeSettings` (runtime `api.setScale` ships earlier, in 0.2.1)
@@ -74,19 +74,19 @@ Both competitors ship 6–7 joint hooks. r3f-jolt has **none**, though Jolt supp
 
 ### Ergonomics
 
-- [ ] Auto-collider generation from a wrapped mesh — rapier's headline feature. Today geometry args must be duplicated between hook and JSX (`size: [100, 0.01, 100]` _and_ `<boxGeometry args={[100, 0.01, 100]} />`)
-- [ ] Instanced bodies (rapier `InstancedRigidBodies`, cannon `api.at(index)`)
+- [ ] Auto-collider generation from a wrapped mesh. Today geometry args must be duplicated between hook and JSX (`size: [100, 0.01, 100]` _and_ `<boxGeometry args={[100, 0.01, 100]} />`), and the two can drift apart silently
+- [ ] Instanced bodies — one hook driving an `InstancedMesh`, with per-instance access by index
 - [ ] Batch body add/remove — `AddBodiesPrepare` / `AddBodiesFinalize` / `AddBodiesAbort` / `RemoveBodies`. The supported way to spawn or despawn many bodies at once; adding them one at a time re-walks the broadphase each time. Instanced bodies should be built on this rather than looping `AddBody`
-- [ ] Per-body collision filtering via `mCollisionGroup` + a rapier-style `interactionGroups()` helper, layered on 0.2.0's configurable object layers
+- [ ] Per-body collision filtering via `mCollisionGroup` + an `interactionGroups()` helper for building the group/mask pair, layered on 0.2.0's configurable object layers
 - [ ] `updatePriority` prop (the `-1` step priority is hard-coded in 0.2.0)
 - [ ] `updateLoop: "follow" | "independent"`, manual stepping, `frameloop="demand"` support
 
 ### World configuration
 
 - [ ] `maxBodies` / `maxBodyPairs` / `maxContactConstraints` on `Physics` — `JoltSettings` defaults are hard-coded, so consumers hit a body cap they cannot raise
-- [ ] Solver settings passthrough (`PhysicsSettings`), as rapier exposes `numSolverIterations` et al.
-- [ ] Multithreaded simulation guidance — the entry point is already selectable via 0.2.0's injected `module` prop, so what remains is `JoltSettings.mMaxWorkerThreads` plumbing plus honest docs on the COOP/COEP headers it requires (cannon offloads to a worker instead; we stay main-thread by default)
-- [ ] Typedoc API site + hosted examples (both competitors have both)
+- [ ] Solver settings passthrough (`PhysicsSettings`) — velocity/position iteration counts and the rest, currently fixed at Jolt's defaults
+- [ ] Multithreaded simulation guidance — the entry point is already selectable via 0.2.0's injected `module` prop, so what remains is `JoltSettings.mMaxWorkerThreads` plumbing plus honest docs on the COOP/COEP headers it requires. Main-thread by default
+- [ ] Typedoc API site + hosted examples
 
 ---
 

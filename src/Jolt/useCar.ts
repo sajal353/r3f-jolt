@@ -11,8 +11,11 @@ import {
 import type Jolt from "jolt-physics";
 import { useJolt } from "./useJolt";
 import { shapeToGeometry } from "./internal/shapeToGeometry";
-import { createDebugMaterial, disposeDebugMaterial } from "./internal/debugMaterial";
-import { finishShape } from "./internal/useBody";
+import {
+  createDebugMaterial,
+  disposeDebugMaterial,
+} from "./internal/debugMaterial";
+import { shapeFromResult } from "./internal/useBody";
 import type { QuatTuple, Vec3Tuple } from "./types";
 
 export interface CarInput {
@@ -147,9 +150,8 @@ export const useCar = (options: UseCarOptions) => {
     jolt.destroy(centreOfMassOffset);
 
     const shapeResult = carShapeSettings.Create();
-    const carShape = finishShape(shapeResult.Get());
-    shapeResult.Clear();
     jolt.destroy(carShapeSettings);
+    const carShape = shapeFromResult<Jolt.Shape>(shapeResult, "useCar");
 
     const bodyPosition = new jolt.RVec3(position[0], position[1], position[2]);
     const bodyRotation = new jolt.Quat(
@@ -194,10 +196,26 @@ export const useCar = (options: UseCarOptions) => {
     }
 
     const wheelPositions: Vec3Tuple[] = [
-      [vehicleSize.width / 2, -wheelSettings.offsetDown, wheelSettings.offsetForward],
-      [-vehicleSize.width / 2, -wheelSettings.offsetDown, wheelSettings.offsetForward],
-      [vehicleSize.width / 2, -wheelSettings.offsetDown, -wheelSettings.offsetForward],
-      [-vehicleSize.width / 2, -wheelSettings.offsetDown, -wheelSettings.offsetForward],
+      [
+        vehicleSize.width / 2,
+        -wheelSettings.offsetDown,
+        wheelSettings.offsetForward,
+      ],
+      [
+        -vehicleSize.width / 2,
+        -wheelSettings.offsetDown,
+        wheelSettings.offsetForward,
+      ],
+      [
+        vehicleSize.width / 2,
+        -wheelSettings.offsetDown,
+        -wheelSettings.offsetForward,
+      ],
+      [
+        -vehicleSize.width / 2,
+        -wheelSettings.offsetDown,
+        -wheelSettings.offsetForward,
+      ],
     ];
 
     const wheels: Jolt.WheelSettingsWV[] = [];
@@ -255,7 +273,8 @@ export const useCar = (options: UseCarOptions) => {
       addDifferential(BL_WHEEL, BR_WHEEL, 1);
     }
 
-    controllerSettings.mDifferentialLimitedSlipRatio = frontBackLimitedSlipRatio;
+    controllerSettings.mDifferentialLimitedSlipRatio =
+      frontBackLimitedSlipRatio;
     vehicleSettings.mController = controllerSettings;
 
     if (antiRollbar) {

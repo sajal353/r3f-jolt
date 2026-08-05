@@ -1,6 +1,6 @@
 import type initJolt from "jolt-physics/wasm-compat";
 import type Jolt from "jolt-physics";
-import type { Vector3 } from "three";
+import type { Quaternion, Vector3 } from "three";
 
 export type JoltModule = Awaited<ReturnType<typeof initJolt>>;
 
@@ -10,7 +10,26 @@ export type Vec3Tuple = [number, number, number];
 
 export type QuatTuple = [number, number, number, number];
 
-export type MotionType = "static" | "dynamic";
+export type MotionType = "static" | "kinematic" | "dynamic";
+
+export type Vec3Input = Vec3Tuple | Vector3;
+
+export type QuatInput = QuatTuple | Quaternion;
+
+/** Per-axis switches, ordered x, y, z. */
+export type AxisTriple = [boolean, boolean, boolean];
+
+/**
+ * Scratch Jolt objects shared by the whole world. Every accessor returns a
+ * borrowed object that the caller must neither store nor destroy — see
+ * `internal/temps.ts` for how long one stays valid.
+ */
+export interface Temps {
+  vec3: (value: Vec3Input) => Jolt.Vec3;
+  rvec3: (value: Vec3Input) => Jolt.RVec3;
+  quat: (value: QuatInput) => Jolt.Quat;
+  destroy: () => void;
+}
 
 export interface BodyMaterial {
   friction?: number;
@@ -63,9 +82,47 @@ export interface BodyContactHandlers {
   onExit?: (contact: ContactInfo) => void;
 }
 
+/**
+ * Live clock for the world, mutated in place by `<Physics>` each frame. Read
+ * fields at the moment you need them rather than destructuring once.
+ */
+export interface PhysicsTiming {
+  /**
+   * Seconds the most recent step covered — the configured `timeStep`, or the
+   * clamped frame delta when stepping `"vary"`. Anything deriving a velocity
+   * from a target transform needs *this*, not `useFrame`'s render delta, which
+   * is a different clock whenever the timestep is fixed.
+   */
+  stepDelta: number;
+  /** Monotonic step count. A change means the world advanced since last frame. */
+  stepCount: number;
+  /**
+   * How far the renderer is between the previous step and the current one, 0…1
+   * — the accumulator remainder over `timeStep`. Always 0 when interpolation is
+   * off or the timestep varies.
+   */
+  alpha: number;
+  /** Whether `<Physics interpolate>` is on. */
+  interpolate: boolean;
+}
+
+export interface ActivationHandlers {
+  onWake?: () => void;
+  onSleep?: () => void;
+}
+
+export interface ActivationRegistry {
+  addBodyListener: (bodyID: number, handlers: ActivationHandlers) => () => void;
+  flush: () => void;
+  destroy: () => void;
+}
+
 export interface ContactRegistry {
   addListener: (handlers: ContactHandlers) => () => void;
-  addBodyListener: (bodyID: number, handlers: BodyContactHandlers) => () => void;
+  addBodyListener: (
+    bodyID: number,
+    handlers: BodyContactHandlers,
+  ) => () => void;
   subscribe: (callback: () => void) => () => void;
   getSnapshot: () => number;
   flush: () => void;
@@ -87,6 +144,9 @@ export interface JoltApi {
   };
   objectLayer: (group: number, mask: number) => number;
   contacts: ContactRegistry;
+  activation: ActivationRegistry;
+  temps: Temps;
+  timing: PhysicsTiming;
   debug: boolean;
   /**
    * React unmounts a parent's effects before its children's, so `<Physics>`

@@ -3,12 +3,16 @@ import { useFrame } from "@react-three/fiber";
 import initJolt from "jolt-physics/wasm-compat";
 import type Jolt from "jolt-physics";
 import { joltContext } from "./context";
+import { createActivationRegistry } from "./internal/activation";
 import { createContactRegistry } from "./internal/contacts";
+import { createTemps } from "./internal/temps";
 import type {
   BroadPhaseLayerConfig,
   JoltApi,
   JoltInit,
   JoltModule,
+  PhysicsTiming,
+  Temps,
   Vec3Tuple,
 } from "./types";
 
@@ -39,6 +43,13 @@ export interface PhysicsProps {
   paused?: boolean;
   debug?: boolean;
   timeStep?: number | "vary";
+  /**
+   * Render bodies between physics steps instead of snapping to the last one.
+   * Costs one step of latency and is what stops a fixed timestep looking juddery
+   * whenever the frame rate is not a multiple of it. Ignored when `timeStep` is
+   * `"vary"`, which already lands a step on every frame.
+   */
+  interpolate?: boolean;
   maxSubSteps?: number;
   collisionSteps?: number;
   broadPhaseLayers?: BroadPhaseLayerConfig[];
@@ -53,6 +64,7 @@ export const Physics = ({
   paused = false,
   debug = false,
   timeStep = 1 / 60,
+  interpolate = true,
   maxSubSteps = 4,
   collisionSteps = 1,
   broadPhaseLayers = DEFAULT_BROAD_PHASE,
@@ -62,6 +74,15 @@ export const Physics = ({
 }: PhysicsProps) => {
   const [world, setWorld] = useState<Omit<JoltApi, "debug"> | null>(null);
   const accumulatorRef = useRef(0);
+
+  // One mutable clock for the world, handed to every consumer by reference so a
+  // body reads this frame's values rather than the ones captured at mount.
+  const timingRef = useRef<PhysicsTiming>({
+    stepDelta: typeof timeStep === "number" ? timeStep : 1 / 60,
+    stepCount: 0,
+    alpha: 0,
+    interpolate: false,
+  });
 
   // The world is built once; changing these after mount is a remount (`key`).
   const [mount] = useState(() => ({
@@ -77,6 +98,8 @@ export const Physics = ({
       jolt: JoltModule;
       joltInterface: Jolt.JoltInterface;
       contacts: ReturnType<typeof createContactRegistry>;
+      activation: ReturnType<typeof createActivationRegistry>;
+      temps: Temps;
       state: { disposed: boolean; destroyed: boolean };
     } | null = null;
 
@@ -115,16 +138,20 @@ export const Physics = ({
       const bodyInterface = physicsSystem.GetBodyInterface();
       const state = { disposed: false, destroyed: false };
       const contacts = createContactRegistry(jolt, physicsSystem);
+      const activation = createActivationRegistry(jolt, physicsSystem);
+      const temps = createTemps(jolt);
 
       const objectLayer = (group: number, mask: number) =>
         jolt.ObjectLayerPairFilterMask.prototype.sGetObjectLayer(group, mask);
 
-      created = { jolt, joltInterface, contacts, state };
+      created = { jolt, joltInterface, contacts, activation, temps, state };
 
       if (cancelled) {
         state.disposed = true;
         state.destroyed = true;
         contacts.destroy();
+        activation.destroy();
+        temps.destroy();
         jolt.destroy(joltInterface);
         created = null;
         return;
@@ -145,6 +172,9 @@ export const Physics = ({
         groups: { GROUP_NON_MOVING, GROUP_MOVING },
         objectLayer,
         contacts,
+        activation,
+        temps,
+        timing: timingRef.current,
         state,
       });
     };
@@ -163,20 +193,38 @@ export const Physics = ({
         queueMicrotask(() => {
           world.state.destroyed = true;
           world.contacts.destroy();
+          world.activation.destroy();
+          world.temps.destroy();
           world.jolt.destroy(world.joltInterface);
         });
       }
     };
   }, [mount]);
 
+  // A fixed step is known from the prop and stays correct while paused; a
+  // varying one is only knowable per frame, so the step callback owns that case.
+  // Interpolation needs a fixed step to have anything to interpolate between:
+  // `"vary"` already lands exactly one step on every frame.
+  useEffect(() => {
+    const timing = timingRef.current;
+
+    if (typeof timeStep === "number") {
+      timing.stepDelta = timeStep;
+      timing.interpolate = interpolate;
+    } else {
+      timing.interpolate = false;
+      timing.alpha = 0;
+    }
+  }, [timeStep, interpolate]);
+
   const [gravityX, gravityY, gravityZ] = gravity;
 
   useEffect(() => {
     if (!world) return;
 
-    const vector = new world.Jolt.Vec3(gravityX, gravityY, gravityZ);
-    world.physicsSystem.SetGravity(vector);
-    world.Jolt.destroy(vector);
+    world.physicsSystem.SetGravity(
+      world.temps.vec3([gravityX, gravityY, gravityZ]),
+    );
   }, [world, gravityX, gravityY, gravityZ]);
 
   // Priority -1 runs the step before every body's default-priority sync, so
@@ -185,8 +233,13 @@ export const Physics = ({
   useFrame((_, delta) => {
     if (!world || world.state.disposed || paused) return;
 
+    const timing = timingRef.current;
+
     if (timeStep === "vary") {
-      world.joltInterface.Step(Math.min(delta, 1 / 30), collisionSteps);
+      const varyingStep = Math.min(delta, 1 / 30);
+      timing.stepDelta = varyingStep;
+      world.joltInterface.Step(varyingStep, collisionSteps);
+      timing.stepCount += 1;
     } else {
       accumulatorRef.current += delta;
 
@@ -200,9 +253,13 @@ export const Physics = ({
       if (steps === maxSubSteps) {
         accumulatorRef.current = 0;
       }
+
+      timing.stepCount += steps;
+      timing.alpha = timing.interpolate ? accumulatorRef.current / timeStep : 0;
     }
 
     world.contacts.flush();
+    world.activation.flush();
   }, -1);
 
   const value = useMemo(

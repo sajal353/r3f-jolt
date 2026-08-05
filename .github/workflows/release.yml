@@ -108,6 +108,12 @@ jobs:
             echo "published=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # Before the publish, so a version that forgot its changelog entry fails
+      # here rather than leaving a published version with no release to tag.
+      - name: Extract the release notes
+        if: steps.check.outputs.published == 'false'
+        run: node scripts/changelog-section.mjs > /tmp/release-notes.md
+
       - if: steps.check.outputs.published == 'false'
         run: pnpm run build
 
@@ -115,12 +121,12 @@ jobs:
         if: steps.check.outputs.published == 'false'
         run: npm publish --tag latest
 
-      - name: Tag and draft the GitHub release
+      - name: Tag and publish the GitHub release
         if: steps.check.outputs.published == 'false'
         run: |
           gh release create "v${{ steps.version.outputs.version }}" \
             --title "v${{ steps.version.outputs.version }}" \
-            --generate-notes \
+            --notes-file /tmp/release-notes.md \
             --target "${{ github.sha }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

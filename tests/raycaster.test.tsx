@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import { Vector3 } from "three";
 import { useBox } from "@/Jolt/useBox";
 import { useClosestHitRaycaster } from "@/Jolt/useClosestHitRaycaster";
-import type { ClosestHitRaycasterApi, RaycastHit } from "@/Jolt/useClosestHitRaycaster";
+import type {
+  ClosestHitRaycasterApi,
+  RaycastHit,
+} from "@/Jolt/useClosestHitRaycaster";
 import {
   expectNoAsserts,
   loadDebugModule,

@@ -1,6 +1,6 @@
 {
   "name": "r3f-jolt",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Jolt Physics Hooks for React-Three-Fiber",
   "keywords": [
@@ -36,7 +36,7 @@
   "files": [
     "dist"
   ],
-  "packageManager": "pnpm@10.20.0",
+  "packageManager": "pnpm@11.19.0",
   "scripts": {
     "dev": "vite -c vite.demo.config.ts",
     "build": "tsc -b && vite build",
