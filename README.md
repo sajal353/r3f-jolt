@@ -5,12 +5,6 @@ Jolt Physics hooks for React Three Fiber.
 [![Version](https://img.shields.io/npm/v/r3f-jolt?style=flat)](https://www.npmjs.com/package/r3f-jolt)
 [![Downloads](https://img.shields.io/npm/dt/r3f-jolt.svg?style=flat)](https://www.npmjs.com/package/r3f-jolt)
 
-Three things here have no equivalent in `@react-three/rapier` or `@react-three/cannon`, because Jolt itself provides them:
-
-- **`useCharacter`** is a full Jolt `CharacterVirtual` — stair stepping, slope limits, crouching, ground state. Rapier's character controller is far thinner; cannon has none.
-- **`useCar`** is a real `WheeledVehicleController` with an engine, transmission, differentials and anti-roll bars. Cannon's is raycast-based; rapier has no vehicle at all.
-- **`useTaperedCapsule`** exists in neither.
-
 ## Requirements
 
 | Peer                  | Range          |
@@ -161,7 +155,7 @@ Jolt is tuned for metres, kilograms and seconds. A 1-unit cube weighing 20 is a 
 
 ## Collision groups and masks
 
-Jolt object layers are built from a **group** and a **mask**, which map directly onto rapier's `interactionGroups` and cannon's `collisionFilterGroup` / `collisionFilterMask`.
+Jolt object layers are built from a **group** and a **mask**: what a body *is*, and what it is willing to collide with.
 
 ```tsx
 const PLAYER = 1 << 2;
@@ -179,7 +173,7 @@ useCapsule({
 
 Two bodies collide when each one's group appears in the other's mask. Omit `group`/`mask` and bodies use the default static/moving split. `layer` sets a raw object layer if you have built one yourself.
 
-> **Group and mask are 16 bits each**, not 32 — the object layer packs them as `(mask << 16) | group`, so you get 16 collision groups. Porting a 32-bit rapier `interactionGroups` value will silently lose the high half.
+> **Group and mask are 16 bits each**, not 32 — the object layer packs them as `(mask << 16) | group`, so you get 16 collision groups. A 32-bit filter value brought in from elsewhere silently loses its high half.
 
 Broad-phase layers are configured on `<Physics>`, one entry per layer:
 

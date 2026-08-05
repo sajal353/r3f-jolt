@@ -103,8 +103,8 @@ export interface BodyOptions {
  * method additionally no-ops once the body is killed or the world is disposed,
  * which those consumers cannot see.
  *
- * Jolt spells the force family `Add*`; the rapier/cannon-familiar `apply*`
- * names are used here and map one-to-one.
+ * Jolt spells the force family `Add*`; these are named `apply*` and map
+ * one-to-one onto it.
  */
 export interface BodyApi<S extends Jolt.Shape> {
   body: Jolt.Body;

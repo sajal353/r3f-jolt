@@ -220,8 +220,11 @@ canvas {
   padding: 4px 8px;
   white-space: nowrap;
   user-select: none;
-  /* These float over the scene, so without this they swallow the drags and
-     clicks meant for the bodies underneath them. */
+  /* drei positions this element itself, so it is the one floating over the
+     canvas — which is why the class goes on `Html` rather than on a div inside
+     it. A label that takes the pointer stops pointermove reaching the canvas,
+     and anything driven from the pointer ray, such as a body being carried in
+     `GrabAndScale`, freezes on the last ray until the pointer clears it. */
   pointer-events: none;
 }
 

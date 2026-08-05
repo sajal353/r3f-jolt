@@ -116,8 +116,8 @@ export const Hud = ({
   position?: [number, number, number];
   children: ReactNode;
 }) => (
-  <Html position={position} center>
-    <div className="hud">{children}</div>
+  <Html position={position} center className="hud">
+    {children}
   </Html>
 );
 
@@ -129,7 +129,7 @@ export const Tag = ({
   position: [number, number, number];
   children: ReactNode;
 }) => (
-  <Html position={position} center>
-    <div className="tag">{children}</div>
+  <Html position={position} center className="tag">
+    {children}
   </Html>
 );

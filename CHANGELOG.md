@@ -1,14 +1,8 @@
 # Changelog
 
-## Unreleased
-
-### Fixed
-
-- **`useCharacter`'s `enableStickToFloor` did the opposite of its name.** Jolt switches the feature off by zeroing `ExtendedUpdateSettings.mStickToFloorStepDown`, and the hook zeroed it when the option was `true`, restoring Jolt's default of `(0, -0.5, 0)` when it was `false`. A character walking downhill launched off the surface every step instead of being held against it, and one standing on a moving platform slid off it. Walking a character down a 25° ramp, the fix takes the frames spent off the ground from 97 in 100 to 4.
-
 ## 0.2.1
 
-Feature parity with `@react-three/rapier` and `@react-three/cannon` wherever Jolt already supported it, plus manual body control. **Purely additive** — no existing signature changed.
+Everything Jolt already supported that the hooks had not yet reached, plus manual control over a body. **Purely additive** — no existing signature changed.
 
 ### Kinematic bodies
 
@@ -20,7 +14,7 @@ Feature parity with `@react-three/rapier` and `@react-three/cannon` wherever Jol
 
 `applyForce` · `applyTorque` · `applyForceAndTorque` · `applyImpulse` · `applyAngularImpulse` · `setLinearVelocity` · `setAngularVelocity` · `setVelocities` · `setPositionAndRotation` · `setMotionType` · `setLayer` · `setGravityFactor` · `sleep` · `wake` · `isSleeping` · `setEnabled` · `resetSleepTimer`
 
-- Jolt spells the force family `Add*`; the rapier/cannon-familiar `apply*` names are used here and map one-to-one.
+- Jolt spells the force family `Add*`; these are named `apply*` and map one-to-one onto it.
 - All of them take a three `Vector3`/`Quaternion` or a tuple, and convert into pooled Jolt temporaries — **no allocation per call**, so they are safe in a `useFrame`.
 - All of them no-op once the body is killed or the world is disposed.
 - `setMotionType` **refuses** to promote a static body created without `allowDynamicOrKinematic` and warns instead. Jolt asserts on this in a debug build; a release build corrupts memory quietly.
@@ -61,6 +55,7 @@ DOF locks are **world**-space, not local-space — Jolt changed this in 0.18.0 t
 
 ### Fixes
 
+- **`useCharacter`'s `enableStickToFloor` did the opposite of its name.** Jolt switches the feature off by zeroing `ExtendedUpdateSettings.mStickToFloorStepDown`, and the hook zeroed it when the option was `true`, restoring Jolt's default of `(0, -0.5, 0)` when it was `false`. A character walking downhill launched off the surface every step instead of being held against it, and one standing on a moving platform slid off it. Walking a character down a 25° ramp, the fix takes the frames spent off the ground from 97 in 100 to 4.
 - **`useCompound` no longer crashes on an invalid child.** A dimension was only checked for being _present_, so `radius: -1` reached Jolt, `Create()` failed, and the failed `ShapeResult` was dereferenced. Children are now checked for a positive finite number and skipped with a console error, as documented.
 - **A failed `ShapeResult` is never dereferenced.** Every shape built through settings — compound, convex, tapered capsule, trimesh, character, car — reads its result through one guard that raises a JS error carrying Jolt's own reason. A release build previously corrupted memory here instead of asserting.
 - **A box's `convexRadius` is now visible in debug.** Jolt's triangulation reports the sharp box whatever the radius, so the debug mesh gets purpose-built geometry for the real rounded collider. The `geometry` the hook returns is unchanged: it is still a plain `BoxGeometry`, and the debug version is built lazily, only when `debug` is on.
@@ -124,7 +119,7 @@ Measured with `JoltInterface.prototype.sGetFreeMemory()` across mount/unmount cy
 ### New
 
 - **Contact events.** `useBodyContacts(body, { onEnter, onStay, onExit })` filters by body, copies data out of the manifold while it is valid, and defers delivery to a frame boundary so `setState` is safe. `useContactListener(handlers)` gives raw in-step access. Jolt permits one contact listener per system; the library multiplexes many subscribers onto it. `useJolt().contacts` exposes `subscribe`/`getSnapshot` for `useSyncExternalStore` or an external store.
-- **Collision groups and masks** — `group`, `mask` and `layer` on every body hook, plus `broadPhaseLayers` on `<Physics>`, mapping onto rapier's `interactionGroups` and cannon's filter pair. Note that group and mask are 16 bits each.
+- **Collision groups and masks** — `group`, `mask` and `layer` on every body hook, plus `broadPhaseLayers` on `<Physics>`. Two bodies collide when each one's group appears in the other's mask. Note that group and mask are 16 bits each.
 - **Swappable Jolt build** — `<Physics module={…}>` or `<Physics init={…}>` selects the WASM, multithreaded, asm or debug build. This is what makes `jolt-physics` being a peer dependency coherent.
 - **`<Physics>` props**: `paused`, `debug` (a default for every child hook), `timeStep` (fixed-step accumulator, default `1/60`) with `maxSubSteps` and `collisionSteps`, and `settingsOverride` for `mMaxBodies` / `mMaxWorkerThreads` / assertion handlers.
 - **Body options**: `enabled`, `userData`, `shapeUserData`, `motionQuality`, and `convexRadius` where the shape supports it.

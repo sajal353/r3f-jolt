@@ -111,8 +111,8 @@ export const categories: Category[] = [
         hook: "useTaperedCapsule",
         hint: (
           <>
-            Different radius at each end — cones, teardrops, bullets. Neither
-            rapier nor cannon has an equivalent. The mesh uses{" "}
+            Different radius at each end — cones, teardrops, bullets. There is
+            no three primitive for it, so the mesh uses{" "}
             <code>api.geometry</code>, the collider's own triangulation.
           </>
         ),
