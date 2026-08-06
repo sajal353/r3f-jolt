@@ -233,3 +233,32 @@ canvas {
   color: #a9a9a9;
   background: rgba(0, 0, 0, 0.55);
 }
+
+.scene-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.scene-controls button {
+  border: 1px solid var(--line);
+  background: rgba(23, 23, 23, 0.92);
+  color: #c6c6c6;
+  border-radius: 6px;
+  padding: 7px 14px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.scene-controls button:hover {
+  border-color: #4a4a4a;
+  color: var(--text);
+}
+
+.scene-controls button[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #111;
+}

@@ -339,6 +339,48 @@ useFrame((_, delta) => {
 });
 ```
 
+## `useConveyor` — belts, walkways and turntables
+
+A conveyor belt is a body whose *surface* moves while the body stays where it is. Jolt applies this per contact, so it drags only what is actually resting on it.
+
+```tsx
+const [ref, api] = useBox({
+  position: [0, 0.25, 0],
+  size: [3, 0.5, 20],
+  motionType: "static",
+  material: { friction: 1 },
+});
+
+const belt = useConveyor(api, { linear: [0, 0, -5] });
+
+// later
+belt?.setLinear([0, 0, 5]);
+belt?.stop();
+```
+
+`linear` is metres per second and `angular` is radians per second about the body's centre of mass — an `angular`-only belt is a turntable. Both default to zero.
+
+`space` decides how those vectors are read. The default `"local"` rotates them by the belt's own rotation, so a belt laid down at an angle carries along itself; `"world"` takes them as given.
+
+Options are read at mount like every other hook. The returned api is what changes a running belt, and is `undefined` until the body exists.
+
+For a belt that never changes speed, skip the hook and declare it on the body:
+
+```tsx
+useBox({
+  // …
+  surfaceVelocity: { linear: [0, 0, -5] },
+});
+```
+
+Both routes share one record per body, so a hook on a body that already declared `surfaceVelocity` takes over that belt rather than fighting it.
+
+Three things worth knowing:
+
+- **Friction does the dragging.** A belt with `friction: 0` carries nothing, and a light crate on a slow belt slips before it grips.
+- **Sleeping bodies report no contacts at all**, so a crate that dozed off on a stopped belt would never notice it start. `wake` handles this and is on by default; turn it off only if you are managing activation yourself.
+- **A `useCharacter` is not carried.** `CharacterVirtual` runs its own contact listener, and Jolt's character contact settings have no surface-velocity field to write.
+
 ## Picking things up
 
 Grabbing, carrying, resizing and throwing a body — the WebXR "pick it up" case, though nothing here is XR-specific. The library owns no input: these are the same calls a controller, a pointer or a gamepad would drive.
@@ -633,18 +675,18 @@ pnpm install
 pnpm dev
 ```
 
-31 scenes in six categories, one per hook or feature:
+35 scenes in six categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
 | **Shapes**       | all 8 body hooks, one scene each                                                                   |
 | **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · motion quality |
-| **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale              |
+| **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale · conveyor    |
 | **Queries**      | closest hit · any hit · all hits                                                                   |
 | **Events**       | `useBodyContacts` · `useContactListener`                                                           |
-| **Systems**      | character · car · interpolation · debug rendering                                                  |
+| **Systems**      | character · car · interpolation · debug rendering · stress test · instancing                        |
 
-Toolbar toggles for `debug`, `<PhysicsDebug />`, `paused`, `interpolate`, and a `1/60` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
+Toolbar toggles for `<PhysicsDebug />`, `paused`, `interpolate`, and a `1/60` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 
 Switching scenes remounts the whole world, which doubles as the mount/unmount stress test.
 

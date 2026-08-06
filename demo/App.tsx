@@ -13,7 +13,6 @@ const TIME_STEPS: { label: string; value: number | "vary" }[] = [
 
 const App = () => {
   const [sceneName, setSceneName] = useState(categories[0].scenes[0].name);
-  const [debug, setDebug] = useState(false);
   const [debugOverride, setDebugOverride] = useState<boolean | null>(null);
   const [paused, setPaused] = useState(false);
   const [interpolate, setInterpolate] = useState(true);
@@ -63,9 +62,6 @@ const App = () => {
 
       <div className="viewport">
         <div className="toolbar">
-          <button aria-pressed={debug} onClick={() => setDebug((v) => !v)}>
-            debug
-          </button>
           <button
             aria-pressed={globalDebug}
             onClick={() => setDebugOverride(!globalDebug)}
@@ -120,7 +116,6 @@ const App = () => {
               is the mount/unmount stress this demo is meant to apply. */}
           <Physics
             key={sceneName}
-            debug={debug}
             paused={paused}
             interpolate={interpolate}
             timeStep={timeStep}

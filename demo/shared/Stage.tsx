@@ -133,3 +133,20 @@ export const Tag = ({
     {children}
   </Html>
 );
+
+/**
+ * Buttons a scene owns, sitting in the world like a `Tag`. Unlike `Hud` and
+ * `Tag` these are meant to be clicked, so the class leaves pointer events on —
+ * the wrapper drei positions is 0×0, so only the buttons take the pointer.
+ */
+export const Controls = ({
+  position,
+  children,
+}: {
+  position: [number, number, number];
+  children: ReactNode;
+}) => (
+  <Html position={position} center className="scene-controls">
+    {children}
+  </Html>
+);

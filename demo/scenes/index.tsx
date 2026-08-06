@@ -19,6 +19,7 @@ import { GravityFactor } from "./bodies/GravityFactor";
 import { LayersAndMasks } from "./bodies/LayersAndMasks";
 import { MotionQuality } from "./bodies/MotionQuality";
 
+import { Conveyor } from "./control/Conveyor";
 import { ForcesAndImpulses } from "./control/ForcesAndImpulses";
 import { Velocities } from "./control/Velocities";
 import { Teleport } from "./control/Teleport";
@@ -336,6 +337,21 @@ export const categories: Category[] = [
           </>
         ),
       },
+      {
+        name: "Conveyor",
+        Component: Conveyor,
+        hook: "useConveyor",
+        physicsDebug: false,
+        hint: (
+          <>
+            A surface that drags what rests on it while the body stays put. The
+            circuit reverses as one line because every belt carries the same{" "}
+            <i>local</i> velocity and differs only in placement; the blue belt is
+            turned a full 90°, and the disc uses <code>angular</code> alone.
+            Friction does the dragging, so a frictionless belt carries nothing.
+          </>
+        ),
+      },
     ],
   },
   {
@@ -467,7 +483,8 @@ export const categories: Category[] = [
           <>
             All seven dynamic shape hooks spawning continuously to a cap of 1500
             bodies, over a static trimesh, with two kinematic bodies ploughing
-            through them, a sensor, a raw contact listener, all three
+            through them, a conveyor belt dragging whatever lands on it towards
+            the far wall, a sensor, a raw contact listener, all three
             raycasters, a grab/scale/throw loop, a vehicle and a character — all
             running at the same time. The readout is live. Switch to a fixed{" "}
             <code>1/60</code> and it will jitter: a frame that takes longer than

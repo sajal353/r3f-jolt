@@ -4,8 +4,10 @@ import {
   BufferGeometry,
   Line,
   LineBasicMaterial,
+  Matrix4,
+  Quaternion,
+  Vector3,
   type ColorRepresentation,
-  type Vector3,
 } from "three";
 import type { QuatTuple, Vec3Tuple } from "@/Jolt/types";
 
@@ -73,6 +75,49 @@ export const rampPlacement = ({
       Math.cos(angle / 2),
     ],
     top: [x, length * sine, foot - direction * length * cosine],
+  };
+};
+
+export interface BeltPlacement {
+  position: Vec3Tuple;
+  rotation: QuatTuple;
+  length: number;
+}
+
+/**
+ * Lays a belt between two deck points at any pitch, oriented so its **local −Z**
+ * runs from `from` towards `to`. Every belt in a circuit can then carry the same
+ * local `[0, 0, -speed]` and differ only by placement, which is what makes one
+ * sign flip reverse a whole line.
+ *
+ * The belt spans exactly `from` to `to`, so neighbouring pieces butt together
+ * when their endpoints meet rather than clipping into each other.
+ *
+ * Local **−X** is the outward side of a circuit walked `nw → ne → se → sw`.
+ */
+export const beltPlacement = (
+  from: Vec3Tuple,
+  to: Vec3Tuple,
+): BeltPlacement => {
+  const travel = new Vector3(to[0] - from[0], to[1] - from[1], to[2] - from[2]);
+  const length = travel.length();
+
+  const zAxis = travel.clone().normalize().negate();
+  const xAxis = new Vector3(0, 1, 0).cross(zAxis).normalize();
+  const yAxis = zAxis.clone().cross(xAxis).normalize();
+
+  const rotation = new Quaternion().setFromRotationMatrix(
+    new Matrix4().makeBasis(xAxis, yAxis, zAxis),
+  );
+
+  return {
+    position: [
+      (from[0] + to[0]) / 2,
+      (from[1] + to[1]) / 2,
+      (from[2] + to[2]) / 2,
+    ],
+    rotation: [rotation.x, rotation.y, rotation.z, rotation.w],
+    length,
   };
 };
 

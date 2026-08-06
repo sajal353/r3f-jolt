@@ -58,6 +58,8 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 - [ ] `OrientedBox.OverlapsAABox` / `OverlapsOrientedBox` exposed as cheap CPU-side overlap helpers
 - [ ] Sensor/intersection events (`onIntersectionEnter`/`Exit`) building on 0.2.1's `sensor`
 - [ ] Contact force payload (`totalForceMagnitude`, `maxForceDirection`) read from the manifold, so a consumer can tell a scrape from an impact
+- [x] `useConveyor` → `ContactSettings.mRelativeLinearSurfaceVelocity` / `mRelativeAngularSurfaceVelocity` — belts, moving walkways and turntables, with `setLinear` / `setAngular` for runtime control
+- [x] `surfaceVelocity` on the body hooks — the same belt declared at mount, for one that never changes speed
 
 ### Shapes
 
@@ -152,6 +154,7 @@ The shared foundation for ragdolls _and_ skinned cloth. Its own module because b
 - [ ] `CharacterID` exposed, so a character stays identifiable after removal and character-vs-character collisions resolve deterministically
 - [ ] `HasCollidedWith` / `HasCollidedWithCharacter` / `GetActiveContacts` on the returned api
 - [ ] Full `CharacterContactListener` callback set — the current hook wires only `OnAdjustBodyVelocity`, `OnContactValidate`, `OnContactAdded` and `OnContactSolve`; jolt 0.32.0 added `OnContactPersisted`, `OnContactRemoved` and the four `OnCharacterContact*` variants
+- [ ] Carry a character on a conveyor belt. `CharacterContactSettings` has no surface-velocity field, so 0.3.0's `useConveyor` does not reach characters; the route is `OnContactSolve`'s `ioNewCharacterVelocity`
 
 ### Character-vs-character collision
 

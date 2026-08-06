@@ -82,6 +82,23 @@ export interface BodyContactHandlers {
   onExit?: (contact: ContactInfo) => void;
 }
 
+/** Mutate in place to change the belt; the registry reads it inside the step. */
+export interface SurfaceVelocity {
+  linear: Vector3;
+  angular: Vector3;
+  space: "local" | "world";
+}
+
+/**
+ * Jolt solves one relative velocity per contact, so a body has one record and
+ * later callers share it: `source` may be a record someone else registered, and
+ * `release` is then a no-op.
+ */
+export interface SurfaceVelocityHandle {
+  source: SurfaceVelocity;
+  release: () => void;
+}
+
 /**
  * Live clock for the world, mutated in place by `<Physics>` each frame. Read
  * fields at the moment you need them rather than destructuring once.
@@ -94,7 +111,6 @@ export interface PhysicsTiming {
    * is a different clock whenever the timestep is fixed.
    */
   stepDelta: number;
-  /** Monotonic step count. A change means the world advanced since last frame. */
   stepCount: number;
   /**
    * How far the renderer is between the previous step and the current one, 0…1
@@ -102,7 +118,6 @@ export interface PhysicsTiming {
    * off or the timestep varies.
    */
   alpha: number;
-  /** Whether `<Physics interpolate>` is on. */
   interpolate: boolean;
 }
 
@@ -123,6 +138,10 @@ export interface ContactRegistry {
     bodyID: number,
     handlers: BodyContactHandlers,
   ) => () => void;
+  addSurfaceVelocity: (
+    bodyID: number,
+    source: SurfaceVelocity,
+  ) => SurfaceVelocityHandle;
   subscribe: (callback: () => void) => () => void;
   getSnapshot: () => number;
   flush: () => void;

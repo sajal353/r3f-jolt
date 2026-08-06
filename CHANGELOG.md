@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0
+
+### Conveyor belts
+
+- **`useConveyor(api, options)`** turns a body's surface into a belt: whatever rests on it is dragged along while the body itself stays put. `linear` for walkways and belts, `angular` for turntables, and `setLinear` / `setAngular` / `stop` on the returned api for changing a belt while it runs.
+- **`surfaceVelocity` on the body hooks** declares the same thing at mount, for a belt whose speed never changes. Both routes share one record per body.
+- `space: "local"` (the default) rotates the velocity by the belt's own rotation, so a belt laid at an angle carries along itself rather than along world axes.
+- `wake` — on by default — starts the bodies resting on a belt when it begins moving. Without it a crate that had gone to sleep on a stopped belt would never notice, because a sleeping body reports no contacts at all.
+- A `useCharacter` is **not** carried: Jolt's character contact settings have no surface-velocity field.
+
+### Fixes
+
+- Contact `onExit` no longer reports `userData: 0` for a body whose partner's listener had just unmounted. The cleanup cleared the remembered-userData entry under the listener's own id, but that map is keyed by the *other* body in a contact. The map is now bounded instead of pruned under the wrong key.
+
 ## 0.2.1
 
 Everything Jolt already supported that the hooks had not yet reached, plus manual control over a body. **Purely additive** — no existing signature changed.

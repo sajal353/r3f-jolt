@@ -16,6 +16,7 @@ import { useCar } from "@/Jolt/useCar";
 import { useCharacter } from "@/Jolt/useCharacter";
 import { useBodyContacts } from "@/Jolt/useBodyContacts";
 import { useContactListener } from "@/Jolt/useContactListener";
+import { useConveyor } from "@/Jolt/useConveyor";
 import { useClosestHitRaycaster } from "@/Jolt/useClosestHitRaycaster";
 import { useAnyHitRaycaster } from "@/Jolt/useAnyHitRaycaster";
 import { useAllHitsRaycaster } from "@/Jolt/useAllHitsRaycaster";
@@ -329,6 +330,31 @@ const Ridges = () => {
   );
 };
 
+const BELT_SIZE: Vec3Tuple = [5, 0.4, 12];
+
+/**
+ * A belt down one side, clear of the kinematic `Sweeper`'s lane. Surface
+ * velocity is resolved per contact, so this is the one part of the arena whose
+ * cost tracks how much debris has piled onto it rather than the body count.
+ */
+const ConveyorFloor = () => {
+  const [ref, api] = useBox({
+    position: [14, 0.2, 2],
+    size: BELT_SIZE,
+    motionType: "static",
+    material: { friction: 1 },
+  });
+
+  useConveyor(api, { linear: [0, 0, -6] });
+
+  return (
+    <mesh ref={ref} receiveShadow>
+      <boxGeometry args={BELT_SIZE} />
+      <meshStandardMaterial color="#16a085" />
+    </mesh>
+  );
+};
+
 const Arena = () => (
   <>
     <Floor size={ARENA} friction={0.7} />
@@ -337,6 +363,7 @@ const Arena = () => (
     <Wall position={[-ARENA / 2, 2, 0]} size={[1, 4, ARENA]} />
     <Wall position={[ARENA / 2, 2, 0]} size={[1, 4, ARENA]} />
     <Ridges />
+    <ConveyorFloor />
   </>
 );
 

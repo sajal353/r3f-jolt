@@ -63,6 +63,11 @@ export type { RaycasterOptions } from "@/Jolt/internal/raycast";
 
 export { useContactListener } from "@/Jolt/useContactListener";
 export { useBodyContacts } from "@/Jolt/useBodyContacts";
+export {
+  useConveyor,
+  type UseConveyorOptions,
+  type ConveyorApi,
+} from "@/Jolt/useConveyor";
 
 export type { BodyOptions, BodyApi } from "@/Jolt/internal/useBody";
 
@@ -97,6 +102,8 @@ export type {
   ContactHandlers,
   ContactInfo,
   ContactRegistry,
+  SurfaceVelocity,
+  SurfaceVelocityHandle,
   BodyContactHandlers,
   ActivationHandlers,
   ActivationRegistry,

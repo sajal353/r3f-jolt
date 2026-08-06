@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
-import { Mesh, type BufferGeometry } from "three";
+import { Mesh, Vector3, type BufferGeometry } from "three";
 import type Jolt from "jolt-physics";
 import { useJolt } from "../useJolt";
 import { syncObject } from "./syncObject";
@@ -68,6 +68,11 @@ export interface BodyOptions {
    */
   allowDynamicOrKinematic?: boolean;
   sensor?: boolean;
+  surfaceVelocity?: {
+    linear?: Vec3Tuple;
+    angular?: Vec3Tuple;
+    space?: "local" | "world";
+  };
   linearDamping?: number;
   angularDamping?: number;
   gravityFactor?: number;
@@ -809,6 +814,23 @@ export const useBody = <S extends Jolt.Shape>(
       },
     );
   }, [api, bodyApi, wantsActivationEvents, activationHandlers]);
+
+  const surfaceVelocity = mount.options.surfaceVelocity;
+
+  useEffect(() => {
+    if (!bodyApi || !surfaceVelocity) return;
+
+    const handle = api.contacts.addSurfaceVelocity(
+      bodyApi.body.GetID().GetIndexAndSequenceNumber(),
+      {
+        linear: new Vector3(...(surfaceVelocity.linear ?? [0, 0, 0])),
+        angular: new Vector3(...(surfaceVelocity.angular ?? [0, 0, 0])),
+        space: surfaceVelocity.space ?? "local",
+      },
+    );
+
+    return handle.release;
+  }, [api, bodyApi, surfaceVelocity]);
 
   useFrame(() => {
     if (!bodyApi || !aliveRef.current) return;

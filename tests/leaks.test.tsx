@@ -5,6 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { useCar } from "@/Jolt/useCar";
 import { useCharacter } from "@/Jolt/useCharacter";
 import { useBox } from "@/Jolt/useBox";
+import { useConveyor } from "@/Jolt/useConveyor";
 import {
   expectNoAsserts,
   loadDebugModule,
@@ -72,6 +73,33 @@ const Car = () => {
   return null;
 };
 
+const Conveyor = () => {
+  const [, api] = useBox({
+    size: [10, 1, 10],
+    position: [0, 0.5, 0],
+    motionType: "static",
+    material: { friction: 1 },
+  });
+
+  const conveyor = useConveyor(api, { linear: [3, 0, 0] });
+  const frame = useRef(0);
+
+  useFrame(() => {
+    frame.current += 1;
+    conveyor?.setLinear([frame.current % 2 === 0 ? 3 : -3, 0, 0]);
+  });
+
+  useBox({
+    size: [1, 1, 1],
+    position: [0, 2, 0],
+    motionType: "dynamic",
+    mass: 5,
+    material: { friction: 1 },
+  });
+
+  return null;
+};
+
 const cycles = async (element: React.ReactElement, frames: number) => {
   const module = await loadDebugModule();
 
@@ -112,6 +140,12 @@ describe("mount/unmount leak checks", () => {
 
   it("useCar leaves the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<Car />, 30);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useConveyor leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<Conveyor />, 60);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });
