@@ -6,6 +6,15 @@ import { useCar } from "@/Jolt/useCar";
 import { useCharacter } from "@/Jolt/useCharacter";
 import { useBox } from "@/Jolt/useBox";
 import { useConveyor } from "@/Jolt/useConveyor";
+import { useFixedConstraint } from "@/Jolt/useFixedConstraint";
+import { usePointConstraint } from "@/Jolt/usePointConstraint";
+import { useHingeConstraint } from "@/Jolt/useHingeConstraint";
+import { useSliderConstraint } from "@/Jolt/useSliderConstraint";
+import { useDistanceConstraint } from "@/Jolt/useDistanceConstraint";
+import { useConeConstraint } from "@/Jolt/useConeConstraint";
+import { useSwingTwistConstraint } from "@/Jolt/useSwingTwistConstraint";
+import { useSixDOFConstraint } from "@/Jolt/useSixDOFConstraint";
+import type { Vec3Tuple } from "@/Jolt/types";
 import {
   expectNoAsserts,
   loadDebugModule,
@@ -100,6 +109,91 @@ const Conveyor = () => {
   return null;
 };
 
+const useJointedPair = () => {
+  const [, anchor] = useBox({
+    size: [0.4, 0.4, 0.4],
+    position: [0, 6, 0],
+    motionType: "static",
+  });
+  const [, hanging] = useBox({
+    size: [1, 1, 1],
+    position: [0, 4, 0],
+    motionType: "dynamic",
+    mass: 5,
+  });
+
+  return { anchor, hanging };
+};
+
+/**
+ * `AddConstraint` takes the only reference, so a missing `Release` — or a
+ * `destroy` where a `Release` belongs — shows up here and nowhere else: there is
+ * no `GetNumConstraints` to count against.
+ */
+const Joints = () => {
+  const { anchor, hanging } = useJointedPair();
+  const point: Vec3Tuple = [0, 5, 0];
+
+  useFixedConstraint(anchor, hanging);
+  usePointConstraint(anchor, hanging, { point });
+  useHingeConstraint(anchor, hanging, {
+    point,
+    hingeAxis: [0, 0, 1],
+    normalAxis: [1, 0, 0],
+    limits: { min: -0.5, max: 0.5 },
+    limitsSpring: { frequency: 5, damping: 0.5 },
+    motor: { state: "velocity", targetAngularVelocity: 1, maxTorqueLimit: 500 },
+  });
+  useSliderConstraint(anchor, hanging, {
+    point,
+    sliderAxis: [1, 0, 0],
+    normalAxis: [0, 1, 0],
+    limits: { min: -1, max: 1 },
+    motor: { state: "position", targetPosition: 0.5 },
+  });
+  useDistanceConstraint(anchor, hanging, { point, maxDistance: 3 });
+  useConeConstraint(anchor, hanging, {
+    point,
+    twistAxis: [0, 1, 0],
+    halfConeAngle: 0.4,
+  });
+  useSwingTwistConstraint(anchor, hanging, {
+    position: point,
+    twistAxis: [0, 1, 0],
+    planeAxis: [1, 0, 0],
+    normalHalfConeAngle: 0.3,
+    swingMotor: { state: "velocity", maxTorqueLimit: 100 },
+    targetAngularVelocity: [0, 1, 0],
+  });
+  useSixDOFConstraint(anchor, hanging, {
+    position: point,
+    axes: {
+      translationX: { limits: { min: -1, max: 1 }, maxFriction: 2 },
+      translationY: { limits: "fixed" },
+      rotationZ: {
+        limits: "free",
+        motor: { state: "velocity", maxTorqueLimit: 50 },
+      },
+    },
+    targetAngularVelocity: [0, 0, 1],
+  });
+
+  return null;
+};
+
+const DebuggedJoint = () => {
+  const { anchor, hanging } = useJointedPair();
+
+  useHingeConstraint(anchor, hanging, {
+    point: [0, 5, 0],
+    hingeAxis: [0, 0, 1],
+    normalAxis: [1, 0, 0],
+    debug: true,
+  });
+
+  return null;
+};
+
 const cycles = async (element: React.ReactElement, frames: number) => {
   const module = await loadDebugModule();
 
@@ -146,6 +240,18 @@ describe("mount/unmount leak checks", () => {
 
   it("useConveyor leaves the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<Conveyor />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("all eight constraint hooks leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<Joints />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("a debug-drawn constraint leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<DebuggedJoint />, 60);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });

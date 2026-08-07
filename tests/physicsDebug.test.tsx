@@ -1,9 +1,10 @@
 import { useEffect } from "react";
 import { useThree } from "@react-three/fiber";
 import { describe, expect, it } from "vitest";
-import { Mesh, MeshBasicMaterial } from "three";
+import { LineSegments, Mesh, MeshBasicMaterial } from "three";
 import type { Scene } from "three";
 import { useBox } from "@/Jolt/useBox";
+import { useHingeConstraint } from "@/Jolt/useHingeConstraint";
 import { PhysicsDebug } from "@/Jolt/PhysicsDebug";
 import { useJolt } from "@/Jolt/useJolt";
 import { debugMotionColors } from "@/Jolt/internal/debugMaterial";
@@ -49,6 +50,47 @@ const wireframeMaterial = (mesh: Mesh) => {
   }
 
   return material;
+};
+
+const jointLines = () => {
+  if (!held.scene) throw new Error("scene was never captured");
+  return held.scene.children.filter(
+    (child): child is LineSegments => child instanceof LineSegments,
+  );
+};
+
+const drawnJointVertices = () => {
+  const [lines] = jointLines();
+  if (!lines) return 0;
+  return lines.geometry.drawRange.count;
+};
+
+const Jointed = ({ joints }: { joints: number }) => {
+  const [, anchor] = useBox({
+    size: [0.4, 0.4, 0.4],
+    position: [0, 6, 0],
+    motionType: "static",
+  });
+  const [, arm] = useBox({
+    size: [1, 1, 1],
+    position: [1.5, 6, 0],
+    motionType: "dynamic",
+    mass: 5,
+  });
+
+  useHingeConstraint(joints > 0 ? anchor : undefined, arm, {
+    point: [0, 6, 0],
+    hingeAxis: [0, 0, 1],
+    normalAxis: [1, 0, 0],
+  });
+
+  useHingeConstraint(joints > 1 ? anchor : undefined, arm, {
+    point: [0, 6, 0],
+    hingeAxis: [0, 1, 0],
+    normalAxis: [1, 0, 0],
+  });
+
+  return null;
 };
 
 const Hooked = () => {
@@ -278,6 +320,78 @@ describe("PhysicsDebug", () => {
     for (let i = 0; i < 3; i += 1) await run();
 
     expect(module.JoltInterface.prototype.sGetFreeMemory()).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("draws the joints the hooks created", async () => {
+    const renderer = await renderPhysics(
+      <>
+        <CaptureScene />
+        <Jointed joints={1} />
+        <PhysicsDebug />
+      </>,
+    );
+
+    await step(renderer, 2);
+
+    // Three segments per joint: centre → anchor → anchor → centre.
+    expect(drawnJointVertices()).toBe(6);
+
+    await updatePhysics(
+      renderer,
+      <>
+        <CaptureScene />
+        <Jointed joints={2} />
+        <PhysicsDebug />
+      </>,
+    );
+    await step(renderer, 2);
+
+    expect(drawnJointVertices()).toBe(12);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("draws nothing once a joint unmounts, and not at all when switched off", async () => {
+    const renderer = await renderPhysics(
+      <>
+        <CaptureScene />
+        <Jointed joints={1} />
+        <PhysicsDebug />
+      </>,
+    );
+
+    await step(renderer, 2);
+    expect(drawnJointVertices()).toBe(6);
+
+    await updatePhysics(
+      renderer,
+      <>
+        <CaptureScene />
+        <Jointed joints={0} />
+        <PhysicsDebug />
+      </>,
+    );
+    await step(renderer, 2);
+
+    expect(drawnJointVertices()).toBe(0);
+
+    await unmount(renderer);
+    expectNoAsserts();
+
+    const plain = await renderPhysics(
+      <>
+        <CaptureScene />
+        <Jointed joints={1} />
+        <PhysicsDebug constraints={false} />
+      </>,
+    );
+
+    await step(plain, 2);
+    expect(jointLines()).toHaveLength(0);
+
+    await unmount(plain);
     expectNoAsserts();
   });
 });

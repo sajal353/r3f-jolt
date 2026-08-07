@@ -4,6 +4,7 @@ import initJolt from "jolt-physics/wasm-compat";
 import type Jolt from "jolt-physics";
 import { joltContext } from "./context";
 import { createActivationRegistry } from "./internal/activation";
+import { createConstraintRegistry } from "./internal/constraints";
 import { createContactRegistry } from "./internal/contacts";
 import { createTemps } from "./internal/temps";
 import type {
@@ -99,6 +100,7 @@ export const Physics = ({
       joltInterface: Jolt.JoltInterface;
       contacts: ReturnType<typeof createContactRegistry>;
       activation: ReturnType<typeof createActivationRegistry>;
+      constraints: ReturnType<typeof createConstraintRegistry>;
       temps: Temps;
       state: { disposed: boolean; destroyed: boolean };
     } | null = null;
@@ -139,18 +141,28 @@ export const Physics = ({
       const state = { disposed: false, destroyed: false };
       const contacts = createContactRegistry(jolt, physicsSystem);
       const activation = createActivationRegistry(jolt, physicsSystem);
+      const constraints = createConstraintRegistry();
       const temps = createTemps(jolt);
 
       const objectLayer = (group: number, mask: number) =>
         jolt.ObjectLayerPairFilterMask.prototype.sGetObjectLayer(group, mask);
 
-      created = { jolt, joltInterface, contacts, activation, temps, state };
+      created = {
+        jolt,
+        joltInterface,
+        contacts,
+        activation,
+        constraints,
+        temps,
+        state,
+      };
 
       if (cancelled) {
         state.disposed = true;
         state.destroyed = true;
         contacts.destroy();
         activation.destroy();
+        constraints.destroy();
         temps.destroy();
         jolt.destroy(joltInterface);
         created = null;
@@ -173,6 +185,7 @@ export const Physics = ({
         objectLayer,
         contacts,
         activation,
+        constraints,
         temps,
         timing: timingRef.current,
         state,
@@ -194,6 +207,7 @@ export const Physics = ({
           world.state.destroyed = true;
           world.contacts.destroy();
           world.activation.destroy();
+          world.constraints.destroy();
           world.temps.destroy();
           world.jolt.destroy(world.joltInterface);
         });

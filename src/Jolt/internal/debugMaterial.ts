@@ -1,4 +1,4 @@
-import { MeshBasicMaterial } from "three";
+import { LineBasicMaterial, MeshBasicMaterial } from "three";
 import type { MotionType } from "../types";
 
 export const debugColors = {
@@ -25,17 +25,23 @@ export type DebugShapeKind = keyof typeof debugColors;
  * need `DEBUG_RENDER_ORDER`: without depth writes, anything drawn afterwards
  * would paint straight over them.
  */
-const overlay = {
-  wireframe: true,
+const asOverlay = {
   depthTest: false,
   depthWrite: false,
   toneMapped: false,
 } as const;
 
+const overlay = { wireframe: true, ...asOverlay } as const;
+
 export const DEBUG_RENDER_ORDER = 1000;
 
 export const createDebugMaterial = (kind: DebugShapeKind) =>
   new MeshBasicMaterial({ color: debugColors[kind], ...overlay });
+
+export const debugConstraintColor = "gold";
+
+export const createConstraintDebugMaterial = () =>
+  new LineBasicMaterial({ color: debugConstraintColor, ...asOverlay });
 
 /**
  * `<PhysicsDebug />` draws bodies it did not create, so it has no shape kind to

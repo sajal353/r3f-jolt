@@ -9,6 +9,10 @@ import {
 } from "./internal/debugMaterial";
 import { shapeToGeometry } from "./internal/shapeToGeometry";
 import {
+  createConstraintDebugLines,
+  type ConstraintDebugLines,
+} from "./internal/constraintDebug";
+import {
   createTransformTracker,
   type TransformTracker,
 } from "./internal/interpolate";
@@ -18,6 +22,12 @@ import type { MotionType } from "./types";
 export interface PhysicsDebugProps {
   /** Wireframe colour per motion type. Any omitted key keeps its default. */
   colors?: Partial<Record<MotionType, string>>;
+  /**
+   * Draw the joints as well as the bodies. Only constraints created by the
+   * hooks are known — Jolt exposes no way to enumerate a world's constraints,
+   * so one built by hand through `useJolt()` cannot be drawn.
+   */
+  constraints?: boolean;
 }
 
 interface TrackedBody {
@@ -35,6 +45,7 @@ interface DebugState {
   tracked: Map<number, TrackedBody>;
   materials: Record<MotionType, MeshBasicMaterial>;
   ids: Jolt.BodyIDVector;
+  joints: ConstraintDebugLines | null;
   acquire: (pointer: number, shape: Jolt.Shape) => BufferGeometry;
   release: (pointer: number) => void;
   dispose: () => void;
@@ -48,13 +59,16 @@ interface DebugState {
  * Geometry is cached by shape pointer, so a hundred bodies sharing one shape
  * cost one `BufferGeometry` between them.
  */
-export const PhysicsDebug = ({ colors }: PhysicsDebugProps = {}) => {
+export const PhysicsDebug = ({
+  colors,
+  constraints = true,
+}: PhysicsDebugProps = {}) => {
   const api = useJolt();
   const scene = useThree((state) => state.scene);
   const stateRef = useRef<DebugState | null>(null);
 
   // Snapshotted like the other init-once options: change them with `key`.
-  const [mountColors] = useState(() => colors);
+  const [mount] = useState(() => ({ colors, constraints }));
 
   useEffect(() => {
     const { Jolt: jolt } = api;
@@ -62,8 +76,9 @@ export const PhysicsDebug = ({ colors }: PhysicsDebugProps = {}) => {
 
     const state: DebugState = {
       tracked: new Map(),
-      materials: createMotionDebugMaterials(mountColors),
+      materials: createMotionDebugMaterials(mount.colors),
       ids: new jolt.BodyIDVector(),
+      joints: mount.constraints ? createConstraintDebugLines() : null,
 
       acquire: (pointer, shape) => {
         const cached = geometries.get(pointer);
@@ -89,6 +104,11 @@ export const PhysicsDebug = ({ colors }: PhysicsDebugProps = {}) => {
       },
 
       dispose: () => {
+        if (state.joints) {
+          scene.remove(state.joints.lines);
+          state.joints.dispose();
+        }
+
         for (const { mesh } of state.tracked.values()) {
           scene.remove(mesh);
         }
@@ -105,6 +125,8 @@ export const PhysicsDebug = ({ colors }: PhysicsDebugProps = {}) => {
       },
     };
 
+    if (state.joints) scene.add(state.joints.lines);
+
     stateRef.current = state;
 
     return () => {
@@ -115,14 +137,16 @@ export const PhysicsDebug = ({ colors }: PhysicsDebugProps = {}) => {
         jolt.destroy(state.ids);
       }
     };
-  }, [api, scene, mountColors]);
+  }, [api, scene, mount]);
 
   useFrame(() => {
     const state = stateRef.current;
     if (!state || api.state.disposed) return;
 
     const { Jolt: jolt, physicsSystem, bodyInterface } = api;
-    const { tracked, materials, ids, acquire, release } = state;
+    const { tracked, materials, ids, joints, acquire, release } = state;
+
+    joints?.update((draw) => api.constraints.forEach(draw));
 
     physicsSystem.GetBodies(ids);
 

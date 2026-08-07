@@ -148,6 +148,25 @@ export interface ContactRegistry {
   destroy: () => void;
 }
 
+/** One joint, as `<PhysicsDebug />` needs it: the constraint and both ends. */
+export interface ConstraintEntry {
+  constraint: Jolt.TwoBodyConstraint;
+  body1: Jolt.Body;
+  body2: Jolt.Body;
+}
+
+/**
+ * Jolt binds no way to enumerate a world's constraints, so the library tracks
+ * the ones its hooks create. A constraint built by hand through `useJolt()` is
+ * not in here and will not be drawn.
+ */
+export interface ConstraintRegistry {
+  add: (entry: ConstraintEntry) => () => void;
+  forEach: (visit: (entry: ConstraintEntry) => void) => void;
+  size: () => number;
+  destroy: () => void;
+}
+
 export interface JoltApi {
   Jolt: JoltModule;
   joltInterface: Jolt.JoltInterface;
@@ -164,6 +183,7 @@ export interface JoltApi {
   objectLayer: (group: number, mask: number) => number;
   contacts: ContactRegistry;
   activation: ActivationRegistry;
+  constraints: ConstraintRegistry;
   temps: Temps;
   timing: PhysicsTiming;
   debug: boolean;

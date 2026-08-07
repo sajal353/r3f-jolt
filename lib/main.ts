@@ -61,6 +61,72 @@ export {
 
 export type { RaycasterOptions } from "@/Jolt/internal/raycast";
 
+export {
+  useFixedConstraint,
+  type UseFixedConstraintOptions,
+  type FixedConstraintApi,
+} from "@/Jolt/useFixedConstraint";
+export {
+  usePointConstraint,
+  type UsePointConstraintOptions,
+  type PointConstraintApi,
+} from "@/Jolt/usePointConstraint";
+export {
+  useHingeConstraint,
+  type UseHingeConstraintOptions,
+  type HingeConstraintApi,
+  type HingeConstraintExtras,
+} from "@/Jolt/useHingeConstraint";
+export {
+  useSliderConstraint,
+  type UseSliderConstraintOptions,
+  type SliderConstraintApi,
+  type SliderConstraintExtras,
+} from "@/Jolt/useSliderConstraint";
+export {
+  useDistanceConstraint,
+  type UseDistanceConstraintOptions,
+  type DistanceConstraintApi,
+  type DistanceConstraintExtras,
+} from "@/Jolt/useDistanceConstraint";
+export {
+  useConeConstraint,
+  type UseConeConstraintOptions,
+  type ConeConstraintApi,
+  type ConeConstraintExtras,
+} from "@/Jolt/useConeConstraint";
+export {
+  useSwingTwistConstraint,
+  type UseSwingTwistConstraintOptions,
+  type SwingTwistConstraintApi,
+  type SwingTwistConstraintExtras,
+  type SwingType,
+} from "@/Jolt/useSwingTwistConstraint";
+export {
+  useSixDOFConstraint,
+  type UseSixDOFConstraintOptions,
+  type SixDOFConstraintApi,
+  type SixDOFConstraintExtras,
+  type SixDOFAxis,
+  type SixDOFAxisOptions,
+} from "@/Jolt/useSixDOFConstraint";
+
+export type {
+  ConstraintApi,
+  ConstraintApiContext,
+  ConstraintBody,
+  ConstraintOptions,
+} from "@/Jolt/internal/useConstraint";
+export type {
+  ConstraintSpace,
+  MotorState,
+  MotorLimits,
+  AngularMotorOptions,
+  LinearMotorOptions,
+  SpringOptions,
+  LimitOptions,
+} from "@/Jolt/internal/constraintSettings";
+
 export { useContactListener } from "@/Jolt/useContactListener";
 export { useBodyContacts } from "@/Jolt/useBodyContacts";
 export {

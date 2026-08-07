@@ -381,6 +381,79 @@ Three things worth knowing:
 - **Sleeping bodies report no contacts at all**, so a crate that dozed off on a stopped belt would never notice it start. `wake` handles this and is on by default; turn it off only if you are managing activation yourself.
 - **A `useCharacter` is not carried.** `CharacterVirtual` runs its own contact listener, and Jolt's character contact settings have no surface-velocity field to write.
 
+## Constraints
+
+Eight hooks, one per Jolt constraint type. Each takes two bodies and an options object, and returns `[api]` — `undefined` until both bodies exist, like every other hook here.
+
+```tsx
+const Door = () => {
+  const [ref, door] = useBox({
+    size: [2, 3, 0.2],
+    position: [1.3, 2, 0],
+    motionType: "dynamic",
+    mass: 20,
+  });
+
+  const [hinge] = useHingeConstraint(null, door, {
+    point: [0, 2, 0],
+    hingeAxis: [0, 1, 0],
+    normalAxis: [1, 0, 0],
+    limits: { min: -Math.PI / 2, max: 0 },
+    motor: { state: "position", targetAngle: 0, maxTorqueLimit: 4000 },
+  });
+
+  useEffect(() => hinge?.setTargetAngle(open ? -Math.PI / 2 : 0), [hinge, open]);
+
+  return <mesh ref={ref}>{/* … */}</mesh>;
+};
+```
+
+| Hook | Holds | Leaves free |
+| --- | --- | --- |
+| `useFixedConstraint` | everything | nothing — a weld |
+| `usePointConstraint` | one point | all three rotations |
+| `useHingeConstraint` | a point and an axis | one rotation |
+| `useSliderConstraint` | orientation and two axes | one translation |
+| `useDistanceConstraint` | a distance range | everything else |
+| `useConeConstraint` | a point, limits the lean | twist about the axis |
+| `useSwingTwistConstraint` | a point, limits lean **and** twist | within the limits |
+| `useSixDOFConstraint` | whatever you say | whatever you say |
+
+### The two bodies
+
+Either side takes a body api, a raw `Jolt.Body`, or `null` for the world:
+
+- **`null`** anchors that side to Jolt's fixed world body — a door in a frame that is not itself a body, a chain hanging from nothing. There is no need to create a static body just to have something to join to.
+- **`undefined`** means "not ready yet". Body hooks return `undefined` on their first render, so passing one straight through is expected; the joint is created on the render where both bodies exist.
+
+### Points and axes
+
+Every point and axis option comes in three forms: a shared one (`point`, `hingeAxis`) applied to both bodies, and per-body overrides (`point1`/`point2`, `hingeAxis1`/`hingeAxis2`) for the cases where they differ. Values are world-space by default; pass `space: "local"` to give them relative to each body's centre of mass instead.
+
+`useFixedConstraint` and `useSliderConstraint` also accept `autoDetectPoint`, which ignores the points and uses wherever the bodies currently are. It is on by default for the fixed joint, since a weld almost always means "keep these exactly as I placed them".
+
+### Motors
+
+`useHingeConstraint`, `useSliderConstraint`, `useSwingTwistConstraint` and `useSixDOFConstraint` take a `motor`, and expose setters for changing it at runtime:
+
+- **`state: "position"`** drives toward a target and holds it, carrying load. Set `targetAngle` (hinge) or `targetPosition` (slider).
+- **`state: "velocity"`** turns or travels at a rate. Set `targetAngularVelocity` or `targetVelocity`.
+- **`state: "off"`** releases the joint back to the simulation.
+- `maxForceLimit` / `maxTorqueLimit` cap what the motor may apply. Leave them out and the motor is unlimited.
+- `spring` decides how hard the motor tracks its target. The default is soft enough that a loaded position motor settles noticeably short of where it was pointed; raise `frequency` (or set `stiffness`) if you want it to arrive.
+
+### Springs and limits
+
+`limits: { min, max }` bounds a hinge (radians) or a slider (metres), and `limitsSpring` makes that bound springy rather than hard. A spring is `{ frequency, damping }` or `{ stiffness, damping }` — setting `stiffness` selects that mode.
+
+### Worth knowing
+
+- **Every runtime setter wakes both bodies.** A settled joint puts its bodies to sleep, and a sleeping body ignores a retargeted motor until something else wakes it. The hooks call Jolt's `ActivateConstraint` for you; `api.activate()` is there if you need it directly.
+- **Options are read once at mount**, like the body hooks. Change a joint at runtime through its setters, or rebuild it with `key`.
+- **`debug: true`** draws the joint: body 1's centre → its anchor → body 2's anchor → body 2's centre. The middle segment has zero length while the constraint holds, so a visible line there is the solver failing to close the gap. `<PhysicsDebug />` draws every joint in the world the same way, in a single buffer — see [Debug rendering](#debug-rendering).
+- **`useFixedConstraint` returns a `TwoBodyConstraint`**, not a `FixedConstraint`. Jolt binds the settings but not the class; nothing is lost, since a weld has no runtime controls.
+- **Two joined bodies still collide with each other** unless you keep them apart or filter them. A hinge whose door overlaps its own frame is held open by the contact, not by the joint.
+
 ## Picking things up
 
 Grabbing, carrying, resizing and throwing a body — the WebXR "pick it up" case, though nothing here is XR-specific. The library owns no input: these are the same calls a controller, a pointer or a gamepad would drive.
@@ -608,6 +681,10 @@ Coloured by motion type rather than by shape, since it has no hook to ask:
 
 Override any of them with `<PhysicsDebug colors={{ static: "red" }} />`. The defaults are exported as `debugMotionColors`. Geometry is cached per shape, so a hundred bodies sharing one shape cost one `BufferGeometry` between them, and wireframes interpolate along with the bodies.
 
+It also draws every [constraint](#constraints) as a gold line running body 1's centre → its anchor → body 2's anchor → body 2's centre, all of them sharing one buffer so the whole set is a single draw call. Turn it off with `<PhysicsDebug constraints={false} />`.
+
+Unlike bodies, joints are drawn from the library's own registry: Jolt exposes no way to ask a world what constraints it holds, so a constraint built by hand through `useJolt()` is the one thing here that cannot be drawn.
+
 ### Per-hook `debug` — one body
 
 `debug` on a hook (or `<Physics debug>` for all of them) overlays a wireframe of that collider only, coloured by shape kind. Better when you are looking at one thing. Colours come from the exported `debugColors`, so you can match them in your own UI.
@@ -675,13 +752,14 @@ pnpm install
 pnpm dev
 ```
 
-35 scenes in six categories, one per hook or feature:
+45 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
 | **Shapes**       | all 8 body hooks, one scene each                                                                   |
 | **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · motion quality |
 | **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale · conveyor    |
+| **Constraints**  | all 8 constraint hooks · motors · springs · a machine driven by every one of them at once           |
 | **Queries**      | closest hit · any hit · all hits                                                                   |
 | **Events**       | `useBodyContacts` · `useContactListener`                                                           |
 | **Systems**      | character · car · interpolation · debug rendering · stress test · instancing                        |

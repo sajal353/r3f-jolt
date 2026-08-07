@@ -26,6 +26,17 @@ import { Teleport } from "./control/Teleport";
 import { Kinematic } from "./control/Kinematic";
 import { GrabAndScale } from "./control/GrabAndScale";
 
+import { FixedConstraintScene } from "./constraints/Fixed";
+import { PointConstraintScene } from "./constraints/Point";
+import { HingeConstraintScene } from "./constraints/Hinge";
+import { SliderConstraintScene } from "./constraints/Slider";
+import { DistanceConstraintScene } from "./constraints/Distance";
+import { ConeAndSwingTwistScene } from "./constraints/ConeAndSwingTwist";
+import { SixDOFConstraintScene } from "./constraints/SixDOF";
+import { MotorsScene } from "./constraints/Motors";
+import { SpringsScene } from "./constraints/Springs";
+import { MachineScene } from "./constraints/Machine";
+
 import { ClosestHit } from "./queries/ClosestHit";
 import { AnyHit } from "./queries/AnyHit";
 import { AllHits } from "./queries/AllHits";
@@ -351,6 +362,137 @@ export const categories: Category[] = [
             Friction does the dragging, so a frictionless belt carries nothing.
           </>
         ),
+      },
+    ],
+  },
+  {
+    name: "Constraints",
+    scenes: [
+      {
+        name: "Fixed",
+        Component: FixedConstraintScene,
+        hook: "useFixedConstraint",
+        hint: (
+          <>
+            Welds bodies together. <code>autoDetectPoint</code> is on by
+            default, so the joint locks them exactly where you placed them and
+            needs no anchor points. The welded tower topples in one piece; the
+            plain stack beside it scatters.
+          </>
+        ),
+      },
+      {
+        name: "Point",
+        Component: PointConstraintScene,
+        hook: "usePointConstraint",
+        hint: (
+          <>
+            A ball joint: the anchor points are held together and every rotation
+            stays free. Passing <code>null</code> as the first body joins to the
+            world, which is what holds each chain up without a static block. The
+            gold lines are the joint debug view.
+          </>
+        ),
+      },
+      {
+        name: "Hinge",
+        Component: HingeConstraintScene,
+        hook: "useHingeConstraint",
+        hint: (
+          <>
+            One rotation about a shared axis. <code>limits</code> are radians
+            measured from where the two <code>normalAxis</code> vectors line up
+            — equal min and max holds the door shut.
+          </>
+        ),
+      },
+      {
+        name: "Slider",
+        Component: SliderConstraintScene,
+        hook: "useSliderConstraint",
+        hint: (
+          <>
+            One translation along a shared axis. <code>maxFrictionForce</code>
+            {" "}resists travel without stopping it, and a vertical slider is
+            held up by nothing but its own lower limit.
+          </>
+        ),
+      },
+      {
+        name: "Distance",
+        Component: DistanceConstraintScene,
+        hook: "useDistanceConstraint",
+        hint: (
+          <>
+            Keeps two points within a range. Equal min and max is a rigid rod;
+            a min of zero is a rope that stays slack until it runs out, which is
+            why the red ball drops before it swings.
+          </>
+        ),
+      },
+      {
+        name: "Cone & swing-twist",
+        Component: ConeAndSwingTwistScene,
+        hook: "useConeConstraint, useSwingTwistConstraint",
+        hint: (
+          <>
+            Both limit how far a body may lean away from its twist axis. Only
+            swing-twist also bounds rotation <i>about</i> that axis — the two
+            green reeds have the same lean limit and opposite twist limits.
+          </>
+        ),
+      },
+      {
+        name: "Six DOF",
+        Component: SixDOFConstraintScene,
+        hook: "useSixDOFConstraint",
+        hint: (
+          <>
+            Every axis is separately <code>free</code>, <code>fixed</code> or
+            limited, with its own spring, friction and motor. The other seven
+            constraint hooks are shortcuts for its common configurations.
+          </>
+        ),
+      },
+      {
+        name: "Motors",
+        Component: MotorsScene,
+        hook: "motor, setTargetAngle, setTargetPosition",
+        hint: (
+          <>
+            A <b>position</b> motor holds a target and carries load; a{" "}
+            <b>velocity</b> motor turns at a rate. Every runtime setter wakes
+            both bodies first — a settled joint is asleep, and would otherwise
+            ignore its new target entirely.
+          </>
+        ),
+      },
+      {
+        name: "Springs",
+        Component: SpringsScene,
+        hook: "limitsSpring",
+        hint: (
+          <>
+            The spring sits on the joint's <i>limits</i>, so each bob falls
+            freely and the spring only decides how it settles at the stop. Low
+            frequency and damping oscillate; high values arrive and stay.
+            Re-dropped every six seconds.
+          </>
+        ),
+      },
+      {
+        name: "Machine",
+        Component: MachineScene,
+        hook: "all eight constraint hooks",
+        hint: (
+          <>
+            A chute feeds a motorised lift, the lift loads a motorised
+            turntable, the turntable sweeps the ball past a swinging gate and
+            down a ramp into sprung skittles. Fixed, point, hinge, slider,
+            distance, cone, swing-twist and six-DOF joints, all at once.
+          </>
+        ),
+        physicsDebug: false,
       },
     ],
   },

@@ -31,20 +31,20 @@ Where this library is going, and why. Jolt Physics exposes far more than `r3f-jo
 
 Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, Path, Pulley, Gear and RackAndPinion. r3f-jolt exposes **none** of them, so no ragdoll, door, chain or lift is buildable today.
 
-- [ ] `useFixedConstraint`
-- [ ] `usePointConstraint`
-- [ ] `useHingeConstraint`
-- [ ] `useSliderConstraint`
-- [ ] `useDistanceConstraint`
-- [ ] `useConeConstraint` / `useSwingTwistConstraint`
-- [ ] `useSixDOFConstraint`
-- [ ] Shared constraint lifecycle helper — `AddConstraint`/`RemoveConstraint` + destroy, `disposed`-aware. The pre-0.2.0 `useCar` never removed its constraint or step listener on unmount; that is exactly this class of mistake, so it gets solved once, centrally
+- [x] `useFixedConstraint`
+- [x] `usePointConstraint`
+- [x] `useHingeConstraint`
+- [x] `useSliderConstraint`
+- [x] `useDistanceConstraint`
+- [x] `useConeConstraint` / `useSwingTwistConstraint`
+- [x] `useSixDOFConstraint`
+- [x] Shared constraint lifecycle helper — `AddConstraint`/`RemoveConstraint` + destroy, `disposed`-aware. The pre-0.2.0 `useCar` never removed its constraint or step listener on unmount; that is exactly this class of mistake, so it gets solved once, centrally
 
 ### Required by 0.4.0 and 0.5.0 — prerequisites, not nice-to-haves
 
-- [ ] `MotorSettings` + `SetMotorState` / `SetTargetAngle` / `SetTargetVelocity` on the applicable constraints — required for active ragdolls, doors, cranes and turrets
-- [ ] `SpringSettings` on constraints — shared by ragdoll joints, motorcycle lean and suspension
-- [ ] Constraint priority (`CalculateConstraintPriorities`) exposed on the constraint lifecycle helper
+- [x] `MotorSettings` + `SetMotorState` / `SetTargetAngle` / `SetTargetVelocity` on the applicable constraints — required for active ragdolls, doors, cranes and turrets
+- [x] `SpringSettings` on constraints — shared by ragdoll joints, motorcycle lean and suspension
+- [x] Constraint priority exposed on the constraint lifecycle helper, as a `priority` option plus `api.setPriority`. **Amended:** `PhysicsSystem.CalculateConstraintPriorities` does not exist in the JS bindings — it is bound only on `RagdollSettings`. Per-constraint `SetConstraintPriority` is the whole of what is available
 - [ ] `useBeforePhysicsStep` / `useAfterPhysicsStep` — water buoyancy must run per sub-step, not per frame
 
 ### Queries and events

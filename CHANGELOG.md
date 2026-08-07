@@ -2,6 +2,19 @@
 
 ## 0.3.0
 
+### Constraints
+
+Eight new hooks, one per Jolt constraint type — the largest gap in the library until now. Nothing joint-shaped was buildable before: no door, chain, lift, rope bridge or ragdoll.
+
+- **`useFixedConstraint`** · **`usePointConstraint`** · **`useHingeConstraint`** · **`useSliderConstraint`** · **`useDistanceConstraint`** · **`useConeConstraint`** · **`useSwingTwistConstraint`** · **`useSixDOFConstraint`**. Each takes two bodies and returns `[api]`, `undefined` until both bodies exist.
+- **Either side may be `null`**, which anchors to the world — a door in a frame that is not a body, a chain hanging from nothing. `undefined` means "that body is not created yet" and the joint waits for it, so a body hook's first-render `undefined` can be passed straight through.
+- **Motors** on the hinge, slider, swing-twist and six-DOF joints: `position` holds a target and carries load, `velocity` turns at a rate, `off` hands the joint back to the simulation. Targets and state are settable at runtime.
+- **Springs** on joint limits (`limitsSpring`) and inside motors, as either `{ frequency, damping }` or `{ stiffness, damping }`.
+- **Every runtime setter wakes both bodies.** A settled joint puts its bodies to sleep, and a sleeping body ignores a retargeted motor — the same trap `useConveyor`'s `wake` option exists for. `api.activate()` is exposed for the cases the library cannot see.
+- Shared across all eight: `enabled`, `priority`, solver step overrides, `settingsOverride`, and `debug`, which draws the joint as body 1's centre → its anchor → body 2's anchor → body 2's centre. The middle segment has zero length while the constraint holds, so a visible line there is the solver losing.
+- **`<PhysicsDebug />` draws joints too**, via `constraints` (on by default). Jolt exposes no way to enumerate a world's constraints, so the library keeps its own registry of the ones its hooks create — which does mean a constraint built by hand through `useJolt()` is not drawn, unlike a hand-built body. Every joint shares one line buffer, so a world full of them is still a single draw call.
+- `useFixedConstraint` returns a `TwoBodyConstraint` — Jolt binds `FixedConstraintSettings` but no matching class. A weld has no runtime controls, so nothing is lost.
+
 ### Conveyor belts
 
 - **`useConveyor(api, options)`** turns a body's surface into a belt: whatever rests on it is dragged along while the body itself stays put. `linear` for walkways and belts, `angular` for turntables, and `setLinear` / `setAngular` / `stop` on the returned api for changing a belt while it runs.
