@@ -2,6 +2,22 @@
 
 ## 0.3.0
 
+### Step callbacks
+
+- **`useBeforePhysicsStep(callback)`** and **`useAfterPhysicsStep(callback)`** run once per physics step, which is not once per frame: a fixed timestep runs however many steps that frame's delta paid for. A force applied from a `useFrame` is therefore applied at the wrong strength, and by how much depends on the viewer's refresh rate — which is why buoyancy, thrusters and custom gravity fields need these.
+- Both receive `(delta, index)` — the step's own duration and its number.
+- They run **between** Jolt's steps rather than inside one, so unlike Jolt's own `PhysicsStepListener` there is no lock held and the world is safe to touch. The one rule is not to `setState` from them: that schedules a render per sub-step, from inside the step loop.
+- Subscribers run in mount order, and one subscribed from inside a step is held until the next step rather than run twice in the same one. Unsubscribing is exact under `<StrictMode>`, which mounts every effect twice — a step callback subscribed there fires once per step, not twice.
+- New **Step callbacks** demo scene: two rings in orbit under the same pull, one taking it per step and one per frame, each with the circle it should be tracing drawn through it. The per-frame ring leaves its circle. Switch the toolbar to `vary`, where one frame is one step, and both hold it.
+
+### World configuration
+
+- **`maxBodies` / `maxBodyPairs` / `maxContactConstraints` / `maxWorkerThreads`** on `<Physics>`. Jolt sizes these at construction, so they are read once at mount and a new value needs a new world (`key`). They are applied before `settingsOverride`, which still wins.
+- **A world that runs out of bodies now says so.** Jolt returns a null body when the pool is full and everything after that dereferences it; the cap is checked before the first allocation, so the failure is a sentence naming `maxBodies` rather than a wasm trap.
+- **`physicsSettings`** — the solver and sleep settings, applied over the defaults the world was built with, so an option you do not name keeps Jolt's default rather than becoming zero. Unlike the caps this one is live. Raising `numVelocitySteps` / `numPositionSteps` stiffens everything at once; the per-constraint overrides are the cheaper tool for one stretchy rope.
+- `maxWorkerThreads` replaces reaching into `settingsOverride` for it. Multithreading still needs a `…-multithread` build and COOP/COEP headers, and is still not the default.
+- **Documented, not fixed:** `<Physics debug>` is read by each hook at mount, so changing it rebuilds every body in the world. `<PhysicsDebug />` is the live toggle.
+
 ### Constraints
 
 Eight new hooks, one per Jolt constraint type — the largest gap in the library until now. Nothing joint-shaped was buildable before: no door, chain, lift, rope bridge or ragdoll.

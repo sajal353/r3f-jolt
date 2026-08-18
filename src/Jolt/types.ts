@@ -121,6 +121,27 @@ export interface PhysicsTiming {
   interpolate: boolean;
 }
 
+/**
+ * Runs once per physics step, either side of it. `index` is the step's own
+ * number — the value `PhysicsTiming.stepCount` holds while a `"before"`
+ * callback runs, and one less than it holds while the matching `"after"` one
+ * does.
+ */
+export type StepCallback = (delta: number, index: number) => void;
+
+export type StepPhase = "before" | "after";
+
+/**
+ * The only registry with no Jolt object in it: these callbacks run *between*
+ * `Step()` calls rather than inside one, so there is no listener to install and
+ * nothing to free.
+ */
+export interface StepRegistry {
+  add: (phase: StepPhase, callback: StepCallback) => () => void;
+  run: (phase: StepPhase, delta: number, index: number) => void;
+  destroy: () => void;
+}
+
 export interface ActivationHandlers {
   onWake?: () => void;
   onSleep?: () => void;
@@ -184,6 +205,7 @@ export interface JoltApi {
   contacts: ContactRegistry;
   activation: ActivationRegistry;
   constraints: ConstraintRegistry;
+  steps: StepRegistry;
   temps: Temps;
   timing: PhysicsTiming;
   debug: boolean;

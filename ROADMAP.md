@@ -45,7 +45,7 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 - [x] `MotorSettings` + `SetMotorState` / `SetTargetAngle` / `SetTargetVelocity` on the applicable constraints — required for active ragdolls, doors, cranes and turrets
 - [x] `SpringSettings` on constraints — shared by ragdoll joints, motorcycle lean and suspension
 - [x] Constraint priority exposed on the constraint lifecycle helper, as a `priority` option plus `api.setPriority`. **Amended:** `PhysicsSystem.CalculateConstraintPriorities` does not exist in the JS bindings — it is bound only on `RagdollSettings`. Per-constraint `SetConstraintPriority` is the whole of what is available
-- [ ] `useBeforePhysicsStep` / `useAfterPhysicsStep` — water buoyancy must run per sub-step, not per frame
+- [x] `useBeforePhysicsStep` / `useAfterPhysicsStep` — water buoyancy must run per sub-step, not per frame. **Amended:** they run *between* `Step()` calls, not inside one. The accumulator drives the loop from JS, so each iteration already is a sub-step and a plain JS callback needs no `PhysicsStepListenerJS` — and, unlike a real step listener, holds no lock, so the world is safe to touch from one
 
 ### Queries and events
 
@@ -85,10 +85,10 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 
 ### World configuration
 
-- [ ] `maxBodies` / `maxBodyPairs` / `maxContactConstraints` on `Physics` — `JoltSettings` defaults are hard-coded, so consumers hit a body cap they cannot raise
-- [ ] Solver settings passthrough (`PhysicsSettings`) — velocity/position iteration counts and the rest, currently fixed at Jolt's defaults
-- [ ] Multithreaded simulation guidance — the entry point is already selectable via 0.2.0's injected `module` prop, so what remains is `JoltSettings.mMaxWorkerThreads` plumbing plus honest docs on the COOP/COEP headers it requires. Main-thread by default
-- [ ] Typedoc API site + hosted examples
+- [x] `maxBodies` / `maxBodyPairs` / `maxContactConstraints` on `Physics` — `JoltSettings` defaults are hard-coded, so consumers hit a body cap they cannot raise. Plus `maxWorkerThreads`, and a guard in `useBody` so hitting the cap is an error message rather than a null dereference
+- [x] Solver settings passthrough (`PhysicsSettings`) — velocity/position iteration counts and the rest, currently fixed at Jolt's defaults. Live, applied over the world's own defaults. `GetPhysicsSettings()` hands back a **borrowed** struct, measured rather than assumed: 200 applications leave the heap exactly flat, so destroying it would be a double free
+- [x] Multithreaded simulation guidance — the entry point is already selectable via 0.2.0's injected `module` prop, so what remains is `JoltSettings.mMaxWorkerThreads` plumbing plus honest docs on the COOP/COEP headers it requires. Main-thread by default
+- [ ] Typedoc API site + hosted examples. **Amended:** deferred out of 0.3.0 by decision — the readme and the demo are the documentation this release ships, and a generated site is a release-mechanics job rather than a feature one
 
 ---
 

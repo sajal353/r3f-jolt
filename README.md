@@ -143,15 +143,38 @@ Jolt is tuned for metres, kilograms and seconds. A 1-unit cube weighing 20 is a 
 | ------------------- | ----------------- | ------------------------------------------------- |
 | `gravity`           | `[0, -9.81, 0]`   | Live — changing it calls `SetGravity`             |
 | `paused`            | `false`           | Stops stepping; bodies stay alive                 |
-| `debug`             | `false`           | Default for every child hook's `debug`            |
+| `debug`             | `false`           | Default for every child hook's `debug`. Read once, at mount |
 | `timeStep`          | `1/60`            | Or `"vary"` for frame-delta stepping              |
 | `interpolate`       | `true`            | Render between steps; ignored when `timeStep="vary"` |
 | `maxSubSteps`       | `4`               | Fixed steps allowed per frame                     |
 | `collisionSteps`    | `1`               | Collision sub-steps passed to `Step`              |
 | `broadPhaseLayers`  | static + moving   | See [Collision groups](#collision-groups-and-masks) |
+| `maxBodies`         | Jolt's default    | Hard cap on bodies in the world; sized at construction |
+| `maxBodyPairs`      | Jolt's default    | Broadphase pair cap                               |
+| `maxContactConstraints` | Jolt's default | Contact constraint cap                            |
+| `maxWorkerThreads`  | Jolt's default    | Only a `…-multithread` build has threads to create |
+| `physicsSettings`   | —                 | Solver and sleep settings, [below](#solver-settings). Live |
 | `module`            | —                 | An already-initialised Jolt module                |
 | `init`              | `wasm-compat`     | A custom module initialiser                       |
-| `settingsOverride`  | —                 | `(settings, jolt) => void`, for `mMaxBodies` etc. |
+| `settingsOverride`  | —                 | `(settings, jolt) => void`, applied last          |
+
+Everything above the `physicsSettings` row except `gravity`, `paused` and `physicsSettings` is read when the world is built. Changing one afterwards does nothing until the world is rebuilt, which you do by giving `<Physics>` a new `key`.
+
+`debug` is the sharpest edge of that: every hook reads it at mount, so changing it *does* take effect — by destroying and rebuilding every body in the world, which drops them back to their starting transforms. Reach for [`<PhysicsDebug />`](#physicsdebug--everything-in-the-world) instead, which is a live toggle and draws more.
+
+### Solver settings
+
+`physicsSettings` is applied over whatever the world was built with, so an option you do not name keeps Jolt's default rather than becoming zero. Unlike the caps above it is live: change a value and it takes effect on the next step.
+
+```tsx
+<Physics physicsSettings={{ numVelocitySteps: 10, numPositionSteps: 2 }}>…</Physics>
+```
+
+The names map one-to-one onto Jolt's `PhysicsSettings` fields with the `m` prefix dropped: `numVelocitySteps`, `numPositionSteps`, `baumgarte`, `speculativeContactDistance`, `penetrationSlop`, `linearCastThreshold`, `linearCastMaxPenetration`, `manifoldTolerance`, `maxPenetrationDistance`, `minVelocityForRestitution`, `timeBeforeSleep`, `pointVelocitySleepThreshold`, `deterministicSimulation`, `constraintWarmStart`, `useBodyPairContactCache`, `useManifoldReduction`, `useLargeIslandSplitter`, `allowSleeping`, `checkActiveEdges`, `maxInFlightBodyPairs`, `stepListenersBatchSize`, `stepListenerBatchesPerJob`.
+
+Removing the prop does not put the previous values back — there is nothing to put back to, since the settings are the world's own. Name the values you want.
+
+Raising `numVelocitySteps` / `numPositionSteps` stiffens *everything* — every joint, every stack, every contact. If one rope is stretchy, the per-constraint `numVelocityStepsOverride` and `numPositionStepsOverride` are the cheaper tool.
 
 ## Collision groups and masks
 
@@ -206,11 +229,13 @@ Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Embedder-Policy: require-corp
 ```
 
-Many static hosts do not set these, and without them the multithreaded build will not start. Cap worker threads with `settingsOverride`:
+Many static hosts do not set these, and without them the multithreaded build will not start. Cap worker threads with the `maxWorkerThreads` prop:
 
 ```tsx
-<Physics settingsOverride={(settings) => (settings.mMaxWorkerThreads = 2)} />
+<Physics init={() => initJolt()} maxWorkerThreads={2} />
 ```
+
+The prop is accepted by every build and ignored by the single-threaded ones, which have no threads to create. Main-thread is the default, and is the right default: the multithreaded builds buy throughput on worlds large enough to need it and cost you the header requirement above on every page that loads them.
 
 Modules are cached per initialiser, so mounting several `<Physics>` trees instantiates the WASM once.
 
@@ -338,6 +363,40 @@ useFrame((_, delta) => {
   api?.moveKinematic([Math.sin(t.current) * 4, 1, 0], [0, 0, 0, 1]);
 });
 ```
+
+## Step callbacks
+
+`useFrame` runs once per rendered frame. A fixed timestep runs however many steps that frame's delta paid for — two, or none, or four. Anything that has to be *integrated* — a force, a thruster, buoyancy, a custom gravity field — has to arrive once per step, or it is applied at the wrong strength and the result depends on the viewer's refresh rate.
+
+```tsx
+import { useBeforePhysicsStep, useAfterPhysicsStep } from "r3f-jolt";
+
+const Attracted = () => {
+  const [ref, api] = useSphere({ position: [3, 4, 0], gravityFactor: 0 });
+
+  useBeforePhysicsStep(() => {
+    api?.applyForce(pullTowards(api.body.GetPosition(), origin));
+  });
+
+  useAfterPhysicsStep((delta, index) => {
+    // Sampled at the rate the world actually simulates at.
+    trail.push(api.body.GetPosition());
+  });
+
+  return <mesh ref={ref}>…</mesh>;
+};
+```
+
+Both take `(delta, index)`: the duration of that step, and its number. `index` is what `api.timing.stepCount` reads while a `before` callback runs, and one less than it reads in the matching `after` one.
+
+**Worth knowing**
+
+- They run **between** Jolt's steps, not inside one. This is not Jolt's `PhysicsStepListener`: no lock is held, so reading positions, applying forces, even creating a body are all fine.
+- **Do not call `setState` from one.** A render scheduled from inside the step loop fires once per sub-step, from a `useFrame` at negative priority — the worst place in the frame to schedule one. Write to a ref and read it from a `useFrame` if something on screen has to change.
+- Nothing runs while `<Physics paused>`, because nothing is stepping.
+- With `timeStep="vary"` there is exactly one step per frame, so these behave like a `useFrame` — which is why the demo scene tells you to switch to `vary` and watch the difference disappear.
+- Subscribers run in the order they mounted. A callback that subscribes another one from inside a step is held until the next step rather than run twice.
+- Contact events are still delivered once per frame, after the last step, so a contact made in this step has not been dispatched when your `after` callback runs.
 
 ## `useConveyor` — belts, walkways and turntables
 
@@ -752,7 +811,7 @@ pnpm install
 pnpm dev
 ```
 
-44 scenes in seven categories, one per hook or feature:
+45 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
@@ -762,9 +821,9 @@ pnpm dev
 | **Constraints**  | all 8 constraint hooks · motors · springs · rope built from chained distance joints                 |
 | **Queries**      | closest hit · any hit · all hits                                                                   |
 | **Events**       | `useBodyContacts` · `useContactListener`                                                           |
-| **Systems**      | character · car · interpolation · debug rendering · stress test · instancing                        |
+| **Systems**      | character · car · interpolation · step callbacks · debug rendering · stress test · instancing        |
 
-Toolbar toggles for `<PhysicsDebug />`, `paused`, `interpolate`, and a `1/60` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
+Toolbar toggles for `<PhysicsDebug />`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 
 Switching scenes remounts the whole world, which doubles as the mount/unmount stress test.
 

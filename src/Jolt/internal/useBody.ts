@@ -295,6 +295,7 @@ export const useBody = <S extends Jolt.Shape>(
     const {
       Jolt: jolt,
       bodyInterface,
+      physicsSystem,
       layers,
       groups,
       objectLayer,
@@ -345,6 +346,18 @@ export const useBody = <S extends Jolt.Shape>(
     const isDynamic = motionType === "dynamic";
     const isStatic = motionType === "static";
     const isMoving = !isStatic;
+
+    // Jolt hands back a null body when the pool is full, and everything after
+    // `CreateBody` dereferences it. Checked here, before the first allocation,
+    // so the failure is a sentence rather than a wasm trap — and so nothing
+    // has to be unwound to report it.
+    if (physicsSystem.GetNumBodies() >= physicsSystem.GetMaxBodies()) {
+      throw new Error(
+        `r3f-jolt: the world is full at ${physicsSystem.GetMaxBodies()} bodies. ` +
+          "Raise `maxBodies` on <Physics>. It is sized at construction, so the " +
+          "world has to be rebuilt (`key`) for a new value to take.",
+      );
+    }
 
     const { shape, geometry, debugGeometry } = createShape(jolt);
 

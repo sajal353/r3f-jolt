@@ -15,8 +15,10 @@ import { useConeConstraint } from "@/Jolt/useConeConstraint";
 import { useSwingTwistConstraint } from "@/Jolt/useSwingTwistConstraint";
 import { useSixDOFConstraint } from "@/Jolt/useSixDOFConstraint";
 import type { Vec3Tuple } from "@/Jolt/types";
+import { applyPhysicsSettings } from "@/Jolt/internal/physicsSettings";
 import {
   expectNoAsserts,
+  getApi,
   loadDebugModule,
   renderPhysics,
   step,
@@ -253,6 +255,36 @@ describe("mount/unmount leak checks", () => {
   it("a debug-drawn constraint leaves the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<DebuggedJoint />, 60);
     expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  /**
+   * `GetPhysicsSettings()` may hand back the system's own struct or a heap copy
+   * we then own, and the bindings do not say which. Two hundred applications
+   * with the heap flat is the answer: it is borrowed, and destroying it would
+   * be the double free rather than the fix.
+   *
+   * The step registry is deliberately absent from this file — it creates no
+   * Jolt objects at all, so there is nothing here for it to leak.
+   */
+  it("re-applying physicsSettings leaves the heap flat", async () => {
+    const module = await loadDebugModule();
+
+    const renderer = await renderPhysics(<Ground />, {
+      physicsSettings: { numVelocitySteps: 8 },
+    });
+
+    const { physicsSystem } = getApi();
+    applyPhysicsSettings(physicsSystem, { numVelocitySteps: 9 });
+    const baseline = module.JoltInterface.prototype.sGetFreeMemory();
+
+    for (let i = 0; i < 200; i += 1) {
+      applyPhysicsSettings(physicsSystem, { numVelocitySteps: 8 + (i % 4) });
+    }
+
+    expect(module.JoltInterface.prototype.sGetFreeMemory()).toBe(baseline);
+
+    await unmount(renderer);
     expectNoAsserts();
   });
 

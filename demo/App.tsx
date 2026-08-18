@@ -7,6 +7,7 @@ import { categories, findScene } from "./scenes";
 
 const TIME_STEPS: { label: string; value: number | "vary" }[] = [
   { label: "1/60", value: 1 / 60 },
+  { label: "1/30", value: 1 / 30 },
   { label: "1/15", value: 1 / 15 },
   { label: "vary", value: "vary" },
 ];

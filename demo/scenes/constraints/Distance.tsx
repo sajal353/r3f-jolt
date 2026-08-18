@@ -22,11 +22,7 @@ const LINK_MASS = 3;
 /** Long enough to clear the weight, so the last link never sits inside it. */
 const BALL_DROP = 1.1;
 const ROPE_LENGTH = ROPE_LINKS * LINK_SPACING + BALL_DROP;
-/**
- * The rope is longer than the distance it is held out over, so it starts
- * gathered up and droops the instant it is let go. A rod cannot do that, and
- * the two rigs are otherwise identical, which is the whole point of the scene.
- */
+/** Lays the rope out short of its own length, so it starts gathered and droops. */
 const ROPE_GATHER = REACH / ROPE_LENGTH;
 /**
  * A chain is solved a link at a time, so a correction at one end needs a pass
@@ -41,6 +37,7 @@ type Link = BodyApi<Jolt.SphereShape>;
 type TubeEnd = Vec3Tuple | Link | null | undefined;
 
 const UP = new Vector3(0, 1, 0);
+// Shared scratch: a rope of a dozen tubes cannot afford three fresh vectors each.
 const tubeFrom = new Vector3();
 const tubeTo = new Vector3();
 const tubeAxis = new Vector3();
@@ -105,10 +102,7 @@ const Tube = ({
   );
 };
 
-/**
- * A one-body constraint anchors to the world, which on its own draws nothing —
- * so both rigs would hang from thin air without something to hang them from.
- */
+/** Anchoring to the world draws nothing, so both rigs would hang from thin air. */
 const Anchor = ({ x }: { x: number }) => {
   const size: Vec3Tuple = [0.6, 0.4, 0.6];
   const [ref] = useBox({
@@ -143,10 +137,6 @@ const pivotOf = (x: number): Vec3Tuple => [x, PIVOT_HEIGHT, 0];
  *  fall through carries them into the wall's upper courses. */
 const restOf = (x: number): Vec3Tuple => [x - REACH, PIVOT_HEIGHT, 0];
 
-/**
- * One joint with equal min and max: the ball can neither fall inward nor swing
- * outward, so the whole thing behaves as a stick with a pivot at one end.
- */
 const Rod = ({ x }: { x: number }) => {
   const pivot = pivotOf(x);
   const start = restOf(x);
@@ -207,14 +197,8 @@ const RopeWeight = ({ x, above }: { x: number; above: Link | undefined }) => {
 };
 
 /**
- * Rope geometry is this, repeated: a line of light bodies, each held a fixed
- * distance from the one before it by its own joint, the first joined to the
- * world. No link may stretch, yet the rope as a whole goes slack the moment it
- * is not pulled straight — which is the difference between many short joints
- * and the single long one beside it, and no hook can fake it.
- *
  * Each link needs the body before it, which only exists once that link has
- * mounted, so this recurses rather than looping over an array. The links
+ * mounted, so this recurses rather than looping over an array. The link bodies
  * themselves are never drawn: the tubes between them are the rope.
  */
 const RopeLink = ({

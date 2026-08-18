@@ -46,6 +46,7 @@ import { RawListener } from "./events/RawListener";
 import { Character } from "./systems/Character";
 import { Car } from "./systems/Car";
 import { Interpolation } from "./systems/Interpolation";
+import { StepCallbacks } from "./systems/StepCallbacks";
 import { DebugRendering } from "./systems/DebugRendering";
 import { StressTest } from "./systems/StressTest";
 import { Instancing } from "./systems/Instancing";
@@ -600,6 +601,26 @@ export const categories: Category[] = [
             interpolation has nothing to do at <code>vary</code>: one step per
             frame is already in step with the renderer. The gap between the two
             is the one step of latency interpolation costs.
+          </>
+        ),
+      },
+      {
+        name: "Step callbacks",
+        Component: StepCallbacks,
+        hook: "useBeforePhysicsStep, useAfterPhysicsStep",
+        // Two steps a frame at 60 Hz, so the per-frame ring is pulled twice as
+        // hard as it should be. Anything faster only makes the point louder.
+        timeStep: 1 / 30,
+        hint: (
+          <>
+            Two rings, same inverse-square pull, each meant to trace the grey
+            circle drawn through it. The left takes its pull from{" "}
+            <code>useBeforePhysicsStep</code>, once per step; the right from a{" "}
+            <code>useFrame</code>, once per frame. A fixed timestep is not a
+            frame, so the right ring gets the wrong amount of force and leaves
+            its circle. Switch to <b>vary</b>, where one frame is one step, and
+            both hold it. Trails are sampled per step, from{" "}
+            <code>useAfterPhysicsStep</code>.
           </>
         ),
       },

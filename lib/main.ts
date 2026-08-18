@@ -127,6 +127,10 @@ export type {
   LimitOptions,
 } from "@/Jolt/internal/constraintSettings";
 
+export { useBeforePhysicsStep } from "@/Jolt/useBeforePhysicsStep";
+export { useAfterPhysicsStep } from "@/Jolt/useAfterPhysicsStep";
+export type { PhysicsSettingsOptions } from "@/Jolt/internal/physicsSettings";
+
 export { useContactListener } from "@/Jolt/useContactListener";
 export { useBodyContacts } from "@/Jolt/useBodyContacts";
 export {
@@ -173,4 +177,7 @@ export type {
   BodyContactHandlers,
   ActivationHandlers,
   ActivationRegistry,
+  StepCallback,
+  StepPhase,
+  StepRegistry,
 } from "@/Jolt/types";
