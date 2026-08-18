@@ -637,7 +637,21 @@ Braking is independent of `driveType`. The service brake acts on all four wheels
 
 Each axle's share is split evenly between its two wheels, so the defaults give 2400 per front wheel, 600 per rear wheel, and 4000 of handbrake per rear wheel. `brakeBias: 0.5` is a balanced setup; `1` is front-only.
 
-## Raycasting
+## Queries
+
+Five ways to ask the world a question, none of which move anything or add anything to it.
+
+| Hook | Asks |
+| ---- | ---- |
+| `useClosestHitRaycaster` · `useAnyHitRaycaster` · `useAllHitsRaycaster` | what does this **ray** hit |
+| `useShapeCaster` | what does this **shape** hit, swept along a direction |
+| `useShapeOverlap` | what would this shape be **touching**, placed here |
+| `usePointQuery` | which body is **at this point** |
+| `useBroadphaseQuery` | what is **near** here, by bounding box alone |
+
+Every one of them takes `layer`, `broadPhaseLayer` and `ignoreBodies`, and every one reuses its result objects between calls — copy anything you need to keep. All of them are cheap enough to call every frame; only `useShapeCaster` allocates, and only when it is re-aimed (see below).
+
+### Raycasting
 
 Three hooks, same options and same hit shape, differing only in which hits they keep:
 
@@ -665,6 +679,100 @@ Result objects and the array are reused between casts — copy anything you need
 Any-hit stops at the first hit the traversal meets rather than comparing distances, which is why it is the cheapest and why the hit it reports is *not* necessarily the nearest.
 
 Pass `layer` to cast against something other than the moving layer. The default (`LAYER_MOVING`) masks both groups, so it sees static geometry too.
+
+### `useShapeCaster` — sweeping a shape
+
+A ray is a line with no width, so it cannot answer *would this fit through there*. A shape cast can: it sweeps a real collider along a direction and reports what stops it.
+
+```tsx
+const [, body] = useCapsule({ height: 1.2, radius: 0.45, position: [0, 1, 0] });
+
+const [caster] = useShapeCaster({
+  shape: body?.shape,
+  direction: [0, 0, -10],
+});
+
+useFrame(() => {
+  const hit = caster?.cast(position, rotation);
+  if (hit?.hit) console.log(hit.fraction, hit.contactPointOn2);
+});
+```
+
+`shape` is usually a body's own `api.shape`, which is `undefined` until that body mounts — the caster waits for it and stays `undefined` in the meantime, exactly as a constraint waits for its bodies. It holds a reference to the shape while it lives, so a caster outliving its body is safe rather than a crash.
+
+`cast(position?, rotation?, direction?)` — each argument falls back to the last one used, so a caster that only moves can be called with one. The length of `direction` is how far the sweep reaches.
+
+Re-aiming rebuilds Jolt's `ShapeCast`, which is the one allocation any query here makes — a few percent of the cost of the cast itself, and only when the aim actually changes. It is not avoidable: a `ShapeCast` caches the shape's world bounds when it is built, so one that is nudged in place keeps searching where it used to be and silently finds nothing.
+
+`mode` picks the collector and, with it, the return type:
+
+| `mode` | Returns |
+| ------ | ------- |
+| `"closest"` (default) | the first thing the sweep meets |
+| `"any"` | *a* hit, cheapest — for "is the path blocked" |
+| `"all"` | every body along the sweep, nearest first |
+
+A hit carries `fraction`, `distance`, `bodyID`, `subShapeID`, `contactPointOn1` (on your shape), `contactPointOn2` (on the body hit), `penetrationAxis`, `penetrationDepth` and `isBackFaceHit`.
+
+Also: `scale`, `backFaces` (hit the inside of triangles), and `returnDeepestPoint` for a sweep that starts already overlapping.
+
+### `useShapeOverlap` — what is in this region
+
+```tsx
+const [probe] = useShapeOverlap({ shape: blastShape, mode: "all" });
+
+const detonate = (at: Vec3Tuple) => {
+  for (const hit of probe?.overlap(at) ?? []) damage(hit.bodyID, hit.penetrationDepth);
+};
+```
+
+Same three modes and the same hit shape minus `fraction`, `distance` and `isBackFaceHit`. Trigger volumes, blast radii, "is this spawn point clear", "select everything in the box" — all of them are this rather than a ray.
+
+`maxSeparationDistance` also reports bodies within that distance of touching. `internalEdgeRemoval` drops the ghost hits a shape gets from the interior edges of a triangle mesh, where two triangles meet and neither is really a wall.
+
+### `usePointQuery` — what is here
+
+```tsx
+const [query] = usePointQuery();
+const hit = query?.query([x, y, z]);
+```
+
+The cheapest question in the library: no shape, no direction, no sweep. It returns `{ hit, bodyID, subShapeID }`, or an array of them in `"all"` mode.
+
+A very short ray is the usual substitute and answers a different question — a ray has to *enter* a body, so one starting inside reports nothing.
+
+### `useBroadphaseQuery` — what is near
+
+```tsx
+const [broad] = useBroadphaseQuery();
+const nearby = broad?.collideSphere(position, 20); // body ids
+```
+
+`castRay` · `collideAABox` · `collideSphere` · `collidePoint` · `collideOrientedBox` · `castAABox`, all returning an array of body ids and nothing else.
+
+This is the acceleration structure alone: **bounding boxes, no shape ever looked at**. Its answer is always a *superset* of the exact one, so it is right for AI perception, spatial culling, and narrowing a set before an exact test — and wrong for anything that has to be true.
+
+Jolt binds no ready-made broadphase collectors, so the library supplies its own and every hit costs one call into JS. That is affordable precisely because the answers are meant to be small; it is not a query to run against the whole world every frame.
+
+### Filtering
+
+| Option | Effect |
+| ------ | ------ |
+| `layer` | Object layer to query against. Defaults to `LAYER_MOVING`, which masks both groups and so sees static geometry too |
+| `broadPhaseLayer` | Skip whole regions of the tree before any shape is looked at. Index into `broadPhaseLayers` on `<Physics>` |
+| `ignoreBodies` | Bodies the query pretends are not there |
+
+`ignoreBodies` is also settable at runtime — `api.setIgnoredBodies([body])` — which is usually necessary rather than convenient: the body doing the asking does not exist yet when the query hook mounts, and without it a self-query reports itself at zero distance.
+
+### `overlapsAABox` / `overlapsOrientedBox`
+
+Two plain functions, not hooks — box-against-box with no world involved, for culling and region tests you want answered without asking the simulation anything.
+
+```tsx
+const { Jolt } = useJolt();
+
+overlapsAABox(Jolt, { centre, halfExtents, rotation }, { min, max });
+```
 
 ## Contact events
 
@@ -811,7 +919,7 @@ pnpm install
 pnpm dev
 ```
 
-45 scenes in seven categories, one per hook or feature:
+48 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
@@ -819,7 +927,7 @@ pnpm dev
 | **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · motion quality |
 | **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale · conveyor    |
 | **Constraints**  | all 8 constraint hooks · motors · springs · rope built from chained distance joints                 |
-| **Queries**      | closest hit · any hit · all hits                                                                   |
+| **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener`                                                           |
 | **Systems**      | character · car · interpolation · step callbacks · debug rendering · stress test · instancing        |
 

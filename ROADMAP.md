@@ -49,13 +49,13 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 
 ### Queries and events
 
-- [ ] Shape casting (`CastShape`) with closest / any / all collectors — `CastShapeClosestHitCollisionCollector`, `…AnyHit…`, `…AllHit…`
-- [ ] Shape overlap (`CollideShape`) with closest / any / all collectors — the same three variants exist
-- [ ] Point queries (`CollidePoint`)
-- [ ] `useBroadphaseQuery` → `BroadPhaseQuery.CastRay` / `CollideAABox` / `CollideSphere` / `CollidePoint` / `CollideOrientedBox` / `CastAABox` — cheap "what might be near me" tests for AI perception and spatial culling, with no narrow-phase cost
-- [ ] `CollideShapeWithInternalEdgeRemoval` as an option on shape overlap — avoids ghost hits against dense triangle meshes
-- [ ] `SpecifiedBroadPhaseLayerFilter` alongside the default filters, for querying one specific broadphase layer
-- [ ] `OrientedBox.OverlapsAABox` / `OverlapsOrientedBox` exposed as cheap CPU-side overlap helpers
+- [x] Shape casting (`CastShape`) with closest / any / all collectors — `CastShapeClosestHitCollisionCollector`, `…AnyHit…`, `…AllHit…`. One `useShapeCaster` with a typed `mode` rather than three hooks
+- [x] Shape overlap (`CollideShape`) with closest / any / all collectors — the same three variants exist
+- [x] Point queries (`CollidePoint`)
+- [x] `useBroadphaseQuery` → `BroadPhaseQuery.CastRay` / `CollideAABox` / `CollideSphere` / `CollidePoint` / `CollideOrientedBox` / `CastAABox` — cheap "what might be near me" tests for AI perception and spatial culling, with no narrow-phase cost. **Amended:** no concrete broadphase collectors are bound — only the `*JS` bases, whose `AddHit` hands back a raw pointer — so the library supplies its own and every hit costs a call into JS. That is why it returns body ids only
+- [x] `CollideShapeWithInternalEdgeRemoval` as an option on shape overlap — avoids ghost hits against dense triangle meshes
+- [x] `SpecifiedBroadPhaseLayerFilter` alongside the default filters, for querying one specific broadphase layer. Plus `ignoreBodies` on every query including the raycasters, settable at runtime
+- [x] `OrientedBox.OverlapsAABox` / `OverlapsOrientedBox` exposed as cheap CPU-side overlap helpers — plain functions, not hooks
 - [ ] Sensor/intersection events (`onIntersectionEnter`/`Exit`) building on 0.2.1's `sensor`
 - [ ] Contact force payload (`totalForceMagnitude`, `maxForceDirection`) read from the manifold, so a consumer can tell a scrape from an impact
 - [x] `useConveyor` → `ContactSettings.mRelativeLinearSurfaceVelocity` / `mRelativeAngularSurfaceVelocity` — belts, moving walkways and turntables, with `setLinear` / `setAngular` for runtime control

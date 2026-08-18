@@ -6,6 +6,11 @@ import { useCar } from "@/Jolt/useCar";
 import { useCharacter } from "@/Jolt/useCharacter";
 import { useBox } from "@/Jolt/useBox";
 import { useConveyor } from "@/Jolt/useConveyor";
+import { useSphere } from "@/Jolt/useSphere";
+import { useShapeCaster } from "@/Jolt/useShapeCaster";
+import { useShapeOverlap } from "@/Jolt/useShapeOverlap";
+import { usePointQuery } from "@/Jolt/usePointQuery";
+import { useBroadphaseQuery } from "@/Jolt/useBroadphaseQuery";
 import { useFixedConstraint } from "@/Jolt/useFixedConstraint";
 import { usePointConstraint } from "@/Jolt/usePointConstraint";
 import { useHingeConstraint } from "@/Jolt/useHingeConstraint";
@@ -196,6 +201,46 @@ const DebuggedJoint = () => {
   return null;
 };
 
+/**
+ * Every query hook at once, each in a different mode, plus a few hundred calls
+ * of each. Two different leaks are possible here and only one of them shows on
+ * a mount cycle: the hand-rolled `*JS` broadphase collectors are torn down per
+ * mount, but a Jolt object allocated *per call* would only show under repeated
+ * casting.
+ */
+const Queries = () => {
+  const [, sphere] = useSphere({
+    radius: 0.5,
+    position: [0, 4, 0],
+    motionType: "static",
+  });
+
+  const shape = sphere?.shape;
+
+  const [caster] = useShapeCaster({
+    shape,
+    mode: "all",
+    direction: [0, -8, 0],
+  });
+  const [probe] = useShapeOverlap({ shape, mode: "all" });
+  const [point] = usePointQuery({ mode: "all" });
+  const [broad] = useBroadphaseQuery();
+
+  useFrame(() => {
+    caster?.cast([0, 4, 0]);
+    probe?.overlap([0, 0.5, 0]);
+    point?.query([0, 0, 0]);
+    broad?.collideAABox([-2, -2, -2], [2, 2, 2]);
+    broad?.collideSphere([0, 0, 0], 2);
+    broad?.collidePoint([0, 0, 0]);
+    broad?.collideOrientedBox([0, 0, 0], [1, 1, 1]);
+    broad?.castRay([0, 6, 0], [0, -12, 0]);
+    broad?.castAABox([-1, 5, -1], [1, 6, 1], [0, -12, 0]);
+  });
+
+  return null;
+};
+
 const cycles = async (element: React.ReactElement, frames: number) => {
   const module = await loadDebugModule();
 
@@ -285,6 +330,12 @@ describe("mount/unmount leak checks", () => {
     expect(module.JoltInterface.prototype.sGetFreeMemory()).toBe(baseline);
 
     await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("the query hooks leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<Queries />, 60);
+    expect(after).toBe(baseline);
     expectNoAsserts();
   });
 

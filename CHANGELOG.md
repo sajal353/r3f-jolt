@@ -2,6 +2,20 @@
 
 ## 0.3.0
 
+### Queries
+
+Raycasts were the only question the library could ask the world. Four more hooks, none of which move anything or add anything to the world.
+
+- **`useShapeCaster`** sweeps a real collider along a direction. A ray is a line with no width, so *would this fit through there* was not a question that could be asked before this.
+- **`useShapeOverlap`** reports what a shape would be touching, placed somewhere — trigger volumes, blast radii, "is this spawn point clear". `maxSeparationDistance` widens it to bodies near touching, and `internalEdgeRemoval` drops the ghost hits a shape gets from the interior edges of a triangle mesh.
+- **`usePointQuery`** — which body contains this point. The usual substitute, a very short ray, answers a different question: a ray has to *enter* a body, so one starting inside reports nothing.
+- **`useBroadphaseQuery`** — `castRay` / `collideAABox` / `collideSphere` / `collidePoint` / `collideOrientedBox` / `castAABox`, returning body ids and nothing else. Bounding boxes only, no shape ever looked at, so the answer is always a superset of the exact one. Jolt binds no ready-made broadphase collectors, so the library supplies its own and every hit costs one call into JS — affordable precisely because the answers are meant to be small.
+- All three narrow-phase hooks take `mode: "closest" | "any" | "all"`, which picks the collector and the return type together. This differs from the raycasters, which are three hooks; those cannot change.
+- **`ignoreBodies` and `broadPhaseLayer` on every query, raycasters included**, plus `setIgnoredBodies` at runtime. The second is usually necessary rather than convenient: the body doing the asking does not exist yet when the query hook mounts, and without it a self-query reports itself at zero distance.
+- **`overlapsAABox` / `overlapsOrientedBox`** as plain functions rather than hooks — box against box, no world involved.
+- A shape handed to a query is usually a body's own `api.shape`, which is `undefined` until that body mounts. The query waits for it, and holds a reference to it while it lives, so a query outliving its body is safe rather than a crash.
+- Three demo scenes: **Shape cast** (the same capsule swept at a gate it fits and one it does not), **Shape overlap** (a region highlighting what it contains, with the broadphase's answer drawn over the exact one), and **Point query**.
+
 ### Step callbacks
 
 - **`useBeforePhysicsStep(callback)`** and **`useAfterPhysicsStep(callback)`** run once per physics step, which is not once per frame: a fixed timestep runs however many steps that frame's delta paid for. A force applied from a `useFrame` is therefore applied at the wrong strength, and by how much depends on the viewer's refresh rate — which is why buoyancy, thrusters and custom gravity fields need these.

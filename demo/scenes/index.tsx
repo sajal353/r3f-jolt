@@ -39,6 +39,9 @@ import { SpringsScene } from "./constraints/Springs";
 import { ClosestHit } from "./queries/ClosestHit";
 import { AnyHit } from "./queries/AnyHit";
 import { AllHits } from "./queries/AllHits";
+import { ShapeCast } from "./queries/ShapeCast";
+import { ShapeOverlap } from "./queries/ShapeOverlap";
+import { PointQuery } from "./queries/PointQuery";
 
 import { BodyContacts } from "./events/BodyContacts";
 import { RawListener } from "./events/RawListener";
@@ -522,6 +525,43 @@ export const categories: Category[] = [
           <>
             Every body the ray crosses, sorted nearest-first. The array and the
             hits in it are reused between casts, so copy anything you keep.
+          </>
+        ),
+      },
+      {
+        name: "Shape cast",
+        Component: ShapeCast,
+        hook: "useShapeCaster",
+        hint: (
+          <>
+            One 0.9-wide capsule sliding along a wall, swept at it from a fixed
+            distance. It clears the 1.6 and 1.0 gaps and is stopped by the 0.6
+            one. A ray is a line with no width and would go through all three.
+          </>
+        ),
+      },
+      {
+        name: "Shape overlap",
+        Component: ShapeOverlap,
+        hook: "useShapeOverlap, useBroadphaseQuery",
+        hint: (
+          <>
+            A sphere sweeping through a wall of crates: green is what it is
+            touching, orange is what the broadphase names for the same region.
+            The broadphase compares bounding boxes and never looks at a shape,
+            so its answer is always a superset.
+          </>
+        ),
+      },
+      {
+        name: "Point query",
+        Component: PointQuery,
+        hook: "usePointQuery",
+        hint: (
+          <>
+            The pointer projected onto the z=0 plane, asking which body is at
+            that point. A short ray cannot stand in for it: a ray has to{" "}
+            <i>enter</i> a body, so one starting inside reports nothing.
           </>
         ),
       },

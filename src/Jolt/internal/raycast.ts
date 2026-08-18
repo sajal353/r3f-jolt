@@ -1,5 +1,10 @@
 import { Vector3 } from "three";
 import type Jolt from "jolt-physics";
+import {
+  createQueryFilters,
+  readVector,
+  type QueryFilterOptions,
+} from "./query";
 import type { JoltApi, Vec3Input } from "../types";
 
 export interface RaycastHit {
@@ -20,30 +25,20 @@ export const createHit = (): RaycastHit => ({
   bodyID: 0,
 });
 
-const readVector = (value: Vec3Input) =>
-  Array.isArray(value)
-    ? ([value[0], value[1], value[2]] as const)
-    : ([value.x, value.y, value.z] as const);
-
 /**
  * The parts every raycaster needs identically: the filter set, the reusable ray,
  * and the reset-then-cast discipline. Jolt collectors accumulate across casts,
  * so forgetting the `Reset()` yields hits from three frames ago.
  */
-export const createRaycastContext = (api: JoltApi, layer: number) => {
-  const { Jolt: jolt, joltInterface, physicsSystem } = api;
+export const createRaycastContext = (
+  api: JoltApi,
+  layer: number,
+  options: QueryFilterOptions = {},
+) => {
+  const { Jolt: jolt, physicsSystem } = api;
 
   const settings = new jolt.RayCastSettings();
-  const broadPhaseFilter = new jolt.DefaultBroadPhaseLayerFilter(
-    joltInterface.GetObjectVsBroadPhaseLayerFilter(),
-    layer,
-  );
-  const objectFilter = new jolt.DefaultObjectLayerFilter(
-    joltInterface.GetObjectLayerPairFilter(),
-    layer,
-  );
-  const bodyFilter = new jolt.BodyFilter();
-  const shapeFilter = new jolt.ShapeFilter();
+  const filters = createQueryFilters(api, layer, options);
 
   const rayOrigin = new jolt.RVec3(0, 0, 0);
   const rayDirection = new jolt.Vec3(0, -1, 0);
@@ -74,10 +69,10 @@ export const createRaycastContext = (api: JoltApi, layer: number) => {
         ray,
         settings,
         collector,
-        broadPhaseFilter,
-        objectFilter,
-        bodyFilter,
-        shapeFilter,
+        filters.broadPhaseFilter,
+        filters.objectFilter,
+        filters.bodyFilter,
+        filters.shapeFilter,
       );
   };
 
@@ -118,18 +113,22 @@ export const createRaycastContext = (api: JoltApi, layer: number) => {
     jolt.destroy(ray);
     jolt.destroy(rayOrigin);
     jolt.destroy(rayDirection);
-    jolt.destroy(shapeFilter);
-    jolt.destroy(bodyFilter);
-    jolt.destroy(objectFilter);
-    jolt.destroy(broadPhaseFilter);
+    filters.destroy();
     jolt.destroy(settings);
   };
 
-  return { ray, aim, cast, clear, fill, destroy };
+  return {
+    ray,
+    aim,
+    cast,
+    clear,
+    fill,
+    destroy,
+    setIgnoredBodies: filters.setIgnoredBodies,
+  };
 };
 
-export interface RaycasterOptions {
+export interface RaycasterOptions extends QueryFilterOptions {
   origin?: Vec3Input;
   direction?: Vec3Input;
-  layer?: number;
 }

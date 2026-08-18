@@ -62,6 +62,43 @@ export {
 export type { RaycasterOptions } from "@/Jolt/internal/raycast";
 
 export {
+  useShapeCaster,
+  type UseShapeCasterOptions,
+  type ShapeCasterApi,
+} from "@/Jolt/useShapeCaster";
+export {
+  useShapeOverlap,
+  type UseShapeOverlapOptions,
+  type ShapeOverlapApi,
+} from "@/Jolt/useShapeOverlap";
+export {
+  usePointQuery,
+  type UsePointQueryOptions,
+  type PointQueryApi,
+  type PointHit,
+} from "@/Jolt/usePointQuery";
+export {
+  useBroadphaseQuery,
+  type UseBroadphaseQueryOptions,
+  type BroadphaseQueryApi,
+} from "@/Jolt/useBroadphaseQuery";
+
+export {
+  overlapsAABox,
+  overlapsOrientedBox,
+  type AABoxInput,
+  type OrientedBoxInput,
+} from "@/Jolt/boxOverlap";
+
+export type {
+  QueryBody,
+  QueryMode,
+  QueryFilterOptions,
+  OverlapHit,
+  ShapeCastHit,
+} from "@/Jolt/internal/query";
+
+export {
   useFixedConstraint,
   type UseFixedConstraintOptions,
   type FixedConstraintApi,
