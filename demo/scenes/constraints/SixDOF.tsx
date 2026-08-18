@@ -1,6 +1,6 @@
 import { Floor, Tag } from "../../shared/Stage";
+import { Projectile } from "./Projectile";
 import { useBox } from "@/Jolt/useBox";
-import { useSphere } from "@/Jolt/useSphere";
 import { useSixDOFConstraint } from "@/Jolt/useSixDOFConstraint";
 import type { UseSixDOFConstraintOptions } from "@/Jolt/useSixDOFConstraint";
 import type { Vec3Tuple } from "@/Jolt/types";
@@ -27,7 +27,6 @@ const Rig = ({
   useSixDOFConstraint(null, body, {
     position: home,
     axes,
-    debug: true,
   });
 
   return (
@@ -38,23 +37,17 @@ const Rig = ({
   );
 };
 
-const Nudger = ({ x }: { x: number }) => {
-  const [ref] = useSphere({
-    radius: 0.35,
-    position: [x - 0.5, 2.6, -6],
-    motionType: "dynamic",
-    mass: 20,
-    initialVelocity: [0, 0, 9],
-    gravityFactor: 0,
-  });
-
-  return (
-    <mesh ref={ref} castShadow>
-      <sphereGeometry args={[0.35, 16, 16]} />
-      <meshStandardMaterial color="#e74c3c" />
-    </mesh>
-  );
-};
+/** Off-centre on purpose: a square-on hit would never turn the rigs that spin. */
+const Nudger = ({ x }: { x: number }) => (
+  <Projectile
+    from={[x - 0.5, 2.6, -6]}
+    to={[x - 0.5, 2.1, -RIG_SIZE[2] / 2]}
+    seconds={0.6}
+    radius={0.35}
+    mass={20}
+    color="#e74c3c"
+  />
+);
 
 const LOCKED_EXCEPT_SLIDE: UseSixDOFConstraintOptions["axes"] = {
   translationX: { limits: { min: -3, max: 3 } },

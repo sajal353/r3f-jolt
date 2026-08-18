@@ -35,7 +35,6 @@ import { ConeAndSwingTwistScene } from "./constraints/ConeAndSwingTwist";
 import { SixDOFConstraintScene } from "./constraints/SixDOF";
 import { MotorsScene } from "./constraints/Motors";
 import { SpringsScene } from "./constraints/Springs";
-import { MachineScene } from "./constraints/Machine";
 
 import { ClosestHit } from "./queries/ClosestHit";
 import { AnyHit } from "./queries/AnyHit";
@@ -56,7 +55,7 @@ export interface Scene {
   Component: ComponentType;
   hook: string;
   hint: ReactNode;
-  /** Whether `<PhysicsDebug />` starts on. Off for scenes it would drown. */
+  /** Starts `<PhysicsDebug />` on. Off everywhere unless the scene is about it. */
   physicsDebug?: boolean;
   /** Starting timestep. Defaults to `"vary"`; only scenes about a fixed step set it. */
   timeStep?: number | "vary";
@@ -274,10 +273,10 @@ export const categories: Category[] = [
         timeStep: 1 / 60,
         hint: (
           <>
-            Two bullets at 70 m/s into a 6 cm pane, at a fixed{" "}
-            <code>1/60</code> — 1.2 m of travel per step, so the{" "}
-            <code>discrete</code> one is above the pane on one step and below it
-            on the next. <code>linearCast</code> sweeps the gap instead.
+            Two bullets at 70 m/s into a 6 cm pane, at a fixed <code>1/60</code>{" "}
+            — 1.2 m of travel per step, so the <code>discrete</code> one is
+            above the pane on one step and below it on the next.{" "}
+            <code>linearCast</code> sweeps the gap instead.
           </>
         ),
       },
@@ -352,13 +351,12 @@ export const categories: Category[] = [
         name: "Conveyor",
         Component: Conveyor,
         hook: "useConveyor",
-        physicsDebug: false,
         hint: (
           <>
             A surface that drags what rests on it while the body stays put. The
             circuit reverses as one line because every belt carries the same{" "}
-            <i>local</i> velocity and differs only in placement; the blue belt is
-            turned a full 90°, and the disc uses <code>angular</code> alone.
+            <i>local</i> velocity and differs only in placement; the blue belt
+            is turned a full 90°, and the disc uses <code>angular</code> alone.
             Friction does the dragging, so a frictionless belt carries nothing.
           </>
         ),
@@ -389,8 +387,8 @@ export const categories: Category[] = [
           <>
             A ball joint: the anchor points are held together and every rotation
             stays free. Passing <code>null</code> as the first body joins to the
-            world, which is what holds each chain up without a static block. The
-            gold lines are the joint debug view.
+            world, which is what holds each chain up without a static block.
+            Turn on <code>PhysicsDebug</code> to see every joint drawn in gold.
           </>
         ),
       },
@@ -412,9 +410,9 @@ export const categories: Category[] = [
         hook: "useSliderConstraint",
         hint: (
           <>
-            One translation along a shared axis. <code>maxFrictionForce</code>
-            {" "}resists travel without stopping it, and a vertical slider is
-            held up by nothing but its own lower limit.
+            One translation along a shared axis. <code>maxFrictionForce</code>{" "}
+            resists travel without stopping it, and a vertical slider is held up
+            by nothing but its own lower limit.
           </>
         ),
       },
@@ -424,9 +422,10 @@ export const categories: Category[] = [
         hook: "useDistanceConstraint",
         hint: (
           <>
-            Keeps two points within a range. Equal min and max is a rigid rod;
-            a min of zero is a rope that stays slack until it runs out, which is
-            why the red ball drops before it swings.
+            Keeps two points within a range. Equal min and max is a rigid rod; a
+            min of zero stays slack until it runs out, which is why the red ball
+            drops before it swings. Chain a line of light bodies the same way
+            and you have rope — no rope hook required, just one joint per link.
           </>
         ),
       },
@@ -461,9 +460,13 @@ export const categories: Category[] = [
         hint: (
           <>
             A <b>position</b> motor holds a target and carries load; a{" "}
-            <b>velocity</b> motor turns at a rate. Every runtime setter wakes
-            both bodies first — a settled joint is asleep, and would otherwise
-            ignore its new target entirely.
+            <b>velocity</b> motor turns at a rate. Hand a position motor a
+            distant target and it closes the gap as fast as its force limit
+            allows, so gravity makes the lift drop quicker than it rises — the
+            door and the lift here walk their targets over at a fixed rate
+            instead, which is what makes both directions take the same time.
+            Every runtime setter wakes both bodies first: a settled joint is
+            asleep, and would otherwise ignore its new target entirely.
           </>
         ),
       },
@@ -479,20 +482,6 @@ export const categories: Category[] = [
             Re-dropped every six seconds.
           </>
         ),
-      },
-      {
-        name: "Machine",
-        Component: MachineScene,
-        hook: "all eight constraint hooks",
-        hint: (
-          <>
-            A chute feeds a motorised lift, the lift loads a motorised
-            turntable, the turntable sweeps the ball past a swinging gate and
-            down a ramp into sprung skittles. Fixed, point, hinge, slider,
-            distance, cone, swing-twist and six-DOF joints, all at once.
-          </>
-        ),
-        physicsDebug: false,
       },
     ],
   },
@@ -573,7 +562,6 @@ export const categories: Category[] = [
         name: "Character",
         Component: Character,
         hook: "useCharacter",
-        physicsDebug: false,
         hint: (
           <>
             <code>WASD</code> to move, <code>Space</code> to jump,{" "}
@@ -588,7 +576,6 @@ export const categories: Category[] = [
         name: "Car",
         Component: Car,
         hook: "useCar",
-        physicsDebug: false,
         hint: (
           <>
             <code>WASD</code> to drive, <code>Space</code> for handbrake,{" "}
@@ -620,7 +607,6 @@ export const categories: Category[] = [
         name: "Stress test",
         Component: StressTest,
         hook: "everything at once",
-        physicsDebug: false,
         hint: (
           <>
             All seven dynamic shape hooks spawning continuously to a cap of 1500
@@ -638,7 +624,6 @@ export const categories: Category[] = [
         name: "Instancing",
         Component: Instancing,
         hook: "useJolt, shapeToGeometry",
-        physicsDebug: false,
         hint: (
           <>
             1050 bodies in <b>seven</b> draw calls — 150 each of the seven

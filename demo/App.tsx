@@ -30,7 +30,7 @@ const App = () => {
   // and times itself against the step, so at a fixed rate on a display that is
   // not exactly 60 Hz the two diverge, and a character riding a kinematic
   // platform slides by the difference.
-  const globalDebug = debugOverride ?? scene.physicsDebug !== false;
+  const globalDebug = debugOverride ?? scene.physicsDebug === true;
   const timeStep = stepOverride ?? scene.timeStep ?? "vary";
 
   return (

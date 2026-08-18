@@ -1,6 +1,6 @@
 import { Floor, Tag } from "../../shared/Stage";
+import { Projectile } from "./Projectile";
 import { useBox } from "@/Jolt/useBox";
-import { useSphere } from "@/Jolt/useSphere";
 import { useHingeConstraint } from "@/Jolt/useHingeConstraint";
 import type { LimitOptions } from "@/Jolt/internal/constraintSettings";
 import type { Vec3Tuple } from "@/Jolt/types";
@@ -30,7 +30,6 @@ const Door = ({
     hingeAxis: [0, 1, 0],
     normalAxis: [1, 0, 0],
     limits,
-    debug: true,
   });
 
   return (
@@ -41,24 +40,14 @@ const Door = ({
   );
 };
 
-const Knocker = ({ x }: { x: number }) => {
-  const [ref] = useSphere({
-    radius: 0.4,
-    position: [x + 1, HINGE_HEIGHT, -5],
-    motionType: "dynamic",
-    mass: 25,
-    initialVelocity: [0, 0, 7],
-    gravityFactor: 0,
-    linearDamping: 0,
-  });
-
-  return (
-    <mesh ref={ref} castShadow>
-      <sphereGeometry args={[0.4, 20, 20]} />
-      <meshStandardMaterial color="#e67e22" />
-    </mesh>
-  );
-};
+/** Aimed at the far edge of the door, where a hinge has the most to say. */
+const Knocker = ({ x }: { x: number }) => (
+  <Projectile
+    from={[x + DOOR_SIZE[0], 1.6, -6]}
+    to={[x + DOOR_SIZE[0], HINGE_HEIGHT + 0.4, 0]}
+    mass={25}
+  />
+);
 
 export const HingeConstraintScene = () => (
   <>

@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useFrame } from "@react-three/fiber";
 import { Controls, Floor, Hud, Tag } from "../../shared/Stage";
 import { useBox } from "@/Jolt/useBox";
 import { useSphere } from "@/Jolt/useSphere";
@@ -8,6 +9,45 @@ import type { Vec3Tuple } from "@/Jolt/types";
 
 const DOOR_SIZE: Vec3Tuple = [2.4, 3, 0.2];
 const STIFF = { frequency: 20, damping: 1 };
+
+/** Radians per second for the door, metres per second for the lift. */
+const DOOR_SPEED = 2.4;
+const LIFT_SPEED = 5;
+
+/**
+ * A position motor takes a setpoint, not a speed. Hand it a distant target and
+ * it closes the gap as fast as its force limit allows, so the same door slams
+ * open and drifts shut the moment anything — a limit, gravity — helps one
+ * direction and not the other, and a target set right on a limit overshoots
+ * hard enough to punch through it before the limit catches up.
+ *
+ * Walking the setpoint at a fixed rate instead makes every direction take the
+ * same time by construction, and is how a real powered door or lift is driven:
+ * the motor is always chasing a target a few millimetres away.
+ */
+const useSetpoint = (
+  target: number,
+  rate: number,
+  drive: ((value: number) => void) | undefined,
+) => {
+  const setpoint = useRef(target);
+
+  useFrame((_, delta) => {
+    const gap = target - setpoint.current;
+    if (gap === 0) return;
+
+    // A tab left in the background hands back one enormous delta; without the
+    // clamp the setpoint jumps the whole way and the slam is back.
+    const travel = rate * Math.min(delta, 1 / 30);
+
+    setpoint.current =
+      Math.abs(gap) <= travel
+        ? target
+        : setpoint.current + Math.sign(gap) * travel;
+
+    drive?.(setpoint.current);
+  });
+};
 
 const PoweredDoor = ({ open }: { open: boolean }) => {
   const hinge: Vec3Tuple = [-6, 2, 0];
@@ -29,12 +69,9 @@ const PoweredDoor = ({ open }: { open: boolean }) => {
       maxTorqueLimit: 4000,
       spring: STIFF,
     },
-    debug: true,
   });
 
-  useEffect(() => {
-    joint?.setTargetAngle(open ? -Math.PI / 2 : 0);
-  }, [joint, open]);
+  useSetpoint(open ? -Math.PI / 2 : 0, DOOR_SPEED, joint?.setTargetAngle);
 
   return (
     <mesh ref={ref} castShadow receiveShadow>
@@ -68,12 +105,9 @@ const PoweredLift = ({ raised }: { raised: boolean }) => {
       maxForceLimit: 20000,
       spring: STIFF,
     },
-    debug: true,
   });
 
-  useEffect(() => {
-    joint?.setTargetPosition(raised ? 5 : 0);
-  }, [joint, raised]);
+  useSetpoint(raised ? 5 : 0, LIFT_SPEED, joint?.setTargetPosition);
 
   return (
     <mesh ref={ref} castShadow receiveShadow>
@@ -117,9 +151,10 @@ const Turntable = ({ speed }: { speed: number }) => {
       targetAngularVelocity: speed,
       maxTorqueLimit: 3000,
     },
-    debug: true,
   });
 
+  // No ramp here: a velocity motor is commanded in the units it runs in, so
+  // it is already symmetric — which is half of why the two kinds exist.
   useEffect(() => {
     joint?.setTargetAngularVelocity(speed);
   }, [joint, speed]);
@@ -171,8 +206,7 @@ export const MotorsScene = () => {
       <Tag position={[6, 4, 0]}>hinge · velocity motor</Tag>
 
       <Hud position={[0, 10, 0]}>
-        every setter wakes both bodies — a settled joint is asleep and would
-        otherwise ignore a new target
+        position motors walk to their target · same speed both ways
       </Hud>
     </>
   );

@@ -39,7 +39,6 @@ const SprungBob = ({
     normalAxis: [1, 0, 0],
     limits: { min: 0, max: DROP_HEIGHT - REST_HEIGHT },
     limitsSpring: spring,
-    debug: true,
   });
 
   useEffect(() => {

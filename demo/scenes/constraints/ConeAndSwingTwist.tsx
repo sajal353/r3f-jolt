@@ -1,6 +1,6 @@
 import { Floor, Tag } from "../../shared/Stage";
+import { Projectile } from "./Projectile";
 import { useCapsule } from "@/Jolt/useCapsule";
-import { useSphere } from "@/Jolt/useSphere";
 import { useConeConstraint } from "@/Jolt/useConeConstraint";
 import { useSwingTwistConstraint } from "@/Jolt/useSwingTwistConstraint";
 import type { Vec3Tuple } from "@/Jolt/types";
@@ -46,7 +46,6 @@ const ConeReed = ({
     point: base,
     twistAxis: [0, 1, 0],
     halfConeAngle,
-    debug: true,
   });
 
   return <ReedMesh reedRef={ref} color={color} />;
@@ -78,29 +77,21 @@ const SwingTwistReed = ({
     planeHalfConeAngle: swingAngle,
     twistMinAngle: -twist,
     twistMaxAngle: twist,
-    debug: true,
   });
 
   return <ReedMesh reedRef={ref} color={color} />;
 };
 
-const Pellet = ({ x, z }: { x: number; z: number }) => {
-  const [ref] = useSphere({
-    radius: 0.3,
-    position: [x, 1.8, z],
-    motionType: "dynamic",
-    mass: 12,
-    initialVelocity: [0, 0, -z * 2],
-    gravityFactor: 0,
-  });
-
-  return (
-    <mesh ref={ref} castShadow>
-      <sphereGeometry args={[0.3, 16, 16]} />
-      <meshStandardMaterial color="#e67e22" />
-    </mesh>
-  );
-};
+/** Aimed at the reed's upper half, which is where a pinned base gives leverage. */
+const Pellet = ({ x }: { x: number }) => (
+  <Projectile
+    from={[x, 2.2, 5]}
+    to={[x, REED_HEIGHT * 0.85, 0]}
+    seconds={0.5}
+    radius={0.3}
+    mass={12}
+  />
+);
 
 export const ConeAndSwingTwistScene = () => (
   <>
@@ -113,11 +104,11 @@ export const ConeAndSwingTwistScene = () => (
     <SwingTwistReed x={3} swingAngle={0.5} twist={0} color="#2ecc71" />
     <SwingTwistReed x={6} swingAngle={0.5} twist={Math.PI} color="#82e0aa" />
 
-    <Pellet x={-7} z={4} />
-    <Pellet x={-4} z={4} />
-    <Pellet x={-1} z={4} />
-    <Pellet x={3} z={4} />
-    <Pellet x={6} z={4} />
+    <Pellet x={-7} />
+    <Pellet x={-4} />
+    <Pellet x={-1} />
+    <Pellet x={3} />
+    <Pellet x={6} />
 
     <Tag position={[-4, 4.5, 0]}>useConeConstraint · lean limits 0.15 / 0.5 / 1.1 rad</Tag>
     <Tag position={[4.5, 4.5, 0]}>useSwingTwistConstraint · twist locked / free</Tag>

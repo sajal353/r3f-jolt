@@ -1,6 +1,6 @@
 import { Floor, Tag } from "../../shared/Stage";
+import { Projectile } from "./Projectile";
 import { useBox } from "@/Jolt/useBox";
-import { useSphere } from "@/Jolt/useSphere";
 import { useFixedConstraint } from "@/Jolt/useFixedConstraint";
 import type { BodyApi } from "@/Jolt/internal/useBody";
 import type Jolt from "jolt-physics";
@@ -72,23 +72,16 @@ const Tower = ({
   <TowerBlock x={x} index={0} below={undefined} welded={welded} color={color} />
 );
 
-const Cannonball = ({ x }: { x: number }) => {
-  const [ref] = useSphere({
-    radius: 0.6,
-    position: [x, 2.5, -8],
-    motionType: "dynamic",
-    mass: 40,
-    initialVelocity: [0, 0, 12],
-    gravityFactor: 0,
-  });
-
-  return (
-    <mesh ref={ref} castShadow>
-      <sphereGeometry args={[0.6, 24, 24]} />
-      <meshStandardMaterial color="#c0392b" metalness={0.4} />
-    </mesh>
-  );
-};
+/** Aimed low, so the welded tower has to topple rather than lose its top block. */
+const Cannonball = ({ x }: { x: number }) => (
+  <Projectile
+    from={[x, 3, -8]}
+    to={[x, BLOCK * 1.5, 0]}
+    radius={0.6}
+    mass={40}
+    color="#c0392b"
+  />
+);
 
 export const FixedConstraintScene = () => (
   <>

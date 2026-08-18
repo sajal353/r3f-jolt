@@ -752,14 +752,14 @@ pnpm install
 pnpm dev
 ```
 
-45 scenes in seven categories, one per hook or feature:
+44 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
 | **Shapes**       | all 8 body hooks, one scene each                                                                   |
 | **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · motion quality |
 | **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale · conveyor    |
-| **Constraints**  | all 8 constraint hooks · motors · springs · a machine driven by every one of them at once           |
+| **Constraints**  | all 8 constraint hooks · motors · springs · rope built from chained distance joints                 |
 | **Queries**      | closest hit · any hit · all hits                                                                   |
 | **Events**       | `useBodyContacts` · `useContactListener`                                                           |
 | **Systems**      | character · car · interpolation · debug rendering · stress test · instancing                        |

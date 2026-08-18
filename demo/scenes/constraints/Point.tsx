@@ -36,7 +36,6 @@ const ChainLink = ({
 
   usePointConstraint(above, api, {
     point: [x, y + LINK_SPACING / 2, 0],
-    debug: true,
   });
 
   return (

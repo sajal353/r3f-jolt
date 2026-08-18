@@ -78,6 +78,26 @@ export const rampPlacement = ({
   };
 };
 
+/** Matches `<Physics>`'s own default, which no scene here overrides. */
+const GRAVITY = 9.81;
+
+/**
+ * The launch velocity that carries a body from `from` to `to` in `seconds`,
+ * against the world's gravity. A scene that wants to knock something over can
+ * then aim at the spot it should hit and still let the thrown body fall
+ * afterwards — `gravityFactor: 0` would reach the same spot but sail off level
+ * for ever after the bounce, and reads on screen as gravity being broken.
+ */
+export const ballisticVelocity = (
+  from: Vec3Tuple,
+  to: Vec3Tuple,
+  seconds: number,
+): Vec3Tuple => [
+  (to[0] - from[0]) / seconds,
+  (to[1] - from[1]) / seconds + (GRAVITY * seconds) / 2,
+  (to[2] - from[2]) / seconds,
+];
+
 export interface BeltPlacement {
   position: Vec3Tuple;
   rotation: QuatTuple;
