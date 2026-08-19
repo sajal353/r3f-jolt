@@ -2,6 +2,22 @@
 
 ## 0.3.0
 
+### Shapes
+
+Four colliders Jolt supports were unreachable, and the most common static collider of all — a ground plane — had to be faked with a very wide box.
+
+- **`usePlane`** — the ground, as a collider rather than a 100×0.01×100 slab. **Jolt's plane is not infinite**: it is a half space bounded by `halfExtent`, whose Jolt default of 1000 paints a two-kilometre wireframe quad over every scene with `<PhysicsDebug />` on. The hook defaults it to 100 and sizes the render mesh separately with `renderSize`, so the gap between the collider and what you can see is a choice rather than a surprise. Give it a `normal` and a `constant`, or a `point` it passes through.
+- **`useHeightField`** — terrain at a fraction of a triangle mesh's cost. `heights` takes a `(x, z) => number | null` sampler, a row-major `number[]` / `Float32Array`, or greyscale image data so a heightmap PNG drops straight in; all three index the same way and a `null` or `NaN` sample is a hole nothing collides with. The api adds `getMinHeight` / `getMaxHeight` / `getHeight`, `isNoCollision`, and `getHeights` / `setHeights` — the primitive craters are built on, with the render geometry re-triangulated in place so the mesh and the collider cannot drift.
+- **`useTaperedCylinder`** — a cylinder with two radii, and with one at zero, a cone. Flat ends are the whole difference from `useTaperedCapsule`: this stands where a tapered capsule rolls.
+- **`useEmpty`** — a body with no collision at all. It moves, sleeps, carries velocity and can be jointed to; it simply never touches anything. A one-sided constraint bolts to the world and cannot move, so this is the anchor for when it has to.
+- **`scale` at creation on every body hook.** It wraps the collider in the same `ScaledShape` `api.setScale` builds later, seeding one slot rather than two — so a later `setScale` replaces it instead of compounding with it, and both go through the same validity check.
+- **Full mass properties** — `massProperties: { mass?, inertia? }` plus `overrideMassProperties`, for a body whose shape does not describe how it should behave: a hollow shell, a weighted die, a flywheel. Both survive a `setScale`, which would otherwise recompute them from density × the new volume. Jolt has **no** centre-of-mass override — that comes from the shape.
+- **`buildQuality` and `triangleUserData` on `useTrimesh`.** The tag is read back through `api.getTriangleUserData(hit.subShapeID)`, which is how a collision reports a surface type for footstep audio or per-surface tyre grip.
+- **`subShapeID` on `RaycastHit`**, which the shape-cast and overlap results already carried. Without it there is nothing to look a triangle up by.
+- **`setMaterial` / `getMaterial` on `usePlane` and `useConvex`** — the only two classes that bind it. `PhysicsMaterial` carries a refcount and nothing else, no friction or restitution or name, so it is an identity token rather than a surface description; the README says so rather than letting anyone find out.
+- Measured rather than read, because it changed the code: `PlaneShapeSettings`'s `inHalfExtent` constructor argument is dropped by the bindings when no material is passed, and only the field takes. `ShapeResult.Get()` never downcasts, so a plane from it has no `GetHalfExtent` and a heightfield no `IsNoCollision` — everything subclass-shaped goes through `castObject`. `setHeights` quantises into the range the field was **built** with and clamps silently, so deformable terrain has to reserve headroom through `range` up front. And `getHeights` / `setHeights` work in whole blocks: a misaligned region asserts in a debug build and reads past the end of the heap in a release one, so the hook refuses instead.
+- Six demo scenes: **Plane** (balls roll off the visible floor and keep rolling), **Height field** (a noise generator with a hole punched through it, and `setHeights` raising a mound), **Terrain sources** (the three `heights` forms side by side, with a car to drive over them), **Tapered cylinder**, **Empty**, and **Surface types**.
+
 ### Queries
 
 Raycasts were the only question the library could ask the world. Four more hooks, none of which move anything or add anything to the world.

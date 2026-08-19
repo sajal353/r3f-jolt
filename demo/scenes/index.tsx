@@ -8,6 +8,12 @@ import { TaperedCapsule } from "./shapes/TaperedCapsule";
 import { Convex } from "./shapes/Convex";
 import { Compound } from "./shapes/Compound";
 import { Trimesh } from "./shapes/Trimesh";
+import { Plane } from "./shapes/Plane";
+import { HeightField } from "./shapes/HeightField";
+import { TerrainSources } from "./shapes/TerrainSources";
+import { TaperedCylinder } from "./shapes/TaperedCylinder";
+import { Empty } from "./shapes/Empty";
+import { SurfaceTypes } from "./shapes/SurfaceTypes";
 
 import { MotionTypes } from "./bodies/MotionTypes";
 import { MassAndMaterial } from "./bodies/MassAndMaterial";
@@ -164,6 +170,82 @@ export const categories: Category[] = [
           <>
             Exact triangle geometry, from a <code>BufferGeometry</code> or raw
             arrays. <b>Always static</b> — Jolt mesh shapes cannot be dynamic.
+          </>
+        ),
+      },
+      {
+        name: "Plane",
+        Component: Plane,
+        hook: "usePlane",
+        hint: (
+          <>
+            Jolt's plane is <b>not infinite</b>: <code>halfExtent</code> bounds
+            the collider (60 here) and <code>renderSize</code> sizes the mesh
+            (20). Balls roll off the visible floor and keep rolling.
+          </>
+        ),
+      },
+      {
+        name: "Height field",
+        Component: HeightField,
+        hook: "useHeightField",
+        hint: (
+          <>
+            64² samples, a byte each, where the same terrain as a{" "}
+            <code>useTrimesh</code> costs roughly 8 000 triangles. The red ball
+            drops through a <b>hole</b> — a <code>null</code> sample.{" "}
+            <i>raise a hill</i> is <code>setHeights</code>, which only works
+            because <code>range</code> reserved headroom at build time.
+          </>
+        ),
+      },
+      {
+        name: "Terrain sources",
+        Component: TerrainSources,
+        hook: "useHeightField",
+        hint: (
+          <>
+            The three shapes <code>heights</code> accepts: a <b>function</b>{" "}
+            called once per sample, a row-major <b>Float32Array</b>, and
+            greyscale <b>image data</b> from a PNG, fetched only when picked.
+            Holes are <code>null</code> from a function, <code>NaN</code> from
+            an array. Drive with <b>WASD</b>, <b>R</b> resets.
+          </>
+        ),
+      },
+      {
+        name: "Tapered cylinder",
+        Component: TaperedCylinder,
+        hook: "useTaperedCylinder",
+        hint: (
+          <>
+            Two radii and <b>flat ends</b> — cones and truncated cones. The
+            rounded caps of a <code>useTaperedCapsule</code> roll; these stand.
+          </>
+        ),
+      },
+      {
+        name: "Empty",
+        Component: Empty,
+        hook: "useEmpty",
+        hint: (
+          <>
+            The yellow marker is a body with <b>no collider</b>: crates fall
+            through it, the weight still hangs off it. A one-sided constraint
+            bolts to the world; this is the anchor for when it has to move.
+          </>
+        ),
+      },
+      {
+        name: "Surface types",
+        Component: SurfaceTypes,
+        hook: "useTrimesh",
+        hint: (
+          <>
+            Every triangle carries a 32-bit tag from{" "}
+            <code>triangleUserData</code>, read back through{" "}
+            <code>api.getTriangleUserData(hit.subShapeID)</code>. Footstep audio
+            and per-surface tyre grip are the same lookup.
           </>
         ),
       },

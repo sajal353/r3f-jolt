@@ -7,6 +7,10 @@ import { useTaperedCapsule } from "@/Jolt/useTaperedCapsule";
 import { useConvex } from "@/Jolt/useConvex";
 import { useCompound } from "@/Jolt/useCompound";
 import { useTrimesh } from "@/Jolt/useTrimesh";
+import { usePlane } from "@/Jolt/usePlane";
+import { useHeightField } from "@/Jolt/useHeightField";
+import { useTaperedCylinder } from "@/Jolt/useTaperedCylinder";
+import { useEmpty } from "@/Jolt/useEmpty";
 
 export const cubeVertices: number[][] = [
   [-0.5, -0.5, -0.5],
@@ -99,6 +103,40 @@ const Trimesh = () => {
   return null;
 };
 
+export const rollingHills = (x: number, z: number) =>
+  Math.sin(x * 0.4) * Math.cos(z * 0.4);
+
+const Plane = () => {
+  usePlane({ position: [0, 0, 0], motionType: "static", halfExtent: 20 });
+  return null;
+};
+
+const HeightField = () => {
+  useHeightField({
+    heights: rollingHills,
+    sampleCount: 8,
+    blockSize: 2,
+    position: [0, 0, 0],
+  });
+  return null;
+};
+
+const TaperedCylinder = () => {
+  useTaperedCylinder({
+    topRadius: 0.1,
+    bottomRadius: 0.4,
+    height: 1,
+    position: [0, 5, 0],
+    motionType: "dynamic",
+  });
+  return null;
+};
+
+const Empty = () => {
+  useEmpty({ position: [0, 5, 0], motionType: "dynamic" });
+  return null;
+};
+
 export const shapeHooks = [
   ["useBox", Box],
   ["useSphere", Sphere],
@@ -108,4 +146,8 @@ export const shapeHooks = [
   ["useConvex", Convex],
   ["useCompound", Compound],
   ["useTrimesh", Trimesh],
+  ["usePlane", Plane],
+  ["useHeightField", HeightField],
+  ["useTaperedCylinder", TaperedCylinder],
+  ["useEmpty", Empty],
 ] as const;

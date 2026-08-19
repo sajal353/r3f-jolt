@@ -1,15 +1,26 @@
 import type Jolt from "jolt-physics";
-import { shapeFromResult, useBody, type BodyOptions } from "./internal/useBody";
+import {
+  shapeFromResultAs,
+  useBody,
+  type BodyApiContext,
+  type BodyOptions,
+} from "./internal/useBody";
 import { shapeToGeometry } from "./internal/shapeToGeometry";
+import {
+  createShapeMaterialApi,
+  type ShapeMaterialApi,
+} from "./internal/shapeMaterial";
 
 export interface UseConvexOptions extends BodyOptions {
   vertices: number[][];
 }
 
+export type ConvexApi = ShapeMaterialApi;
+
 export const useConvex = (options: UseConvexOptions) => {
   const { vertices } = options;
 
-  return useBody<Jolt.Shape>(
+  return useBody<Jolt.ConvexShape, ConvexApi>(
     (jolt) => {
       const settings = new jolt.ConvexHullShapeSettings();
       const point = new jolt.Vec3();
@@ -23,11 +34,18 @@ export const useConvex = (options: UseConvexOptions) => {
 
       const result = settings.Create();
       jolt.destroy(settings);
-      const shape = shapeFromResult<Jolt.Shape>(result, "useConvex");
+      const shape = shapeFromResultAs(
+        jolt,
+        result,
+        jolt.ConvexShape,
+        "useConvex",
+      );
 
       return { shape, geometry: shapeToGeometry(jolt, shape) };
     },
     options,
     "convex",
+    ({ jolt, shape }: BodyApiContext<Jolt.ConvexShape>) =>
+      createShapeMaterialApi(jolt, shape),
   );
 };

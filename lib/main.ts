@@ -10,7 +10,11 @@ export {
   useTaperedCapsule,
   type UseTaperedCapsuleOptions,
 } from "@/Jolt/useTaperedCapsule";
-export { useConvex, type UseConvexOptions } from "@/Jolt/useConvex";
+export {
+  useConvex,
+  type UseConvexOptions,
+  type ConvexApi,
+} from "@/Jolt/useConvex";
 export {
   useCompound,
   type UseCompoundOptions,
@@ -20,7 +24,24 @@ export {
   useTrimesh,
   type UseTrimeshOptions,
   type TrimeshSource,
+  type TrimeshBuildQuality,
+  type TrimeshExtras,
 } from "@/Jolt/useTrimesh";
+export { usePlane, type UsePlaneOptions, type PlaneApi } from "@/Jolt/usePlane";
+export {
+  useHeightField,
+  type UseHeightFieldOptions,
+  type HeightFieldExtras,
+  type HeightFieldSamples,
+  type HeightFieldSampler,
+  type HeightFieldImage,
+} from "@/Jolt/useHeightField";
+export {
+  useTaperedCylinder,
+  type UseTaperedCylinderOptions,
+} from "@/Jolt/useTaperedCylinder";
+export { useEmpty, type UseEmptyOptions } from "@/Jolt/useEmpty";
+export type { ShapeMaterialApi } from "@/Jolt/internal/shapeMaterial";
 
 export {
   useCharacter,
@@ -176,7 +197,15 @@ export {
   type ConveyorApi,
 } from "@/Jolt/useConveyor";
 
-export type { BodyOptions, BodyApi } from "@/Jolt/internal/useBody";
+export type {
+  BodyOptions,
+  BodyApi,
+  BodyApiContext,
+} from "@/Jolt/internal/useBody";
+export type {
+  MassPropertiesOptions,
+  MassPropertiesOverride,
+} from "@/Jolt/internal/massProperties";
 
 /**
  * Triangulates any Jolt shape. The body hooks hand this back as `api.geometry`;
@@ -184,7 +213,10 @@ export type { BodyOptions, BodyApi } from "@/Jolt/internal/useBody";
  * thousand bodies through `useJolt()`, where a tapered capsule, a hull or a
  * compound has no equivalent primitive in three to draw it with.
  */
-export { shapeToGeometry } from "@/Jolt/internal/shapeToGeometry";
+export {
+  shapeToGeometry,
+  refillShapeGeometry,
+} from "@/Jolt/internal/shapeToGeometry";
 export {
   debugColors,
   debugMotionColors,

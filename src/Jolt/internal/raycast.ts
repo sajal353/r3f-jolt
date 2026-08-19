@@ -14,6 +14,12 @@ export interface RaycastHit {
   point: Vector3;
   normal: Vector3;
   bodyID: number;
+  /**
+   * Which part of a composite shape was hit — the triangle of a mesh, the child
+   * of a compound. Feed it to `useTrimesh`'s `getTriangleUserData` to learn what
+   * surface the ray landed on.
+   */
+  subShapeID: number;
 }
 
 export const createHit = (): RaycastHit => ({
@@ -23,6 +29,7 @@ export const createHit = (): RaycastHit => ({
   point: new Vector3(),
   normal: new Vector3(),
   bodyID: 0,
+  subShapeID: 0,
 });
 
 /**
@@ -81,6 +88,7 @@ export const createRaycastContext = (
     result.fraction = 0;
     result.distance = 0;
     result.bodyID = 0;
+    result.subShapeID = 0;
     result.point.set(0, 0, 0);
     result.normal.set(0, 0, 0);
     return result;
@@ -91,6 +99,7 @@ export const createRaycastContext = (
     result.fraction = raw.mFraction;
     result.distance = raw.mFraction * rayDirection.Length();
     result.bodyID = raw.mBodyID.GetIndexAndSequenceNumber();
+    result.subShapeID = raw.mSubShapeID2.GetValue();
 
     const point = ray.GetPointOnRay(raw.mFraction);
     result.point.set(point.GetX(), point.GetY(), point.GetZ());

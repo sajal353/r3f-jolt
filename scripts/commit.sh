@@ -70,7 +70,15 @@ fi
 GPG_TTY="${GPG_TTY:-$(tty 2>/dev/null || echo)}"
 export GPG_TTY
 
-commit_args=(--gpg-sign="$signing_key" "${message_args[@]}")
+# Appended as a trailer rather than written into the message file, so it is
+# spaced correctly whether or not the message already ends in a trailer block.
+co_author="Claude Opus 5 <noreply@anthropic.com>"
+
+commit_args=(
+  --gpg-sign="$signing_key"
+  --trailer "Co-authored-by: $co_author"
+  "${message_args[@]}"
+)
 [ "$amend" -eq 1 ] && commit_args+=(--amend)
 
 git add -A

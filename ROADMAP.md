@@ -63,16 +63,16 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 
 ### Shapes
 
-- [ ] `usePlane` → `PlaneShapeSettings(plane, material?, halfExtent?)` — an infinite ground plane, the most common static collider there is, and today it has to be faked with a very wide box
-- [ ] Heightfield hook → `HeightFieldShapeSettings` — terrain without paying trimesh cost
-- [ ] Tapered-cylinder hook → `TaperedCylinderShapeSettings` (upstream's name; also how you get a cone)
-- [ ] `EmptyShape` → `EmptyShapeSettings` — a body with no collision, for markers and attachment points
-- [ ] Shape `scale` support at creation → `ScaledShapeSettings` (runtime `api.setScale` ships earlier, in 0.2.1)
-- [ ] Full mass properties (density, centre of mass, inertia tensor) via `mMassPropertiesOverride` — today only a scalar `mass`
-- [ ] `MeshShapeSettings.mBuildQuality` — trade mesh build time against runtime query speed, which matters when streaming terrain
-- [ ] Per-triangle user data on `MeshShape` — how you get surface types out of a collision, for footstep audio and per-surface tire grip
-- [ ] Heightfield extras: `GetMinHeightValue` / `GetMaxHeightValue`, `Get/SetMaterials` for per-cell surface types
-- [ ] `Shape.SetMaterial` / `PlaneShape.SetMaterial`
+- [x] `usePlane` → `PlaneShapeSettings(plane, material?, halfExtent?)` — the most common static collider there is, and today it has to be faked with a very wide box. **Amended: Jolt's plane is not infinite** — it is a half space bounded by `halfExtent`, whose Jolt default of 1000 puts a 2 km quad into every debug overlay, so the hook defaults it to 100 and sizes the render mesh separately. The constructor's `inHalfExtent` argument is also dropped by the bindings when no material is passed; only the `mHalfExtent` field takes
+- [x] `useHeightField` → `HeightFieldShapeSettings` — terrain without paying trimesh cost. `heights` takes a sampler function, a row-major array or greyscale image data
+- [x] `useTaperedCylinder` → `TaperedCylinderShapeSettings` (upstream's name; also how you get a cone)
+- [x] `useEmpty` → `EmptyShape` — a body with no collision, for markers, attachment points and the anchor of a joint that has to move
+- [x] Shape `scale` support at creation → wraps the collider in the same `ScaledShape` `api.setScale` builds, seeding one slot so the two paths cannot disagree (runtime `api.setScale` shipped earlier, in 0.2.1)
+- [x] Full mass properties via `mMassPropertiesOverride` — today only a scalar `mass`. **Amended: there is no centre-of-mass override.** `MassProperties` binds `mMass` and `mInertia` only; the centre of mass comes from the shape, so shifting it means an off-centre compound child. `massProperties: { mass?, inertia? }` plus `overrideMassProperties`
+- [x] `MeshShapeSettings.mBuildQuality` — trade mesh build time against runtime query speed, which matters when streaming terrain
+- [x] Per-triangle user data on `MeshShape` — how you get surface types out of a collision, for footstep audio and per-surface tire grip. Needed `subShapeID` added to `RaycastHit`, which the shape-cast and overlap results already carried
+- [x] Heightfield extras: `GetMinHeightValue` / `GetMaxHeightValue`, `getHeights` / `setHeights`, `isNoCollision`, and `materialIndices` for per-cell surface types. **Worth recording: `setHeights` clamps to the range the field was *built* with**, so terrain meant to be deformed has to reserve headroom through `range` up front; and Jolt reads and writes whole blocks, asserting on a misaligned region in a debug build and walking off the heap in a release one
+- [x] `Shape.SetMaterial` / `PlaneShape.SetMaterial`. **Amended: only `ConvexShape` and `PlaneShape` bind it**, so it is on `useConvex` and `usePlane` and nowhere else — and `PhysicsMaterial` binds a refcount and nothing else, no friction or restitution or name, so a material is an identity token rather than a surface description. Per-triangle user data is the mechanism for a mesh
 
 ### Ergonomics
 

@@ -241,7 +241,7 @@ Modules are cached per initialiser, so mounting several `<Physics>` trees instan
 
 ## Body hooks
 
-`useBox` · `useSphere` · `useCapsule` · `useCylinder` · `useTaperedCapsule` · `useConvex` · `useCompound` · `useTrimesh`
+`useBox` · `useSphere` · `useCapsule` · `useCylinder` · `useTaperedCapsule` · `useTaperedCylinder` · `useConvex` · `useCompound` · `useTrimesh` · `usePlane` · `useHeightField` · `useEmpty`
 
 All of them take these options and return `[ref, api]`.
 
@@ -253,6 +253,9 @@ All of them take these options and return `[ref, api]`.
 | `rotation`                 | `[0, 0, 0, 1]`              | Quaternion                                         |
 | `motionType`               | —                           | `"static"`, `"kinematic"` or `"dynamic"`           |
 | `mass`                     | Jolt's density-derived mass | Dynamic bodies only; ignored on the others         |
+| `massProperties`           | —                           | `{ mass?, inertia? }` — full control, see below     |
+| `overrideMassProperties`   | narrowest that fits         | `"calculateMassAndInertia"` · `"calculateInertia"` · `"massAndInertiaProvided"` |
+| `scale`                    | —                           | `[x, y, z]`, applied to the collider at creation    |
 | `material`                 | —                           | `{ friction?, restitution? }`; `0` is respected    |
 | `initialVelocity`          | —                           | `[x, y, z]`, applied at creation                   |
 | `initialAngularVelocity`   | —                           | `[x, y, z]`, applied at creation                   |
@@ -285,6 +288,12 @@ All of them take these options and return `[ref, api]`.
 
 **DOF locks are world-space, not local-space.** Jolt changed this in 0.18.0 to match other engines. Locking rotation X locks the *world* X axis however the body happens to be oriented, which is not what most people assume.
 
+**`scale` scales the collider, not your mesh.** The hook wraps its shape in a `ScaledShape` — the same one `api.setScale` builds later, so a later `setScale` *replaces* this rather than compounding with it. The hook's own debug mesh is scaled to match; your mesh is yours. Non-uniform scale is invalid on spheres and capsules and is refused with a warning rather than silently corrected.
+
+**`massProperties` supersedes `mass`.** `{ mass }` alone is the same thing the scalar `mass` does. Adding `inertia` — the diagonal of the inertia tensor about the centre of mass, in kg·m² — is the only way to make a body resist rotation differently from how its shape says it should: a hollow shell, a weighted die, a flywheel. Both survive a `setScale`, which would otherwise recompute them from density × the new volume.
+
+Jolt has **no centre-of-mass override**. That comes from the shape, so shift it by building a `useCompound` whose child sits off-centre. And Jolt stores a full inertia tensor but hands it back eigen-decomposed into a diagonal plus a rotation, with the diagonal sorted — the three numbers survive a round trip while their order does not.
+
 **`allowDynamicOrKinematic` cannot be added later.** A static body created without it has no `MotionProperties` at all, so nothing can promote it afterwards. `setMotionType` and `grab` refuse with a warning rather than letting Jolt corrupt memory — in a release build the assertion that catches this is compiled out.
 
 ### Shape-specific options
@@ -296,15 +305,63 @@ All of them take these options and return `[ref, api]`.
 | `useCapsule`        | `height`, `radius`, `segments?`                  |
 | `useCylinder`       | `height`, `radius`, `convexRadius?`, `segments?` |
 | `useTaperedCapsule` | `topRadius`, `bottomRadius`, `height`            |
+| `useTaperedCylinder`| `topRadius`, `bottomRadius`, `height`, `convexRadius?`, `renderSegments?` |
 | `useConvex`         | `vertices: number[][]`                           |
 | `useCompound`       | `shapes: CompoundChild[]`                        |
-| `useTrimesh`        | `mesh: BufferGeometry \| { position, index? }`   |
+| `useTrimesh`        | `mesh: BufferGeometry \| { position, index? }`, `buildQuality?`, `triangleUserData?` |
+| `usePlane`          | `normal?`, `constant?`, `point?`, `halfExtent?`, `renderSize?`, `renderSegments?` |
+| `useHeightField`    | `heights`, `sampleCount`, `offset?`, `sampleScale?`, `blockSize?`, `bitsPerSample?`, `range?`, `materialIndices?` |
+| `useEmpty`          | `centerOfMass?`                                  |
 
 `convexRadius` defaults to a value derived from the shape's size rather than a fixed `0.05`, which was wrong on small shapes.
 
 `useTrimesh` accepts a `BufferGeometry` directly and derives the index when the geometry is non-indexed. **A trimesh body is always static** — Jolt mesh shapes cannot be dynamic.
 
 `useCompound` children are `{ type, position, rotation?, … }` where `type` is `box`, `sphere`, `capsule`, `cylinder`, `taperedCapsule` or `convex`. An invalid child is skipped with a console error and the rest of the compound still builds.
+
+`useTaperedCylinder` is a cylinder with two radii, and with one of them at zero it is a cone. Flat ends are the whole difference from `useTaperedCapsule`: this stands where a tapered capsule rolls.
+
+`useEmpty` is a body with no collision at all. It moves, sleeps, carries velocity and can be jointed to — it simply never touches anything, which makes it the anchor a one-sided constraint cannot be (that one bolts to the world and cannot move). `api.geometry` is empty, so bring your own mesh.
+
+#### `usePlane` — the ground
+
+**Jolt's plane is not infinite.** It is a half space bounded by `halfExtent`, whose Jolt default is **1000** — and `<PhysicsDebug />` triangulates every body in the world, so leaving it there paints a two-kilometre wireframe quad over your scene. This hook defaults it to **100** instead, and sizes the render mesh separately with `renderSize` (default 20):
+
+```tsx
+const [ref, api] = usePlane({ position: [0, 0, 0], motionType: "static" });
+
+return <mesh ref={ref} geometry={api?.geometry} receiveShadow />;
+```
+
+The plane is every point where `dot(normal, x) + constant` is zero, so a surface one unit **above** the body's origin has a `constant` of `-1`. Pass `point` instead if that is the wrong way round for you. The render geometry is baked to the plane's orientation and offset, so the mesh needs no transform of its own.
+
+#### `useHeightField` — terrain
+
+Samples are quantised into blocks with a per-block range, so both the shape and the queries walk far less memory than the equivalent `useTrimesh`.
+
+`heights` takes three shapes, all indexed the same way — `z * sampleCount + x`, with sample `(0, 0)` at `offset`:
+
+```tsx
+// a function, called once per sample; `null` is a hole
+useHeightField({ heights: (x, z) => noise(x, z), sampleCount: 128 });
+
+// a row-major array, `sampleCount²` long; `NaN` is a hole
+useHeightField({ heights: loadedFloats, sampleCount: 128 });
+
+// greyscale image data — RGBA reads the red channel
+useHeightField({
+  heights: { data: imageData, heightRange: [0, 16] },
+  sampleCount: 128,
+});
+```
+
+Worth knowing:
+
+- **`sampleCount` must be a multiple of `blockSize`**, and `blockSize` a power of two in [2, 8]. Both are checked with a readable error rather than left to a Jolt assert.
+- **`range` is the span the field can *store*.** It defaults to the span of the samples you gave it, which means `setHeights` can never push a sample outside the terrain's own extremes — silently clamped, not warned. Widen it now for terrain that will be deformed later.
+- **`getHeights` and `setHeights` work in whole blocks.** `x`, `z`, `sizeX` and `sizeZ` must all be multiples of `blockSize`. Jolt only asserts on this in a debug build; in a release build a misaligned region reads past the end of the heap, so the hook refuses instead.
+- An 8-bit `bitsPerSample` over a wide `range` is 256 discrete steps however precise the samples were, and terrain terraces visibly when the two are mismatched.
+- Render geometry is the collider's own triangulation, and `setHeights` regenerates it in place, so the mesh and the physics cannot drift apart.
 
 ### Returned api
 
@@ -339,8 +396,28 @@ Vectors take a three `Vector3` or a `[x, y, z]` tuple; rotations take a `Quatern
 | `moveKinematic(p, r, deltaTime?)`       | The correct way to drive a kinematic body                 |
 | `moveTo(p, r, deltaTime?)`              | The same call, named for a grab loop                      |
 | `setScale(scale, updateMassProperties?)` | Replaces the collider with a scaled one                  |
+| **Shape-specific** | Only on the hooks that can support them                                |
+| `setMaterial(m)` / `getMaterial()` | `usePlane` and `useConvex` — see below                 |
+| `getTriangleUserData(subShapeID)` | `useTrimesh`                                            |
+| `getMinHeight()` / `getMaxHeight()` / `getHeight(x, z)` | `useHeightField`                  |
+| `getHeights(...)` / `setHeights(...)` / `isNoCollision(x, z)` | `useHeightField`            |
 
 `shape` is the shape the hook built and owns. After a `setScale` the body is running on a `ScaledShape` wrapping it, so `shape` is no longer the body's own shape — read `bodyInterface.GetShape(api.body.GetID())` if you need that.
+
+### Identifying surfaces
+
+Two mechanisms, for two different shapes of problem — footstep audio, per-surface tyre grip, decals.
+
+**Per triangle, on a mesh.** `useTrimesh`'s `triangleUserData` tags every triangle with a 32-bit number, either as an array or as a function of the triangle index. Read it back off any hit through the `subShapeID` the hit carries:
+
+```tsx
+const [ref, api] = useTrimesh({ mesh, triangleUserData: (i) => surfaceOf(i) });
+
+const hit = raycaster?.cast(origin, direction);
+if (hit?.hit) console.log(SURFACES[api.getTriangleUserData(hit.subShapeID)]);
+```
+
+**Per shape, on a plane or a hull.** `setMaterial` takes a `Jolt.PhysicsMaterial`, which binds a refcount and **nothing else** — no friction, no restitution, no name. It is an identity token: hand one to a shape, read it back with `getMaterial()` or `bodyInterface.GetMaterial(bodyID, subShapeID)`, and compare pointers. Friction and restitution live on the body (`material` on any body hook) and are not per-surface. Only `ConvexShape` and `PlaneShape` bind `SetMaterial`, which is why only those two hooks carry it. The shape takes a reference, so a freshly-made material needs no `AddRef` from you and must **not** be destroyed.
 
 ## Moving things by hand
 
@@ -670,7 +747,7 @@ useFrame(() => {
 });
 ```
 
-`cast(origin?, direction?)` accepts `Vector3`s or tuples and returns `{ hit, fraction, distance, point, normal, bodyID }`. `fraction` is along the ray; `distance` is `fraction × |direction|`, so the ray's length is meaningful.
+`cast(origin?, direction?)` accepts `Vector3`s or tuples and returns `{ hit, fraction, distance, point, normal, bodyID, subShapeID }`. `subShapeID` names the part of a composite shape that was hit — the triangle of a mesh, the child of a compound — and is what [identifying surfaces](#identifying-surfaces) is looked up by. `fraction` is along the ray; `distance` is `fraction × |direction|`, so the ray's length is meaningful.
 
 `useAllHitsRaycaster` returns an **array** of that shape, sorted nearest-first, and empty on a miss.
 
@@ -919,11 +996,11 @@ pnpm install
 pnpm dev
 ```
 
-48 scenes in seven categories, one per hook or feature:
+53 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
-| **Shapes**       | all 8 body hooks, one scene each                                                                   |
+| **Shapes**       | all 12 body hooks, one scene each · terrain from all three `heights` forms · per-triangle surface types |
 | **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · motion quality |
 | **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale · conveyor    |
 | **Constraints**  | all 8 constraint hooks · motors · springs · rope built from chained distance joints                 |

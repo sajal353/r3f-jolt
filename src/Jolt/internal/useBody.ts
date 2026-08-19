@@ -13,9 +13,15 @@ import {
   DEBUG_RENDER_ORDER,
 } from "./debugMaterial";
 import type { DebugShapeKind } from "./debugMaterial";
+import { applyMassProperties } from "./massProperties";
+import type {
+  MassPropertiesOptions,
+  MassPropertiesOverride,
+} from "./massProperties";
 import type {
   AxisTriple,
   BodyMaterial,
+  JoltApi,
   JoltModule,
   MotionType,
   QuatInput,
@@ -51,6 +57,26 @@ export interface BodyOptions {
   rotation?: QuatTuple;
   motionType: MotionType;
   mass?: number;
+  /**
+   * Mass and inertia in full, for a body whose shape does not describe how it
+   * should behave — a hollow shell, a weighted die, a flywheel. Supersedes the
+   * scalar `mass`, which stays the shorthand for the common case.
+   */
+  massProperties?: MassPropertiesOptions;
+  /**
+   * Which of the two Jolt should take from you rather than derive. Defaults to
+   * the narrowest mode covering what `massProperties` supplied.
+   */
+  overrideMassProperties?: MassPropertiesOverride;
+  /**
+   * Scales the collider at creation, by wrapping it in the same `ScaledShape`
+   * `api.setScale` builds later — so a later `setScale` replaces this rather
+   * than compounding with it, and both go through the same validity check.
+   *
+   * The collider and the hook's own debug mesh are scaled. **Your** mesh is
+   * yours: scale its geometry, or the `<mesh>` itself, to match.
+   */
+  scale?: Vec3Tuple;
   material?: BodyMaterial;
   initialVelocity?: Vec3Tuple;
   initialAngularVelocity?: Vec3Tuple;
@@ -202,6 +228,23 @@ export interface ShapeResult<S extends Jolt.Shape> {
   debugGeometry?: () => BufferGeometry;
 }
 
+/**
+ * Handed to a hook's `extras` factory once the body exists, so a shape with its
+ * own vocabulary — a heightfield's samples, a plane's material — adds methods to
+ * the api without `useBody` knowing about any of them.
+ */
+export interface BodyApiContext<S extends Jolt.Shape> {
+  api: JoltApi;
+  jolt: JoltModule;
+  body: Jolt.Body;
+  shape: S;
+  geometry: BufferGeometry;
+  /** False once the body is killed, unmounted, or the world disposed. */
+  usable: () => boolean;
+  /** Wake the body after a change that should have a visible effect. */
+  activate: () => void;
+}
+
 export const finishShape = <S extends Jolt.Shape>(shape: S): S => {
   shape.AddRef();
   return shape;
@@ -227,6 +270,23 @@ export const shapeFromResult = <S extends Jolt.Shape>(
   result.Clear();
   return shape;
 };
+
+/**
+ * `ShapeResult.Get()` hands back a base-`Shape` wrapper whatever it built —
+ * measured, and the generated types do not admit it: a `PlaneShape` from
+ * `Get()` has no `GetHalfExtent` and a `HeightFieldShape` no `IsNoCollision`.
+ * Anything needing a subclass's own methods has to `castObject` first, which
+ * wraps the same pointer, so ownership is unaffected.
+ */
+export const shapeFromResultAs = <
+  C extends new (...args: never[]) => Jolt.Shape,
+>(
+  jolt: JoltModule,
+  result: Jolt.ShapeResult,
+  Class: C,
+  hook: string,
+): InstanceType<C> =>
+  jolt.castObject(shapeFromResult<Jolt.Shape>(result, hook), Class);
 
 const MAX_USER_DATA = 0xffffffff;
 
@@ -273,23 +333,24 @@ const resolveAllowedDOFs = (jolt: JoltModule, options: BodyOptions) => {
   return mask;
 };
 
-export const useBody = <S extends Jolt.Shape>(
+export const useBody = <S extends Jolt.Shape, E extends object = object>(
   createShape: (jolt: JoltModule) => ShapeResult<S>,
   options: BodyOptions,
   debugKind: DebugShapeKind,
+  extras?: (context: BodyApiContext<S>) => E,
 ) => {
   const ref = useRef<Mesh | null>(null);
   const api = useJolt();
   const scene = useThree((state) => state.scene);
 
   const aliveRef = useRef(false);
-  const [bodyApi, setBodyApi] = useState<BodyApi<S>>();
+  const [bodyApi, setBodyApi] = useState<BodyApi<S> & E>();
   const [tracker] = useState(createTransformTracker);
 
   // Body creation is init-once: these are snapshotted at mount and later prop
   // changes are ignored by design (rebuild with `key`). Holding the snapshot in
   // state rather than a ref keeps the effect's dependency list honest.
-  const [mount] = useState(() => ({ options, createShape, debugKind }));
+  const [mount] = useState(() => ({ options, createShape, debugKind, extras }));
 
   useEffect(() => {
     const {
@@ -305,13 +366,16 @@ export const useBody = <S extends Jolt.Shape>(
       debug: debugDefault,
     } = api;
 
-    const { options, createShape, debugKind } = mount;
+    const { options, createShape, debugKind, extras } = mount;
 
     const {
       position,
       rotation = [0, 0, 0, 1],
       motionType,
       mass,
+      massProperties,
+      overrideMassProperties,
+      scale,
       material,
       initialVelocity,
       initialAngularVelocity,
@@ -361,6 +425,29 @@ export const useBody = <S extends Jolt.Shape>(
 
     const { shape, geometry, debugGeometry } = createShape(jolt);
 
+    // One slot: a creation-time `scale` seeds it and `setScale` releases
+    // whatever is in it, so the two paths cannot disagree.
+    let scaledShape: Jolt.Shape | null = null;
+
+    if (scale) {
+      const requested = new jolt.Vec3(scale[0], scale[1], scale[2]);
+
+      if (shape.IsValidScale(requested)) {
+        scaledShape = new jolt.ScaledShape(shape, requested);
+        scaledShape.AddRef();
+      } else {
+        const valid = shape.MakeScaleValid(requested);
+        console.warn(
+          `[r3f-jolt] scale (${scale[0]}, ${scale[1]}, ${scale[2]}) is not valid ` +
+            "for this shape — spheres and capsules scale uniformly only. Jolt's " +
+            `MakeScaleValid suggests (${valid.GetX()}, ${valid.GetY()}, ` +
+            `${valid.GetZ()}). Ignoring.`,
+        );
+      }
+
+      jolt.destroy(requested);
+    }
+
     if (shapeUserData !== undefined) {
       validateUserData(shapeUserData, "shapeUserData");
       shape.SetUserData(shapeUserData);
@@ -394,7 +481,7 @@ export const useBody = <S extends Jolt.Shape>(
     );
 
     const bodySettings = new jolt.BodyCreationSettings(
-      shape,
+      scaledShape ?? shape,
       settingsPosition,
       settingsRotation,
       resolveMotionType(jolt, motionType),
@@ -472,6 +559,15 @@ export const useBody = <S extends Jolt.Shape>(
       bodySettings.mAllowedDOFs = resolvedDOFs;
     }
 
+    if (massProperties || overrideMassProperties) {
+      applyMassProperties(
+        jolt,
+        bodySettings,
+        massProperties ?? {},
+        overrideMassProperties,
+      );
+    }
+
     bodySettingsOverride?.(bodySettings);
 
     const body = bodyInterface.CreateBody(bodySettings);
@@ -480,9 +576,47 @@ export const useBody = <S extends Jolt.Shape>(
     jolt.destroy(settingsPosition);
     jolt.destroy(settingsRotation);
 
-    if (isDynamic && mass !== undefined) {
-      body.GetMotionProperties().ScaleToMass(mass);
+    // `massProperties` went in through the settings, so re-scaling here would
+    // undo the inertia it asked for.
+    const scalarMass = massProperties || overrideMassProperties ? undefined : mass;
+
+    if (isDynamic && scalarMass !== undefined) {
+      body.GetMotionProperties().ScaleToMass(scalarMass);
     }
+
+    // `SetShape` recomputes mass and inertia from density × the new volume, so
+    // a rescale would discard whatever was asked for. Snapshotting the resolved
+    // values rather than the options covers every override mode, including the
+    // one where Jolt derived the inertia itself.
+    const restoreMassProperties =
+      isDynamic && (massProperties || overrideMassProperties)
+        ? (() => {
+            const motion = body.GetMotionProperties();
+            const inverseMass = motion.GetInverseMass();
+            const diagonal = motion.GetInverseInertiaDiagonal();
+            const inverseInertia: Vec3Tuple = [
+              diagonal.GetX(),
+              diagonal.GetY(),
+              diagonal.GetZ(),
+            ];
+            const rotation = motion.GetInertiaRotation();
+            const inertiaRotation: QuatTuple = [
+              rotation.GetX(),
+              rotation.GetY(),
+              rotation.GetZ(),
+              rotation.GetW(),
+            ];
+
+            return () => {
+              const properties = body.GetMotionProperties();
+              properties.SetInverseMass(inverseMass);
+              properties.SetInverseInertia(
+                temps.vec3(inverseInertia),
+                temps.quat(inertiaRotation),
+              );
+            };
+          })()
+        : null;
 
     if (isMoving && maxLinearVelocity !== undefined) {
       body.GetMotionProperties().SetMaxLinearVelocity(maxLinearVelocity);
@@ -533,6 +667,7 @@ export const useBody = <S extends Jolt.Shape>(
         createDebugMaterial(debugKind),
       );
       debugMesh.renderOrder = DEBUG_RENDER_ORDER;
+      if (scale) debugMesh.scale.set(scale[0], scale[1], scale[2]);
       scene.add(debugMesh);
     }
 
@@ -569,9 +704,8 @@ export const useBody = <S extends Jolt.Shape>(
     };
 
     let grabbedFrom: MotionType | null = null;
-    let scaledShape: Jolt.Shape | null = null;
 
-    setBodyApi({
+    const bodyApiBase: BodyApi<S> = {
       body,
       shape,
       geometry,
@@ -775,15 +909,30 @@ export const useBody = <S extends Jolt.Shape>(
 
         // SetShape recomputes mass from density × the new volume, silently
         // discarding whatever the caller asked for.
-        if (updateMassProperties && isDynamic && mass !== undefined) {
-          body.GetMotionProperties().ScaleToMass(mass);
+        if (updateMassProperties && isDynamic && scalarMass !== undefined) {
+          body.GetMotionProperties().ScaleToMass(scalarMass);
         }
+
+        if (updateMassProperties) restoreMassProperties?.();
 
         // The debug mesh holds the *unscaled* geometry, so scaling the Object3D
         // matches the ScaledShape exactly — no regeneration, no allocation.
         debugMesh?.scale.set(target.GetX(), target.GetY(), target.GetZ());
       },
-    });
+    };
+
+    setBodyApi({
+      ...bodyApiBase,
+      ...extras?.({
+        api,
+        jolt,
+        body,
+        shape,
+        geometry,
+        usable,
+        activate: () => bodyInterface.ActivateBody(id),
+      }),
+    } as BodyApi<S> & E);
 
     return () => {
       aliveRef.current = false;
@@ -863,5 +1012,8 @@ export const useBody = <S extends Jolt.Shape>(
     if (bodyApi.debugMesh) tracker.applyTo(bodyApi.debugMesh);
   });
 
-  return [ref, bodyApi] as [RefObject<Mesh | null>, BodyApi<S> | undefined];
+  return [ref, bodyApi] as [
+    RefObject<Mesh | null>,
+    (BodyApi<S> & E) | undefined,
+  ];
 };
