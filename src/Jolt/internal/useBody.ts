@@ -382,8 +382,15 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
   options: BodyOptions,
   debugKind: DebugShapeKind,
   extras?: (context: BodyApiContext<S>) => E,
+  /**
+   * Lets a caller own the mesh ref rather than take the one this returns —
+   * `useAutoCollider` needs to read the mesh's geometry inside `createShape`,
+   * which means holding the ref before `useBody` hands one back.
+   */
+  externalRef?: RefObject<Mesh | null>,
 ) => {
-  const ref = useRef<Mesh | null>(null);
+  const ownRef = useRef<Mesh | null>(null);
+  const ref = externalRef ?? ownRef;
   const api = useJolt();
   const scene = useThree((state) => state.scene);
 

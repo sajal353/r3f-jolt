@@ -120,6 +120,7 @@ const App = () => {
             paused={paused}
             interpolate={interpolate}
             timeStep={timeStep}
+            updateLoop={scene.updateLoop}
           >
             {globalDebug && <PhysicsDebug />}
             <Suspense fallback={null}>

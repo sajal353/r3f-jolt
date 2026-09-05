@@ -111,10 +111,6 @@ export const Damping = () => {
         linearDamping 0 · 0.05 (default) · 0.5 · 2 — launched together every{" "}
         {LAP_SECONDS}s
       </Tag>
-      <Tag position={[0, 3.5, -6]}>
-        gravityFactor 0 and friction 0, so nothing falls and nothing rubs —
-        damping is the only force acting
-      </Tag>
 
       <Spinner x={-4} angularDamping={0} color="#9b59b6" />
       <Spinner x={0} angularDamping={0.5} color="#8e44ad" />

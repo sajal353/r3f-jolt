@@ -98,8 +98,5 @@ export const LayersAndMasks = () => (
     <Tag position={[0, 9, 0]}>
       grey ball masks only the world — it ignores both shelves
     </Tag>
-    <Tag position={[0, 10.2, 0]}>
-      16 bits of group and 16 of mask, packed into one 32-bit layer
-    </Tag>
   </>
 );

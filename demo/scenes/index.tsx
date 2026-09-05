@@ -24,6 +24,7 @@ import { SleepWake } from "./bodies/SleepWake";
 import { GravityFactor } from "./bodies/GravityFactor";
 import { LayersAndMasks } from "./bodies/LayersAndMasks";
 import { CollisionGroups } from "./bodies/CollisionGroups";
+import { AutoColliders } from "./bodies/AutoColliders";
 import { MotionQuality } from "./bodies/MotionQuality";
 
 import { Conveyor } from "./control/Conveyor";
@@ -62,6 +63,7 @@ import { StepCallbacks } from "./systems/StepCallbacks";
 import { DebugRendering } from "./systems/DebugRendering";
 import { StressTest } from "./systems/StressTest";
 import { Instancing } from "./systems/Instancing";
+import { ManualStepping } from "./systems/ManualStepping";
 
 export interface Scene {
   name: string;
@@ -72,6 +74,8 @@ export interface Scene {
   physicsDebug?: boolean;
   /** Starting timestep. Defaults to `"vary"`; only scenes about a fixed step set it. */
   timeStep?: number | "vary";
+  /** `"independent"` leaves the world still until the scene steps it itself. */
+  updateLoop?: "follow" | "independent";
 }
 
 export interface Category {
@@ -362,6 +366,20 @@ export const categories: Category[] = [
             One level below layers: which <i>individual</i> bodies ignore each
             other. Adjacent links are filtered out on the right, so the chain
             stops fighting its own joints.
+          </>
+        ),
+      },
+      {
+        name: "Auto colliders",
+        Component: AutoColliders,
+        hook: "useAutoCollider",
+        physicsDebug: true,
+        hint: (
+          <>
+            The collider is read off the mesh, so the size is written once — in
+            the JSX. Debug is on so you can see what each mode derived. The
+            orange one is modelled with its feet at the origin, and the collider
+            is offset to match rather than sitting half a body low.
           </>
         ),
       },
@@ -805,19 +823,28 @@ export const categories: Category[] = [
       {
         name: "Instancing",
         Component: Instancing,
-        hook: "useJolt, shapeToGeometry",
+        hook: "useInstancedBodies",
         hint: (
           <>
-            1050 bodies in <b>seven</b> draw calls — 150 each of the seven
-            convex shape kinds, one <code>InstancedMesh</code> apiece. No body
-            hook is used: a hook is one React component, one mesh and one{" "}
-            <code>useFrame</code> per body, which is the right trade up to a few
-            hundred and the wrong one past that. Bodies come from{" "}
-            <code>useJolt()</code> and their transforms are written into the
-            instance matrices each frame — skipping the ones Jolt has put to
-            sleep, whose matrices are already right. One Jolt shape is shared by
-            all 150 of its kind: the same saving on the physics side that
-            instancing is on the render side.
+            1050 bodies in <b>seven</b> draw calls — 150 each of seven collider
+            kinds, one <code>InstancedMesh</code> apiece. A body hook is one
+            component, one mesh and one <code>useFrame</code> per body, which is
+            the right trade up to a few hundred and the wrong one past that.
+            Each kind shares one Jolt shape and is added in a single batch.
+          </>
+        ),
+      },
+      {
+        name: "Manual stepping",
+        Component: ManualStepping,
+        hook: "updateLoop, api.step",
+        updateLoop: "independent",
+        timeStep: 1 / 60,
+        hint: (
+          <>
+            Nothing steps this world but the buttons. <code>updateLoop</code> of{" "}
+            <code>"independent"</code> takes the world off the frame loop, and{" "}
+            <code>api.step()</code> advances it exactly one step.
           </>
         ),
       },

@@ -74,6 +74,8 @@ export interface RenderOptions {
   paused?: boolean;
   maxBodies?: number;
   physicsSettings?: PhysicsSettingsOptions;
+  updateLoop?: "follow" | "independent";
+  updatePriority?: number;
   /** Runs after the assert handler is installed, so a test can override both. */
   settingsOverride?: (settings: Jolt.JoltSettings, jolt: JoltModule) => void;
 }
@@ -93,6 +95,8 @@ const physicsTree = (
     paused,
     maxBodies,
     physicsSettings,
+    updateLoop,
+    updatePriority,
     settingsOverride,
   }: RenderOptions,
 ) => {
@@ -110,6 +114,8 @@ const physicsTree = (
       paused={paused}
       maxBodies={maxBodies}
       physicsSettings={physicsSettings}
+      updateLoop={updateLoop}
+      updatePriority={updatePriority}
       settingsOverride={applySettings}
     >
       <CaptureApi />

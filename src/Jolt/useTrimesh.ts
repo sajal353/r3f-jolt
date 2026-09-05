@@ -1,30 +1,16 @@
-import type {
-  BufferAttribute,
-  BufferGeometry,
-  InterleavedBufferAttribute,
-} from "three";
 import type Jolt from "jolt-physics";
 import {
-  shapeFromResultAs,
   useBody,
   type BodyApiContext,
   type BodyOptions,
 } from "./internal/useBody";
-import { shapeToGeometry } from "./internal/shapeToGeometry";
+import { createColliderShape } from "./internal/colliderShape";
+import type {
+  TrimeshBuildQuality,
+  TrimeshSource,
+} from "./internal/trimeshShape";
 
-export type TrimeshSource =
-  | BufferGeometry
-  | {
-      position: BufferAttribute | InterleavedBufferAttribute;
-      index?: ArrayLike<number>;
-    };
-
-/**
- * `favorRuntimePerformance` is Jolt's default and builds a tighter tree;
- * `favorBuildSpeed` trades query speed for build time, which is what streaming
- * terrain in wants.
- */
-export type TrimeshBuildQuality = "favorRuntimePerformance" | "favorBuildSpeed";
+export type { TrimeshBuildQuality, TrimeshSource };
 
 export interface UseTrimeshOptions extends Omit<BodyOptions, "motionType"> {
   mesh: TrimeshSource;
@@ -49,99 +35,17 @@ export interface TrimeshExtras {
   getTriangleUserData: (subShapeID: number) => number;
 }
 
-const readSource = (mesh: TrimeshSource) => {
-  const position =
-    "position" in mesh
-      ? mesh.position
-      : (mesh.getAttribute("position") as BufferAttribute);
-
-  const index =
-    "position" in mesh ? mesh.index : (mesh.getIndex()?.array ?? undefined);
-
-  if (!position) {
-    throw new Error(
-      "[r3f-jolt] useTrimesh: the mesh has no position attribute",
-    );
-  }
-
-  return { position, index };
-};
-
 export const useTrimesh = (options: UseTrimeshOptions) => {
   const { mesh, buildQuality, triangleUserData } = options;
 
   return useBody<Jolt.MeshShape, TrimeshExtras>(
-    (jolt) => {
-      const { position, index } = readSource(mesh);
-
-      const vertexList = new jolt.VertexList();
-      vertexList.reserve(position.count);
-
-      const vertex = new jolt.Float3(0, 0, 0);
-      for (let i = 0; i < position.count; i += 1) {
-        vertex.x = position.getX(i);
-        vertex.y = position.getY(i);
-        vertex.z = position.getZ(i);
-        vertexList.push_back(vertex);
-      }
-      jolt.destroy(vertex);
-
-      const indexCount = index ? index.length : position.count;
-      const triangleList = new jolt.IndexedTriangleList();
-      triangleList.reserve(indexCount / 3);
-
-      const userDataOf =
-        typeof triangleUserData === "function"
-          ? triangleUserData
-          : triangleUserData
-            ? (n: number) => triangleUserData[n]
-            : null;
-
-      const triangle = new jolt.IndexedTriangle();
-      triangle.mMaterialIndex = 0;
-
-      for (let i = 0; i < indexCount; i += 3) {
-        triangle.set_mIdx(0, index ? index[i] : i);
-        triangle.set_mIdx(1, index ? index[i + 1] : i + 1);
-        triangle.set_mIdx(2, index ? index[i + 2] : i + 2);
-        triangle.mUserData = userDataOf ? userDataOf(i / 3) : 0;
-        triangleList.push_back(triangle);
-      }
-      jolt.destroy(triangle);
-
-      const materials = new jolt.PhysicsMaterialList();
-      materials.push_back(new jolt.PhysicsMaterial());
-
-      const settings = new jolt.MeshShapeSettings(
-        vertexList,
-        triangleList,
-        materials,
-      );
-
-      if (userDataOf) settings.mPerTriangleUserData = true;
-
-      if (buildQuality) {
-        settings.mBuildQuality =
-          buildQuality === "favorBuildSpeed"
-            ? jolt.MeshShapeSettings_EBuildQuality_FavorBuildSpeed
-            : jolt.MeshShapeSettings_EBuildQuality_FavorRuntimePerformance;
-      }
-
-      const result = settings.Create();
-      jolt.destroy(settings);
-      const shape = shapeFromResultAs(
-        jolt,
-        result,
-        jolt.MeshShape,
-        "useTrimesh",
-      );
-
-      jolt.destroy(materials);
-      jolt.destroy(triangleList);
-      jolt.destroy(vertexList);
-
-      return { shape, geometry: shapeToGeometry(jolt, shape) };
-    },
+    (jolt) =>
+      createColliderShape(jolt, {
+        type: "trimesh",
+        mesh,
+        buildQuality,
+        triangleUserData,
+      }),
     { ...options, motionType: "static" },
     "trimesh",
     ({ jolt, shape }: BodyApiContext<Jolt.MeshShape>): TrimeshExtras => ({

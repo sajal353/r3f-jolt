@@ -238,6 +238,15 @@ export interface JoltApi {
   steps: StepRegistry;
   temps: Temps;
   timing: PhysicsTiming;
+  /**
+   * Advances the world by hand: the same accumulator, step callbacks and event
+   * flushes a frame runs. Meant for `updateLoop: "independent"`, where nothing
+   * else steps it; with `"follow"` this is an extra step on top of the frame's.
+   *
+   * `delta` defaults to one `timeStep`, so `step()` is exactly one step.
+   * Does nothing while the world is paused or disposed.
+   */
+  step: (delta?: number) => void;
   debug: boolean;
   /**
    * React unmounts a parent's effects before its children's, so `<Physics>`

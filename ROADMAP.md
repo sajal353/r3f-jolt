@@ -76,12 +76,12 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 
 ### Ergonomics
 
-- [ ] Auto-collider generation from a wrapped mesh. Today geometry args must be duplicated between hook and JSX (`size: [100, 0.01, 100]` _and_ `<boxGeometry args={[100, 0.01, 100]} />`), and the two can drift apart silently
-- [ ] Instanced bodies — one hook driving an `InstancedMesh`, with per-instance access by index
-- [ ] Batch body add/remove — `AddBodiesPrepare` / `AddBodiesFinalize` / `AddBodiesAbort` / `RemoveBodies`. The supported way to spawn or despawn many bodies at once; adding them one at a time re-walks the broadphase each time. Instanced bodies should be built on this rather than looping `AddBody`
+- [x] Auto-collider generation from a wrapped mesh — `useAutoCollider`, reading the collider off the mesh the ref is attached to, so the size is written once in the JSX. Box and sphere from the geometry's bounds, hull from its points, trimesh from its triangles, with the mesh's own `scale` applied. **Worth recording: geometry that is not centred on its origin needs a `RotatedTranslatedShape`**, and `RotatedTranslatedShapeSettings` takes a `ShapeSettings` rather than a `Shape`, so the primitive is built from settings on that path
+- [x] Instanced bodies — `useInstancedBodies`, one shared shape and one `InstancedMesh` for the whole swarm, with `at(index)` for per-instance access. The demo's hand-written instancing scene was rewritten onto it, which is what proved the api. Sleeping instances are skipped and the matrix buffer is uploaded only when something moved
+- [x] Batch body add/remove — `AddBodiesPrepare` / `AddBodiesFinalize` / `AddBodiesAbort` / `RemoveBodies` through `ArrayBodyID.data()`, and `useInstancedBodies` is built on it rather than looping `AddBody`. **Two things measured, since upstream's examples never use this path: `AddBodiesPrepare` sorts `ioBodies` in place**, so an index captured before the add does not name the same slot afterwards and the caller must keep its own list; and **`BodyInterface_AddState` is not ours to free** — `destroy` on one throws "Cannot destroy object", and leaving it alone leaks nothing
 - [x] Per-body collision filtering via `mCollisionGroup` + an `interactionGroups()` helper for building the group/mask pair, layered on 0.2.0's configurable object layers. `collisionGroup` at creation on every body hook, `useGroupFilterTable` to build the refcounted filter, `api.setCollisionGroup` to change it later — the ragdoll self-collision mechanism 0.4.0 needs, and the fix for two joined bodies still colliding
-- [ ] `updatePriority` prop (the `-1` step priority is hard-coded in 0.2.0)
-- [ ] `updateLoop: "follow" | "independent"`, manual stepping, `frameloop="demand"` support
+- [x] `updatePriority` prop, defaulting to the `-1` it was hard-coded at, with a warning when it is set positive — R3F hands rendering to the subscriber as soon as any frame priority is above zero, so a positive value means a black canvas rather than an error
+- [x] `updateLoop: "follow" | "independent"` plus `api.step(delta?)`, which runs exactly what a frame runs — same accumulator, same step callbacks, same event flushes. `frameloop="demand"` works with it: `<Physics>` asks for the next frame while any body is awake and stops once they have all slept, so a world settles into genuinely not rendering rather than freezing mid-fall
 
 ### World configuration
 

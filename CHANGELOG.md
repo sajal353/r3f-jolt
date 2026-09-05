@@ -2,6 +2,19 @@
 
 ## 0.3.0
 
+### Ergonomics
+
+Geometry was declared twice and drifted, a swarm of bodies had to be written by hand, and the frame loop was not yours.
+
+- **`useAutoCollider`** — the collider is read off the mesh the ref is attached to, so a size is written once, in the JSX, instead of once there and once in the hook. `"box"` and `"sphere"` come from the geometry's bounds, `"hull"` from its points, `"trimesh"` from its triangles. The mesh's own `scale` is applied rather than ignored, a sphere under a non-uniform scale says which number it used, and geometry that is not centred on its origin gets a `RotatedTranslatedShape` — otherwise a mesh modelled with its feet at zero collides half a body below itself, which looks like a physics bug and is not one.
+- **`useInstancedBodies`** — many bodies of one kind on one `InstancedMesh`: one shared Jolt shape, one `BodyCreationSettings` rewound per body, one batched add, one loop writing instance matrices that skips whatever Jolt has put to sleep. `collider` takes a descriptor for any of the ten collider kinds, or a factory for anything they do not cover. The api carries the bodies and `at(index)`, a deliberate subset of `BodyApi` — an instance has no mesh and no shape of its own, so the parts about either are absent rather than lying.
+- **Batch add and remove** — `AddBodiesPrepare` / `AddBodiesFinalize` / `AddBodiesAbort` / `RemoveBodies`, so a swarm walks the broadphase once instead of once per body. Measured, because Jolt's own examples do not use this path: **`AddBodiesPrepare` sorts the array it is handed**, so a hook keeping index → body must keep its own list, and `BodyInterface_AddState` is **not** ours to destroy — `destroy` on one throws and leaving it alone leaks nothing.
+- **`updateLoop: "independent"` and `api.step(delta?)`** — takes the world off R3F's frame loop and advances it by hand, running exactly what a frame runs: the same accumulator, the same step callbacks, the same event flushes. `step()` with no argument is one `timeStep`.
+- **`frameloop="demand"` now works.** `<Physics>` asks R3F for the next frame while any body is awake and stops asking once they have all slept, so a world no longer freezes mid-fall on demand — and genuinely stops rendering once it settles.
+- **`updatePriority`** replaces the hard-coded `-1`, with a warning if it is set positive: R3F hands rendering to the subscriber as soon as any frame priority is above zero, and the result is a black canvas rather than an error.
+- One shape builder rather than two: the seven primitive hooks, `useConvex`, `useCompound` and `useTrimesh` now build their colliders through the same descriptor path `useInstancedBodies` takes, so a collider means the same thing whichever way it is asked for.
+- Demo: **Instancing** rewritten onto the hook — the same 1050 bodies in seven draw calls, with the shape building, the batch add, the write-back and the teardown gone from the scene. Plus **Auto colliders** and **Manual stepping**. 56 → 58 scenes.
+
 ### Contacts and filtering
 
 A contact reported that it happened and nothing about how hard, sensors were counted by hand, and two bodies of the same kind could not be made to ignore each other.

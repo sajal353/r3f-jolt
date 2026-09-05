@@ -54,9 +54,5 @@ export const DofLocks = () => (
     <Tag position={[2, 7, 0]}>only Y spin</Tag>
     <Tag position={[6, 7, 0]}>no Z travel</Tag>
 
-    <Tag position={[0, 9, 0]}>
-      locks are WORLD-space — "rotation X" is the world X axis, whatever way the
-      body is facing
-    </Tag>
   </>
 );

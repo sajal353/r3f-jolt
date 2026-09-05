@@ -202,6 +202,24 @@ export {
   type ConveyorApi,
 } from "@/Jolt/useConveyor";
 
+export {
+  useInstancedBodies,
+  type UseInstancedBodiesOptions,
+  type InstancedBodiesApi,
+  type InstanceApi,
+  type InstanceTransform,
+} from "@/Jolt/useInstancedBodies";
+export {
+  useAutoCollider,
+  type UseAutoColliderOptions,
+  type AutoColliderKind,
+} from "@/Jolt/useAutoCollider";
+export type {
+  ColliderDescriptor,
+  ColliderFactory,
+  ColliderSource,
+} from "@/Jolt/internal/colliderShape";
+
 export type {
   BodyOptions,
   BodyApi,

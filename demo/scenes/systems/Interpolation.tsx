@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Floor, Hud, Tag } from "../../shared/Stage";
+import { Floor, Hud } from "../../shared/Stage";
 import { useBox } from "@/Jolt/useBox";
 import { useJolt } from "@/Jolt/useJolt";
 
@@ -73,11 +73,5 @@ export const Interpolation = () => (
     <Runner />
     <Readout />
 
-    <Tag position={[0, 4, 0]}>
-      green mesh = interpolated · red dot = raw simulation position
-    </Tag>
-    <Tag position={[0, 7.4, 0]}>
-      set timeStep to 1/15 in the toolbar and watch the gap appear
-    </Tag>
   </>
 );

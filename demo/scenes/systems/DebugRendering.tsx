@@ -101,8 +101,5 @@ export const DebugRendering = () => (
     <Tag position={[5, 2.4, 0]}>
       four bodies here, no meshes — turn on PhysicsDebug
     </Tag>
-    <Tag position={[0, 9, 0]}>
-      PhysicsDebug colours by motion type · per-hook debug colours by shape kind
-    </Tag>
   </>
 );

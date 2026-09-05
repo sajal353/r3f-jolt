@@ -1,6 +1,12 @@
 import { useRef } from "react";
 import { describe, expect, it } from "vitest";
-import { Vector3 } from "three";
+import type Jolt from "jolt-physics";
+import {
+  BoxGeometry,
+  SphereGeometry,
+  Vector3,
+  type BufferGeometry,
+} from "three";
 import { useFrame } from "@react-three/fiber";
 import { useCar } from "@/Jolt/useCar";
 import { useCharacter } from "@/Jolt/useCharacter";
@@ -22,6 +28,13 @@ import { useSixDOFConstraint } from "@/Jolt/useSixDOFConstraint";
 import { useSensor } from "@/Jolt/useSensor";
 import { useGroupFilterTable } from "@/Jolt/useGroupFilterTable";
 import { useBodyContacts } from "@/Jolt/useBodyContacts";
+import { useInstancedBodies } from "@/Jolt/useInstancedBodies";
+import { useAutoCollider } from "@/Jolt/useAutoCollider";
+import {
+  addBodies,
+  destroyBodies,
+  removeBodies,
+} from "@/Jolt/internal/batchBodies";
 import type { GroupFilterTableApi } from "@/Jolt/useGroupFilterTable";
 import type { Vec3Tuple } from "@/Jolt/types";
 import { applyPhysicsSettings } from "@/Jolt/internal/physicsSettings";
@@ -309,6 +322,67 @@ const ContactForce = () => {
   return null;
 };
 
+/**
+ * The batch path is the wave's only code with no upstream reference — the Jolt
+ * examples add bodies one at a time — so its leak cycle carries more weight than
+ * most. It is also where `BodyInterface_AddState` would show up if it turned out
+ * to be ours to free after all.
+ */
+const Swarm = () => {
+  const [ref, api] = useInstancedBodies({
+    count: 40,
+    collider: { type: "box", size: [0.4, 0.4, 0.4] },
+    transforms: (index) => ({
+      position: [(index % 8) - 4, 3 + Math.floor(index / 8), 0],
+    }),
+    motionType: "dynamic",
+  });
+
+  void api;
+
+  return (
+    <instancedMesh ref={ref} args={[undefined, undefined, 40]}>
+      <meshStandardMaterial />
+    </instancedMesh>
+  );
+};
+
+/** Every derivation mode, including the two that wrap the collider. */
+const AutoColliders = () => (
+  <>
+    <AutoCollider collider="box" geometry={new BoxGeometry(1, 2, 1)} />
+    <AutoCollider collider="sphere" geometry={new SphereGeometry(0.6, 12, 12)} />
+    <AutoCollider collider="hull" geometry={new BoxGeometry(1, 1, 2)} />
+    <AutoCollider collider="offset" geometry={offsetGeometry()} />
+  </>
+);
+
+const offsetGeometry = () => {
+  const geometry = new BoxGeometry(1, 2, 1);
+  geometry.translate(0, 1, 0);
+  return geometry;
+};
+
+const AutoCollider = ({
+  collider,
+  geometry,
+}: {
+  collider: "box" | "sphere" | "hull" | "offset";
+  geometry: BufferGeometry;
+}) => {
+  const [ref] = useAutoCollider({
+    collider: collider === "offset" ? "box" : collider,
+    position: [0, 5, 0],
+    motionType: "dynamic",
+  });
+
+  return (
+    <mesh ref={ref} geometry={geometry} scale={[1.5, 1.5, 1.5]}>
+      <meshStandardMaterial />
+    </mesh>
+  );
+};
+
 const cycles = async (element: React.ReactElement, frames: number) => {
   const module = await loadDebugModule();
 
@@ -395,6 +469,75 @@ describe("mount/unmount leak checks", () => {
   it("the contact force estimate leaves the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<ContactForce />, 120);
     expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useInstancedBodies leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<Swarm />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useAutoCollider leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<AutoColliders />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  /**
+   * Memory is asserted per *world*, above: measured, the debug build's free
+   * counter walks down in 32 KiB steps as the world does work at all — two
+   * hundred steps of an empty world cost one — so in-world flatness says
+   * nothing, while flatness across a whole mount/unmount cycle says everything.
+   * What repetition inside one world does prove is that prepare, finalize,
+   * remove and destroy stay paired: an unmatched one strands bodies in the
+   * world, and the debug build asserts on a mismatched batch.
+   */
+  it("repeated batch add and remove returns every body", async () => {
+    const renderer = await renderPhysics(<Ground />);
+    const api = getApi();
+    const { Jolt: jolt, bodyInterface, layers, physicsSystem } = api;
+
+    const baseline = physicsSystem.GetNumBodies();
+
+    const half = new jolt.Vec3(0.3, 0.3, 0.3);
+    const shape = new jolt.BoxShape(half, 0.03, undefined);
+    shape.AddRef();
+    jolt.destroy(half);
+
+    const position = new jolt.RVec3(0, 8, 0);
+    const rotation = new jolt.Quat(0, 0, 0, 1);
+    const settings = new jolt.BodyCreationSettings(
+      shape,
+      position,
+      rotation,
+      jolt.EMotionType_Dynamic,
+      layers.LAYER_MOVING,
+    );
+
+    for (let round = 0; round < 100; round += 1) {
+      const bodies: Jolt.Body[] = [];
+
+      for (let index = 0; index < 25; index += 1) {
+        position.Set(index - 12, 8, 0);
+        settings.mPosition = position;
+        bodies.push(bodyInterface.CreateBody(settings));
+      }
+
+      const ids = addBodies(api, bodies, true);
+      expect(physicsSystem.GetNumBodies()).toBe(baseline + 25);
+
+      removeBodies(api, ids);
+      destroyBodies(api, ids);
+      expect(physicsSystem.GetNumBodies()).toBe(baseline);
+    }
+
+    jolt.destroy(settings);
+    jolt.destroy(position);
+    jolt.destroy(rotation);
+    shape.Release();
+
+    await unmount(renderer);
     expectNoAsserts();
   });
 

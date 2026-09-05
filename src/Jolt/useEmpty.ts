@@ -1,6 +1,6 @@
-import { BufferGeometry } from "three";
 import type Jolt from "jolt-physics";
-import { finishShape, useBody, type BodyOptions } from "./internal/useBody";
+import { useBody, type BodyOptions } from "./internal/useBody";
+import { createColliderShape } from "./internal/colliderShape";
 import type { Vec3Tuple } from "./types";
 
 export interface UseEmptyOptions extends BodyOptions {
@@ -20,25 +20,7 @@ export const useEmpty = (options: UseEmptyOptions) => {
   const { centerOfMass } = options;
 
   return useBody<Jolt.EmptyShape>(
-    (jolt) => {
-      let shape: Jolt.EmptyShape;
-
-      if (centerOfMass) {
-        const centre = new jolt.Vec3(
-          centerOfMass[0],
-          centerOfMass[1],
-          centerOfMass[2],
-        );
-        shape = new jolt.EmptyShape(centre);
-        jolt.destroy(centre);
-      } else {
-        shape = new jolt.EmptyShape();
-      }
-
-      // Jolt gives an empty shape mass 1 and an identity inertia, so a dynamic
-      // one falls sensibly rather than tripping a zero-volume assert.
-      return { shape: finishShape(shape), geometry: new BufferGeometry() };
-    },
+    (jolt) => createColliderShape(jolt, { type: "empty", centerOfMass }),
     options,
     "empty",
   );
