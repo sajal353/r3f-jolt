@@ -1,15 +1,17 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type Jolt from "jolt-physics";
 import { useJolt } from "./useJolt";
 import { useHandlerRef } from "./internal/useHandlerRef";
-import type { BodyContactHandlers } from "./types";
+import type { BodyContactHandlers, BodyContactOptions } from "./types";
 
 export const useBodyContacts = (
   body: Jolt.Body | undefined,
   handlers: BodyContactHandlers,
+  options?: BodyContactOptions,
 ) => {
   const api = useJolt();
   const handlersRef = useHandlerRef(handlers);
+  const [mount] = useState(() => ({ contactForce: options?.contactForce }));
 
   useEffect(() => {
     if (!body) return;
@@ -31,6 +33,7 @@ export const useBodyContacts = (
     return api.contacts.addBodyListener(
       body.GetID().GetIndexAndSequenceNumber(),
       forwarded,
+      mount,
     );
-  }, [api, body, handlersRef]);
+  }, [api, body, handlersRef, mount]);
 };

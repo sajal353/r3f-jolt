@@ -2,6 +2,17 @@
 
 ## 0.3.0
 
+### Contacts and filtering
+
+A contact reported that it happened and nothing about how hard, sensors were counted by hand, and two bodies of the same kind could not be made to ignore each other.
+
+- **Contact force on `ContactInfo`** — `impactSpeed`, the closing speed along the contact normal, and `impulse`, that speed times the pair's effective mass. Opt in per subscriber with `useBodyContacts(body, handlers, { contactForce: true })`; without it both stay `0` and nothing is computed, so existing subscribers pay nothing. **`impulse` is an estimate**: Jolt binds no applied contact impulse anywhere, and the library says so in the jsdoc, the README and the demo caption rather than implying it was measured. It leaves the angular terms out of the effective mass, which reads high for a glancing blow on a long lever.
+- **`useSensor`** — intersection events for a `sensor: true` body, plus the set of bodies currently inside it. That set is the reason it exists: a body can leave a trigger volume in two ways that are not moving. Jolt keeps a sensor contact only while the other body is **awake**, so a crate that settles inside fires an exit one step later without having moved; and a body destroyed while asleep inside gets no exit at all, because its contact went away when it slept. Both are handled, and the one case that survives — a sensor moving off a sleeping body — is documented with its fix.
+- **`collisionGroup` on every body hook**, plus **`useGroupFilterTable`** to build the filter and `api.setCollisionGroup` to change it later. This is the layer `group`/`mask` pair's opposite number: layers decide what a body *is*, group filters decide which *individuals* ignore each other. Two bodies in different groups always collide; two in the same group consult the table. It is the ragdoll self-collision mechanism, where adjacent bones overlap by design.
+- **`interactionGroups(group, mask)`** — the object-layer packing as a plain function, for the places that take a raw layer without a `useJolt()` call. It throws past 16 bits rather than dropping the high half quietly, which the README could previously only warn about in prose.
+- Measured rather than read, because two of these would have shipped as defects: every `Body` vector getter hands back the **same** wrapper over shared static storage, so reading body 2's velocity overwrites body 1's — written straight, the relative velocity at a contact is exactly zero every time. And a **kinematic** body reports a real inverse mass, 0.000125 for an 8000 kg slab, while the solver treats it as immovable — so the effective mass keys on `IsDynamic()` and not on the number, or a crate landing on a moving platform reads softer than one landing on the ground.
+- Three demo scenes: **Sensor volumes** (a trigger reporting what is in it, whose count holds after the balls fall asleep inside), **Contact force** (four weights dropped onto sprung platforms — they land at the same speed and the sink follows the impulse, 0.22 to 1.53 across the four), and **Collision groups** (two jointed chains of overlapping links, one filtered — the unfiltered one hangs a third longer because every link shoves the ones it is joined to).
+
 ### Shapes
 
 Four colliders Jolt supports were unreachable, and the most common static collider of all — a ground plane — had to be faked with a very wide box.

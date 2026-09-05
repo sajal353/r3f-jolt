@@ -56,8 +56,8 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 - [x] `CollideShapeWithInternalEdgeRemoval` as an option on shape overlap — avoids ghost hits against dense triangle meshes
 - [x] `SpecifiedBroadPhaseLayerFilter` alongside the default filters, for querying one specific broadphase layer. Plus `ignoreBodies` on every query including the raycasters, settable at runtime
 - [x] `OrientedBox.OverlapsAABox` / `OverlapsOrientedBox` exposed as cheap CPU-side overlap helpers — plain functions, not hooks
-- [ ] Sensor/intersection events (`onIntersectionEnter`/`Exit`) building on 0.2.1's `sensor`
-- [ ] Contact force payload (`totalForceMagnitude`, `maxForceDirection`) read from the manifold, so a consumer can tell a scrape from an impact
+- [x] Sensor/intersection events (`onIntersectionEnter`/`Exit`) building on 0.2.1's `sensor` — shipped as `useSensor`, which also keeps the set of bodies currently inside. **Worth recording: Jolt keeps a sensor contact only while the other body is awake**, so a body that settles inside a trigger fires an exit one step after it falls asleep without having moved, and one destroyed while asleep inside fires no exit at all. The hook holds that exit back and delivers it when the body really goes
+- [x] Contact force payload, so a consumer can tell a scrape from an impact. **Amended: `totalForceMagnitude` and `maxForceDirection` are not on the manifold** — `ContactManifold` binds a normal, a penetration depth, two sub-shape ids and the contact points, and no applied impulse is bound anywhere in the library, verified three times. So `impactSpeed` and `impulse` are **derived**: the closing speed along the normal, times the pair's effective mass, computed only for a subscriber that opted in. Labelled an estimate everywhere it appears
 - [x] `useConveyor` → `ContactSettings.mRelativeLinearSurfaceVelocity` / `mRelativeAngularSurfaceVelocity` — belts, moving walkways and turntables, with `setLinear` / `setAngular` for runtime control
 - [x] `surfaceVelocity` on the body hooks — the same belt declared at mount, for one that never changes speed
 
@@ -79,7 +79,7 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 - [ ] Auto-collider generation from a wrapped mesh. Today geometry args must be duplicated between hook and JSX (`size: [100, 0.01, 100]` _and_ `<boxGeometry args={[100, 0.01, 100]} />`), and the two can drift apart silently
 - [ ] Instanced bodies — one hook driving an `InstancedMesh`, with per-instance access by index
 - [ ] Batch body add/remove — `AddBodiesPrepare` / `AddBodiesFinalize` / `AddBodiesAbort` / `RemoveBodies`. The supported way to spawn or despawn many bodies at once; adding them one at a time re-walks the broadphase each time. Instanced bodies should be built on this rather than looping `AddBody`
-- [ ] Per-body collision filtering via `mCollisionGroup` + an `interactionGroups()` helper for building the group/mask pair, layered on 0.2.0's configurable object layers
+- [x] Per-body collision filtering via `mCollisionGroup` + an `interactionGroups()` helper for building the group/mask pair, layered on 0.2.0's configurable object layers. `collisionGroup` at creation on every body hook, `useGroupFilterTable` to build the refcounted filter, `api.setCollisionGroup` to change it later — the ragdoll self-collision mechanism 0.4.0 needs, and the fix for two joined bodies still colliding
 - [ ] `updatePriority` prop (the `-1` step priority is hard-coded in 0.2.0)
 - [ ] `updateLoop: "follow" | "independent"`, manual stepping, `frameloop="demand"` support
 

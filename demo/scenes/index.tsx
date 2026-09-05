@@ -23,6 +23,7 @@ import { Sensors } from "./bodies/Sensors";
 import { SleepWake } from "./bodies/SleepWake";
 import { GravityFactor } from "./bodies/GravityFactor";
 import { LayersAndMasks } from "./bodies/LayersAndMasks";
+import { CollisionGroups } from "./bodies/CollisionGroups";
 import { MotionQuality } from "./bodies/MotionQuality";
 
 import { Conveyor } from "./control/Conveyor";
@@ -51,6 +52,8 @@ import { PointQuery } from "./queries/PointQuery";
 
 import { BodyContacts } from "./events/BodyContacts";
 import { RawListener } from "./events/RawListener";
+import { SensorVolumes } from "./events/SensorVolumes";
+import { ContactForce } from "./events/ContactForce";
 
 import { Character } from "./systems/Character";
 import { Car } from "./systems/Car";
@@ -347,6 +350,18 @@ export const categories: Category[] = [
             Each ball lands on its own shelf and ignores the other. Two bodies
             collide only when <i>each</i> one's mask contains the other's group
             — 16 bits of each, packed into one 32-bit layer.
+          </>
+        ),
+      },
+      {
+        name: "Collision groups",
+        Component: CollisionGroups,
+        hook: "collisionGroup, useGroupFilterTable",
+        hint: (
+          <>
+            One level below layers: which <i>individual</i> bodies ignore each
+            other. Adjacent links are filtered out on the right, so the chain
+            stops fighting its own joints.
           </>
         ),
       },
@@ -673,6 +688,30 @@ export const categories: Category[] = [
             Runs <b>inside</b> the step, so it can change a contact before it is
             solved — restitution per pad here, and rejecting contacts outright
             to make one pad a ghost. Retain nothing; create no bodies.
+          </>
+        ),
+      },
+      {
+        name: "Sensor volumes",
+        Component: SensorVolumes,
+        hook: "useSensor",
+        hint: (
+          <>
+            Intersection events plus the set of bodies currently inside. The
+            count holds after the balls fall asleep — Jolt drops a sensor
+            contact when a body sleeps, and the hook holds that exit back.
+          </>
+        ),
+      },
+      {
+        name: "Contact force",
+        Component: ContactForce,
+        hook: "contactForce",
+        hint: (
+          <>
+            How hard, not just whether. Four weights land on sprung platforms at
+            the same speed, and the sink follows the impulse. An{" "}
+            <b>estimate</b>: Jolt reports no applied impulse.
           </>
         ),
       },

@@ -198,11 +198,42 @@ Two bodies collide when each one's group appears in the other's mask. Omit `grou
 
 > **Group and mask are 16 bits each**, not 32 — the object layer packs them as `(mask << 16) | group`, so you get 16 collision groups. A 32-bit filter value brought in from elsewhere silently loses its high half.
 
+`interactionGroups(group, mask)` packs the same pair without a `useJolt()` call, for the places that take a raw layer — a query's `layer` option, or a body's:
+
+```tsx
+import { interactionGroups } from "r3f-jolt";
+
+useClosestHitRaycaster({ layer: interactionGroups(PLAYER, ENEMY) });
+```
+
+It throws on a value past 16 bits rather than dropping the high half quietly.
+
 Broad-phase layers are configured on `<Physics>`, one entry per layer:
 
 ```tsx
 <Physics broadPhaseLayers={[{ include: STATIC }, { include: PLAYER | ENEMY }]} />
 ```
+
+### Group filters
+
+Layers decide what a body **is**. Group filters work one level down and decide which **individual** bodies ignore each other — the ragdoll problem, where a forearm and an upper arm overlap by design and must not shove each other apart.
+
+```tsx
+const table = useGroupFilterTable(BONES, (t) => {
+  for (let i = 0; i < BONES - 1; i += 1) t.disableCollision(i, i + 1);
+});
+
+// …then, on each body:
+collisionGroup: { filter: table.filter, groupID: RAGDOLL_ID, subGroupID: bone }
+```
+
+The rule in one sentence: **two bodies in different groups always collide; two in the same group collide only if the table allows their two sub-groups.** So one table per ragdoll, with a `groupID` of its own, keeps the filtering local to it.
+
+Worth knowing:
+
+- The table is `undefined` on its owner's first render, and a body reads its filter at **creation** — so bodies needing one belong in a child component the owner renders only once the table exists. `api.setCollisionGroup(...)` is the path for a body that already exists.
+- `GroupFilterTable` is refcounted. The hook holds one reference and releases it on unmount; every body built with it holds its own, so a table outlives its owner if bodies still reference it. Do not `destroy()` one yourself.
+- This is orthogonal to layers. A filter cannot make two bodies collide that their layers already keep apart.
 
 ## Choosing a Jolt build
 
@@ -265,6 +296,7 @@ All of them take these options and return `[ref, api]`.
 | `shapeUserData`            | —                           | 32-bit uint, set on the shape                      |
 | `motionQuality`            | `"discrete"`                | `"linearCast"` for fast movers                     |
 | `group` / `mask` / `layer` | static/moving split         | See [Collision groups](#collision-groups-and-masks) |
+| `collisionGroup`           | —                           | `{ filter?, groupID?, subGroupID? }` — which individuals ignore each other |
 | `allowDynamicOrKinematic`  | `false`                     | Required to promote a **static** body later        |
 | `sensor`                   | `false`                     | Reports contacts, imparts no impulse               |
 | `linearDamping`            | `0.05`                      | Jolt's default; set `0` for exact impulse maths    |
@@ -389,6 +421,7 @@ Vectors take a three `Vector3` or a `[x, y, z]` tuple; rotations take a `Quatern
 | `setPositionAndRotation(p, r, activate?)` | A **teleport** — no implied velocity                    |
 | `setMotionType(type)`                   | Refuses an illegal promotion, see above                   |
 | `setLayer(layer)` / `setGravityFactor(f)` |                                                         |
+| `setCollisionGroup(group)`              | `{ filter?, groupID?, subGroupID? }` — see [Group filters](#group-filters) |
 | `sleep()` / `wake()` / `isSleeping()`   |                                                           |
 | `resetSleepTimer()`                     |                                                           |
 | **Manual control**                      | See [Picking things up](#picking-things-up)               |
@@ -869,7 +902,43 @@ useBodyContacts(api?.body, {
 });
 ```
 
-A `ContactInfo` is `{ bodyID, userData, shapeUserData, point, normal, penetrationDepth }` describing **the other** body. It is pooled — copy anything you keep past the handler. On `onExit` only `bodyID` and `userData` are meaningful, because the manifold is already gone.
+A `ContactInfo` is `{ bodyID, userData, shapeUserData, point, normal, penetrationDepth, impactSpeed, impulse }` describing **the other** body. It is pooled — copy anything you keep past the handler. On `onExit` only `bodyID` and `userData` are meaningful, because the manifold is already gone.
+
+#### How hard it hit
+
+`impactSpeed` and `impulse` are `0` unless you ask for them, because the estimate costs about ten calls into WASM per contact per step:
+
+```tsx
+useBodyContacts(api?.body, { onEnter: (c) => bang(c.impulse) }, { contactForce: true });
+```
+
+`impactSpeed` is the closing speed along the contact normal in m/s, read before the solver ran. `impulse` is that speed times the pair's effective mass, in kg·m/s.
+
+**`impulse` is an estimate, not a measurement.** Jolt binds no applied contact impulse anywhere, so the library derives one: it answers "how much momentum had to be cancelled", and it leaves the angular terms out of the effective mass, which reads high for a glancing blow on a long lever. It ranks a scrape against a crash reliably. Do not treat it as the solver's own number.
+
+A body that is not dynamic — static *or* kinematic — counts as immovable, which is what Jolt's solver does. A kinematic body reports a real inverse mass through the bindings, so reading that number instead would make the same drop onto a moving platform read softer than onto the ground.
+
+### `useSensor` — what is inside a volume
+
+A body created with `sensor: true` reports contacts and imparts no impulse. `useSensor` gives those contacts their own names and, more usefully, keeps the set of bodies currently inside:
+
+```tsx
+const [ref, api] = useBox({ position: [0, 2, 0], size: [4, 4, 4], motionType: "static", sensor: true });
+
+const [inside] = useSensor(api?.body, {
+  onIntersectionEnter: (contact) => arm(contact.bodyID),
+  onIntersectionExit: (contact) => disarm(contact.bodyID),
+});
+```
+
+`inside` is a `readonly number[]` of body ids in entry order. Keeping that list by hand from a pair of enter/exit counters looks right and drifts, because a body can leave in two ways that are not moving:
+
+- **It falls asleep.** Jolt only keeps a sensor contact while the other body is awake, so a crate that settles inside a trigger fires an exit one step later without having moved, and an enter again when it wakes. `useSensor` holds that exit back and keeps the body in `inside`; pass `keepSleeping: false` for Jolt's raw behaviour.
+- **It is destroyed.** A body killed while asleep inside gets no exit from Jolt at all — its contact went away when it slept. The held exit is delivered instead, so the list still empties.
+
+One case survives either way: if the **sensor** moves off a sleeping body, no exit fires until that body wakes, because Jolt has no contact left to remove. Set `allowSleeping: false` on the bodies you track if that matters.
+
+`useSensor` and `useBodyContacts` can both subscribe to the same body.
 
 ### `useContactListener` — raw
 
@@ -996,16 +1065,16 @@ pnpm install
 pnpm dev
 ```
 
-53 scenes in seven categories, one per hook or feature:
+56 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
 | **Shapes**       | all 12 body hooks, one scene each · terrain from all three `heights` forms · per-triangle surface types |
-| **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · motion quality |
+| **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · collision groups · motion quality |
 | **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale · conveyor    |
 | **Constraints**  | all 8 constraint hooks · motors · springs · rope built from chained distance joints                 |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
-| **Events**       | `useBodyContacts` · `useContactListener`                                                           |
+| **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
 | **Systems**      | character · car · interpolation · step callbacks · debug rendering · stress test · instancing        |
 
 Toolbar toggles for `<PhysicsDebug />`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.

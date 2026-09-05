@@ -192,6 +192,11 @@ export type { PhysicsSettingsOptions } from "@/Jolt/internal/physicsSettings";
 export { useContactListener } from "@/Jolt/useContactListener";
 export { useBodyContacts } from "@/Jolt/useBodyContacts";
 export {
+  useSensor,
+  type SensorHandlers,
+  type UseSensorOptions,
+} from "@/Jolt/useSensor";
+export {
   useConveyor,
   type UseConveyorOptions,
   type ConveyorApi,
@@ -201,7 +206,13 @@ export type {
   BodyOptions,
   BodyApi,
   BodyApiContext,
+  CollisionGroupOptions,
 } from "@/Jolt/internal/useBody";
+export {
+  useGroupFilterTable,
+  type GroupFilterTableApi,
+} from "@/Jolt/useGroupFilterTable";
+export { interactionGroups } from "@/Jolt/internal/interactionGroups";
 export type {
   MassPropertiesOptions,
   MassPropertiesOverride,
@@ -244,6 +255,7 @@ export type {
   SurfaceVelocity,
   SurfaceVelocityHandle,
   BodyContactHandlers,
+  BodyContactOptions,
   ActivationHandlers,
   ActivationRegistry,
   StepCallback,

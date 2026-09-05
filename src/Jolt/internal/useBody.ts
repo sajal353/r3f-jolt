@@ -52,6 +52,12 @@ import type {
  * the first rescale would free the thing every later rescale needs.
  */
 
+export interface CollisionGroupOptions {
+  filter?: Jolt.GroupFilter;
+  groupID?: number;
+  subGroupID?: number;
+}
+
 export interface BodyOptions {
   position: Vec3Tuple;
   rotation?: QuatTuple;
@@ -88,6 +94,17 @@ export interface BodyOptions {
   layer?: number;
   group?: number;
   mask?: number;
+  /**
+   * Which individual bodies ignore each other, one level below `group`/`mask`.
+   * Two bodies in **different** groups always collide; two in the same group
+   * collide only if the filter's table allows their two sub-groups.
+   *
+   * This is the ragdoll mechanism — adjacent bones overlap by design. Build the
+   * filter with `useGroupFilterTable`, and note it is read at **creation**, so
+   * a body needing one belongs in a child the table's owner renders once the
+   * table exists. `api.setCollisionGroup` is the later path.
+   */
+  collisionGroup?: CollisionGroupOptions;
   /**
    * Required to later promote a `static` body to kinematic or dynamic. Without
    * it `SetMotionType` trips an assert that a release build does not catch.
@@ -181,6 +198,7 @@ export interface BodyApi<S extends Jolt.Shape> {
   ) => void;
   setMotionType: (motionType: MotionType) => void;
   setLayer: (layer: number) => void;
+  setCollisionGroup: (group: CollisionGroupOptions) => void;
   setGravityFactor: (factor: number) => void;
   sleep: () => void;
   wake: () => void;
@@ -288,6 +306,32 @@ export const shapeFromResultAs = <
 ): InstanceType<C> =>
   jolt.castObject(shapeFromResult<Jolt.Shape>(result, hook), Class);
 
+/**
+ * Jolt copies the group into whatever takes it and refs the filter on the way,
+ * so the one built here is a temporary — measured: assigning it to a
+ * `BodyCreationSettings` takes the filter's refcount up by one and destroying
+ * this brings it back down, leaving the settings' own copy holding a reference.
+ */
+const withCollisionGroup = (
+  jolt: JoltModule,
+  options: CollisionGroupOptions,
+  visit: (group: Jolt.CollisionGroup) => void,
+) => {
+  const { filter, groupID = 0, subGroupID = 0 } = options;
+
+  const group = filter
+    ? new jolt.CollisionGroup(filter, groupID, subGroupID)
+    : new jolt.CollisionGroup();
+
+  if (!filter) {
+    group.SetGroupID(groupID);
+    group.SetSubGroupID(subGroupID);
+  }
+
+  visit(group);
+  jolt.destroy(group);
+};
+
 const MAX_USER_DATA = 0xffffffff;
 
 const validateUserData = (value: number, label: string) => {
@@ -387,6 +431,7 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
       layer,
       group,
       mask,
+      collisionGroup,
       allowDynamicOrKinematic,
       sensor,
       linearDamping,
@@ -515,6 +560,12 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
 
     if (sensor !== undefined) {
       bodySettings.mIsSensor = sensor;
+    }
+
+    if (collisionGroup) {
+      withCollisionGroup(jolt, collisionGroup, (value) => {
+        bodySettings.mCollisionGroup = value;
+      });
     }
 
     if (linearDamping !== undefined) {
@@ -826,6 +877,13 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
       setLayer: (value: number) => {
         if (!usable()) return;
         bodyInterface.SetObjectLayer(id, value);
+      },
+
+      setCollisionGroup: (value: CollisionGroupOptions) => {
+        if (!usable()) return;
+        withCollisionGroup(jolt, value, (group) => {
+          bodyInterface.SetCollisionGroup(id, group);
+        });
       },
 
       setGravityFactor: (factor: number) => {

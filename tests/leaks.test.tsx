@@ -19,6 +19,10 @@ import { useDistanceConstraint } from "@/Jolt/useDistanceConstraint";
 import { useConeConstraint } from "@/Jolt/useConeConstraint";
 import { useSwingTwistConstraint } from "@/Jolt/useSwingTwistConstraint";
 import { useSixDOFConstraint } from "@/Jolt/useSixDOFConstraint";
+import { useSensor } from "@/Jolt/useSensor";
+import { useGroupFilterTable } from "@/Jolt/useGroupFilterTable";
+import { useBodyContacts } from "@/Jolt/useBodyContacts";
+import type { GroupFilterTableApi } from "@/Jolt/useGroupFilterTable";
 import type { Vec3Tuple } from "@/Jolt/types";
 import { applyPhysicsSettings } from "@/Jolt/internal/physicsSettings";
 import {
@@ -241,6 +245,70 @@ const Queries = () => {
   return null;
 };
 
+/**
+ * `GroupFilterTable` is the wave's only new `RefTarget`, and the bodies holding
+ * it take references of their own — so a `destroy()` where a `Release()` belongs
+ * is a double free rather than a leak. Flat across cycles is what proves the
+ * pairing.
+ */
+const Filtered = ({ table }: { table: GroupFilterTableApi }) => {
+  useSphere({
+    position: [0, 2, 0],
+    radius: 0.5,
+    motionType: "dynamic",
+    collisionGroup: { filter: table.filter, groupID: 0, subGroupID: 1 },
+  });
+
+  useSphere({
+    position: [0, 4, 0],
+    radius: 0.5,
+    motionType: "dynamic",
+    collisionGroup: { filter: table.filter, groupID: 0, subGroupID: 2 },
+  });
+
+  return null;
+};
+
+const GroupFilter = () => {
+  const table = useGroupFilterTable(4, (built) => built.disableCollision(1, 2));
+  return table ? <Filtered table={table} /> : null;
+};
+
+/**
+ * The sensor hook builds a `BodyID` per sleep check and frees it again; a
+ * body that settles inside the volume exercises that path every frame.
+ */
+const Sensor = () => {
+  const [, sensor] = useBox({
+    position: [0, 1.5, 0],
+    size: [4, 3, 4],
+    motionType: "static",
+    sensor: true,
+  });
+
+  useSensor(sensor?.body, {});
+
+  useSphere({ position: [0, 3, 0], radius: 0.5, motionType: "dynamic" });
+
+  return null;
+};
+
+/** The force estimate allocates nothing, and this is what says so. */
+const ContactForce = () => {
+  const [, api] = useSphere({
+    position: [0, 4, 0],
+    radius: 0.5,
+    motionType: "dynamic",
+    allowSleeping: false,
+  });
+
+  useBodyContacts(api?.body, { onEnter: () => {}, onStay: () => {} }, {
+    contactForce: true,
+  });
+
+  return null;
+};
+
 const cycles = async (element: React.ReactElement, frames: number) => {
   const module = await loadDebugModule();
 
@@ -312,6 +380,24 @@ describe("mount/unmount leak checks", () => {
    * The step registry is deliberately absent from this file — it creates no
    * Jolt objects at all, so there is nothing here for it to leak.
    */
+  it("useGroupFilterTable leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<GroupFilter />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useSensor leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<Sensor />, 120);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("the contact force estimate leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<ContactForce />, 120);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
   it("re-applying physicsSettings leaves the heap flat", async () => {
     const module = await loadDebugModule();
 

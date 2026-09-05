@@ -74,12 +74,41 @@ export interface ContactInfo {
   point: Vector3;
   normal: Vector3;
   penetrationDepth: number;
+  /**
+   * Closing speed along the contact normal, in m/s, measured before the solver
+   * ran. Zero for a resting or separating contact, and zero on `onExit` — the
+   * manifold is gone by then.
+   *
+   * Only filled when the subscriber asked for it; see `BodyContactOptions`.
+   */
+  impactSpeed: number;
+  /**
+   * Estimated normal impulse, in kg·m/s — `impactSpeed` times the pair's
+   * effective mass.
+   *
+   * Jolt binds no applied impulse anywhere, so this is **derived, not
+   * reported**: it answers "how much momentum had to be cancelled" and ignores
+   * the angular terms in the effective mass, which reads high for a glancing
+   * blow on a long lever. Good for ranking a scrape against a crash. Not a
+   * substitute for the solver's own numbers.
+   *
+   * Only filled when the subscriber asked for it; see `BodyContactOptions`.
+   */
+  impulse: number;
 }
 
 export interface BodyContactHandlers {
   onEnter?: (contact: ContactInfo) => void;
   onStay?: (contact: ContactInfo) => void;
   onExit?: (contact: ContactInfo) => void;
+}
+
+/**
+ * `contactForce` costs about ten calls into WASM per contact per step, so it is
+ * off unless asked for and `impactSpeed` / `impulse` stay 0 without it.
+ */
+export interface BodyContactOptions {
+  contactForce?: boolean;
 }
 
 /** Mutate in place to change the belt; the registry reads it inside the step. */
@@ -158,6 +187,7 @@ export interface ContactRegistry {
   addBodyListener: (
     bodyID: number,
     handlers: BodyContactHandlers,
+    options?: BodyContactOptions,
   ) => () => void;
   addSurfaceVelocity: (
     bodyID: number,
