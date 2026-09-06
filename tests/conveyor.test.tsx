@@ -314,6 +314,38 @@ describe("conveyor belts", () => {
     expectNoAsserts();
   });
 
+  /**
+   * The counterfactual for the test above, and the reason `wake` defaults on.
+   * Measured at the world's own defaults — `timeBeforeSleep` 0.5 s,
+   * `pointVelocitySleepThreshold` 0.03, nothing overridden and no forced
+   * sleep — the crate is asleep by frame 49 and then never notices the belt
+   * start: 7.2 m of travel with `wake`, exactly 0 without it.
+   */
+  it("leaves a sleeping body behind when wake is off", async () => {
+    let crate: BodyApi<Jolt.BoxShape> | undefined;
+    let conveyor: ConveyorApi | undefined;
+
+    const renderer = await renderPhysics(
+      <>
+        <Belt wake={false} onReady={(api) => (conveyor = api)} />
+        <Crate onReady={(api) => (crate = api)} />
+      </>,
+    );
+
+    await step(renderer, 240);
+    expect(crate!.isSleeping()).toBe(true);
+
+    const start = positionOf(crate!).x;
+    conveyor!.setLinear([4, 0, 0]);
+    await step(renderer, 120);
+
+    expect(positionOf(crate!).x).toBeCloseTo(start, 3);
+    expect(crate!.isSleeping()).toBe(true);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
   it("carries a belt declared through the body option", async () => {
     let crate: BodyApi<Jolt.BoxShape> | undefined;
 
