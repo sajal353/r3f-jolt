@@ -126,11 +126,19 @@ export const createContactRegistry = (
     return false;
   };
 
+  /**
+   * `flipNormal` is set for the second body of the pair. Jolt's manifold normal
+   * points from body 1 to body 2 in its own ordering, which the subscriber has
+   * no way of knowing, so the side that is body 2 gets it negated and every
+   * subscriber reads the same thing: the normal points from the body it
+   * subscribed to towards the body in `bodyID`.
+   */
   const queueBodyEvent = (
     kind: EventKind,
     target: Jolt.Body,
     other: Jolt.Body,
     manifold: Jolt.ContactManifold,
+    flipNormal: boolean,
   ) => {
     const targetID = target.GetID().GetIndexAndSequenceNumber();
     if (!wantsBodyEvents(targetID, kind)) return;
@@ -139,12 +147,17 @@ export const createContactRegistry = (
     const otherID = other.GetID().GetIndexAndSequenceNumber();
     const point = manifold.GetWorldSpaceContactPointOn1(0);
     const normal = manifold.mWorldSpaceNormal;
+    const facing = flipNormal ? -1 : 1;
 
     info.bodyID = otherID;
     info.userData = other.GetUserData();
     info.shapeUserData = other.GetShape().GetUserData();
     info.point.set(point.GetX(), point.GetY(), point.GetZ());
-    info.normal.set(normal.GetX(), normal.GetY(), normal.GetZ());
+    info.normal.set(
+      normal.GetX() * facing,
+      normal.GetY() * facing,
+      normal.GetZ() * facing,
+    );
     info.penetrationDepth = manifold.mPenetrationDepth;
     // Per target, not per pair: a listener that did not ask still sees zeroes
     // even when the body on the other side of the contact did ask.
@@ -366,16 +379,24 @@ export const createContactRegistry = (
         const id1 = body1.GetID().GetIndexAndSequenceNumber();
         const id2 = body2.GetID().GetIndexAndSequenceNumber();
 
-        // Symmetric, so it runs once for the pair rather than once per side.
-        if (wantsForce(id1) || wantsForce(id2)) {
+        // Symmetric, so it runs once for the pair rather than once per side —
+        // and only for a side that both asked for the force and has a handler
+        // for this kind of event, since `queueBodyEvent` drops it otherwise. A
+        // wall of resting bodies persists its contacts every step, and the
+        // estimate is about ten calls into WASM each time.
+        const needsForce =
+          (wantsForce(id1) && wantsBodyEvents(id1, kind)) ||
+          (wantsForce(id2) && wantsBodyEvents(id2, kind));
+
+        if (needsForce) {
           estimateForce(body1, body2, manifold);
         } else {
           force.impactSpeed = 0;
           force.impulse = 0;
         }
 
-        queueBodyEvent(kind, body1, body2, manifold);
-        queueBodyEvent(kind, body2, body1, manifold);
+        queueBodyEvent(kind, body1, body2, manifold, false);
+        queueBodyEvent(kind, body2, body1, manifold, true);
       }
     };
 

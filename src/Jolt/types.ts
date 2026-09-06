@@ -72,6 +72,15 @@ export interface ContactInfo {
   userData: number;
   shapeUserData: number;
   point: Vector3;
+  /**
+   * Contact normal, pointing **from the body you subscribed to** towards the
+   * body in `bodyID` — so negating it is the direction you were pushed. Zero on
+   * `onExit`.
+   *
+   * `useContactListener` is unaffected: a raw listener gets Jolt's manifold
+   * untouched, whose normal runs from body 1 to body 2 in Jolt's own pair
+   * ordering.
+   */
   normal: Vector3;
   penetrationDepth: number;
   /**

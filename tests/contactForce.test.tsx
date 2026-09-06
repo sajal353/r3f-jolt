@@ -200,7 +200,66 @@ describe("contact force", () => {
     await unmount(renderer);
     expectNoAsserts();
   });
+
+  it("computes the estimate for each kind of event that was asked for", async () => {
+    const renderer = await renderPhysics(
+      <>
+        <Slab />
+        <EnteringOnly />
+      </>,
+    );
+
+    await step(renderer, 150);
+
+    // The faller asked only about entry, the slab only about persistence, and
+    // both asked for the force. Neither subscription may starve the other: the
+    // estimate is computed per pair, once, for the kinds someone is listening
+    // for.
+    const entered = firstLanding("enterOnly");
+    expect(entered.impulse).toBeGreaterThan(0);
+
+    const stays = landings.stayOnly ?? [];
+    expect(stays.length).toBeGreaterThan(5);
+    expect(Math.max(...stays.map((stay) => stay.impulse))).toBeGreaterThan(0);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
 });
+
+const Slab = () => {
+  const [, api] = useBox({
+    position: [0, -0.5, 0],
+    size: [20, 1, 20],
+    motionType: "static",
+  });
+
+  useBodyContacts(
+    api?.body,
+    { onStay: (contact) => record("stayOnly", contact) },
+    { contactForce: true },
+  );
+
+  return null;
+};
+
+const EnteringOnly = () => {
+  const [, api] = useSphere({
+    position: [0, 4, 0],
+    radius: 0.5,
+    motionType: "dynamic",
+    mass: 3,
+    allowSleeping: false,
+  });
+
+  useBodyContacts(
+    api?.body,
+    { onEnter: (contact) => record("enterOnly", contact) },
+    { contactForce: true },
+  );
+
+  return null;
+};
 
 const Resting = () => {
   const [, api] = useSphere({

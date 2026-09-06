@@ -164,6 +164,53 @@ describe("contact events", () => {
     expectNoAsserts();
   });
 
+  it("points the contact normal from each subscriber towards the other body", async () => {
+    const fromCrate: number[] = [];
+    const fromGround: number[] = [];
+
+    const Pair = () => {
+      const [, ground] = useBox({
+        size: [20, 1, 20],
+        position: [0, -0.5, 0],
+        motionType: "static",
+      });
+
+      const [, crate] = useBox({
+        size: [1, 1, 1],
+        position: [0, 2, 0],
+        motionType: "dynamic",
+        mass: 10,
+      });
+
+      useBodyContacts(crate?.body, {
+        onEnter: (contact) => fromCrate.push(contact.normal.y),
+      });
+
+      useBodyContacts(ground?.body, {
+        onEnter: (contact) => fromGround.push(contact.normal.y),
+      });
+
+      return null;
+    };
+
+    const renderer = await renderPhysics(<Pair />);
+    await step(renderer, 150);
+
+    expect(fromCrate.length).toBeGreaterThan(0);
+    expect(fromGround.length).toBe(fromCrate.length);
+
+    // The crate is above the ground, so "towards the other body" is down for it
+    // and up for the ground. Jolt's own normal is whichever of the two its pair
+    // ordering happened to produce, which is what the registry flips out.
+    for (const y of fromCrate) expect(y).toBeLessThan(-0.9);
+    for (const y of fromGround) expect(y).toBeGreaterThan(0.9);
+
+    fromCrate.forEach((y, index) => expect(y).toBeCloseTo(-fromGround[index], 6));
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
   it("keeps working after one of two subscribers unmounts", async () => {
     const survivor = vi.fn();
     const removed = vi.fn();

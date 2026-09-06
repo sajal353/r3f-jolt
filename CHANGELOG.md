@@ -2,6 +2,15 @@
 
 ## 0.3.0
 
+### Breaking things
+
+- **`ContactInfo.normal` now points from the body you subscribed to towards the body in `bodyID`.** It used to be Jolt's manifold normal handed to both sides unchanged, which runs from body 1 to body 2 in an ordering the subscriber cannot see — so "push it away along the normal" was right on one side of every contact and backwards on the other. `useContactListener` is unaffected: a raw listener still gets Jolt's manifold as Jolt built it.
+- The `impulse` estimate is no longer computed for a contact nobody will be told about. It ran whenever either body had asked for `contactForce`, without checking whether that body had a handler for *this* kind of event — so a scene subscribing only to `onEnter` paid ten calls into WASM for every persisting contact, every step, and the number was then discarded.
+- Demo: **Breakable objects**. A 110-brick wall in a running bond, a cannonball on the camera ray, `three/examples/jsm/misc/ConvexObjectBreaker` doing the splitting, two generations deep, and a ceiling of **200 chunks** the scene reaches and holds by retiring the smallest chips first. The split runs from `useBodyContacts` rather than `useContactListener`, which is the point of the scene: that handler runs *between* steps, so replacing a body with six of them is legal there and is not inside Jolt's own callback. It listens to `onStay` as well as `onEnter`, because in a collapse most of the violence is between bodies that were already touching and those never re-enter. A chunk that can no longer break unsubscribes entirely. 58 → 59 scenes.
+- The scene breaks on the velocity change the estimated impulse would give the piece, not on the impulse itself. `impulse` is closing momentum, so one collision reads about 3000 against a 246 kg brick and 119 against a 40 kg chunk off the same brick: a single absolute threshold either shatters the wall as it settles or never breaks a fragment at all.
+- Measured while staging it, because three of them look like physics bugs: the breaker places each fragment at the parent's position **plus the fragment's centroid in the parent's local frame, unrotated** — 0.65 m out for a brick that has already tumbled, so the scene rotates it back; a cut that grazes a face returns more than four points with no volume, which `ConvexGeometry` throws on rather than reporting, so a failed split leaves the piece standing; and second-generation cuts can produce a hull Jolt refuses outright — every one of them under 1e-9 m³ and 0.6 mm at its thinnest, so the scene drops dust rather than bodying it.
+- The `impulse` estimate itself was checked against ground truth, the body's own mass times its velocity change across the same step: **0.91 of the truth** for a head-on hit, which is exactly the restitution the estimate does not model, and **1.67 times it** for a glancing one, which is the angular term it leaves out of the effective mass. Documented rather than changed — it is an estimate, and both numbers are the size of error the word implies.
+
 ### Ergonomics
 
 Geometry was declared twice and drifted, a swarm of bodies had to be written by hand, and the frame loop was not yours.

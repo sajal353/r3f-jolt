@@ -1000,6 +1000,8 @@ useBodyContacts(api?.body, {
 
 A `ContactInfo` is `{ bodyID, userData, shapeUserData, point, normal, penetrationDepth, impactSpeed, impulse }` describing **the other** body. It is pooled — copy anything you keep past the handler. On `onExit` only `bodyID` and `userData` are meaningful, because the manifold is already gone.
 
+`normal` points **from your body towards the other one**, so negating it is the direction your body was pushed. Both sides of a contact therefore read a normal that means the same thing to each of them, which Jolt's own does not: its manifold normal runs from body 1 to body 2 in an ordering the subscriber cannot see. `useContactListener` gets that raw manifold unchanged.
+
 #### How hard it hit
 
 `impactSpeed` and `impulse` are `0` unless you ask for them, because the estimate costs about ten calls into WASM per contact per step:
@@ -1010,7 +1012,9 @@ useBodyContacts(api?.body, { onEnter: (c) => bang(c.impulse) }, { contactForce: 
 
 `impactSpeed` is the closing speed along the contact normal in m/s, read before the solver ran. `impulse` is that speed times the pair's effective mass, in kg·m/s.
 
-**`impulse` is an estimate, not a measurement.** Jolt binds no applied contact impulse anywhere, so the library derives one: it answers "how much momentum had to be cancelled", and it leaves the angular terms out of the effective mass, which reads high for a glancing blow on a long lever. It ranks a scrape against a crash reliably. Do not treat it as the solver's own number.
+**`impulse` is an estimate, not a measurement.** Jolt binds no applied contact impulse anywhere, so the library derives one: it answers "how much momentum had to be cancelled", and it leaves the angular terms out of the effective mass, which reads high for a glancing blow on a long lever. Measured against ground truth — the body's own mass times its velocity change across the same step — it came out at **0.91** of the truth for a head-on hit, the restitution it does not model, and **1.67** times it for a glancing one, the angular term it leaves out. It ranks a scrape against a crash reliably. Do not treat it as the solver's own number.
+
+It is also closing *momentum*, so it scales with the mass of what was hit. If you are thresholding damage across bodies of different sizes, divide it back out — `impulse * body.GetMotionProperties().GetInverseMass()` is the velocity change the blow would have caused, which compares across a boulder and a pebble where the raw number does not.
 
 A body that is not dynamic — static *or* kinematic — counts as immovable, which is what Jolt's solver does. A kinematic body reports a real inverse mass through the bindings, so reading that number instead would make the same drop onto a moving platform read softer than onto the ground.
 
@@ -1161,7 +1165,7 @@ pnpm install
 pnpm dev
 ```
 
-58 scenes in seven categories, one per hook or feature:
+59 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
@@ -1171,7 +1175,7 @@ pnpm dev
 | **Constraints**  | all 8 constraint hooks · motors · springs · rope built from chained distance joints                 |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
-| **Systems**      | character · car · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping |
+| **Systems**      | character · car · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
 
 Toolbar toggles for `<PhysicsDebug />`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 

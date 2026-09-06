@@ -64,6 +64,7 @@ import { DebugRendering } from "./systems/DebugRendering";
 import { StressTest } from "./systems/StressTest";
 import { Instancing } from "./systems/Instancing";
 import { ManualStepping } from "./systems/ManualStepping";
+import { Breakable } from "./systems/Breakable";
 
 export interface Scene {
   name: string;
@@ -845,6 +846,24 @@ export const categories: Category[] = [
             Nothing steps this world but the buttons. <code>updateLoop</code> of{" "}
             <code>"independent"</code> takes the world off the frame loop, and{" "}
             <code>api.step()</code> advances it exactly one step.
+          </>
+        ),
+      },
+      {
+        name: "Breakable objects",
+        Component: Breakable,
+        hook: "useBodyContacts, useConvex",
+        hint: (
+          <>
+            <b>Click to fire.</b> A dry-stacked brick wall — no joints, just
+            friction — splitting two generations deep to a ceiling of{" "}
+            <b>200 chunks</b>. A piece goes when the estimated impulse would
+            change <i>its own</i> velocity by 0.8 m/s: <code>impulse</code> is
+            momentum, so only a mass-relative threshold breaks a brick and its
+            chips alike. The split runs from <code>useBodyContacts</code>, whose
+            handler fires <b>between steps</b> — building bodies inside
+            Jolt&apos;s own contact callback is illegal. <code>impulse</code> is
+            an estimate, not a number Jolt reported.
           </>
         ),
       },
