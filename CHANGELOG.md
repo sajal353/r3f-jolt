@@ -2,112 +2,109 @@
 
 ## 0.3.0
 
-### Breaking things
+### Breaking changes
 
-- **`ContactInfo.normal` now points from the body you subscribed to towards the body in `bodyID`.** It used to be Jolt's manifold normal handed to both sides unchanged, which runs from body 1 to body 2 in an ordering the subscriber cannot see — so "push it away along the normal" was right on one side of every contact and backwards on the other. `useContactListener` is unaffected: a raw listener still gets Jolt's manifold as Jolt built it.
-- The `impulse` estimate is no longer computed for a contact nobody will be told about. It ran whenever either body had asked for `contactForce`, without checking whether that body had a handler for *this* kind of event — so a scene subscribing only to `onEnter` paid ten calls into WASM for every persisting contact, every step, and the number was then discarded.
-- Demo: **Breakable objects**. A 110-brick wall in a running bond, a cannonball on the camera ray, `three/examples/jsm/misc/ConvexObjectBreaker` doing the splitting, two generations deep, and a ceiling of **200 chunks** the scene reaches and holds by retiring the smallest chips first. The split runs from `useBodyContacts` rather than `useContactListener`, which is the point of the scene: that handler runs *between* steps, so replacing a body with six of them is legal there and is not inside Jolt's own callback. It listens to `onStay` as well as `onEnter`, because in a collapse most of the violence is between bodies that were already touching and those never re-enter. A chunk that can no longer break unsubscribes entirely. 58 → 59 scenes.
-- The scene breaks on the velocity change the estimated impulse would give the piece, not on the impulse itself. `impulse` is closing momentum, so one collision reads about 3000 against a 246 kg brick and 119 against a 40 kg chunk off the same brick: a single absolute threshold either shatters the wall as it settles or never breaks a fragment at all.
-- Measured while staging it, because three of them look like physics bugs: the breaker places each fragment at the parent's position **plus the fragment's centroid in the parent's local frame, unrotated** — 0.65 m out for a brick that has already tumbled, so the scene rotates it back; a cut that grazes a face returns more than four points with no volume, which `ConvexGeometry` throws on rather than reporting, so a failed split leaves the piece standing; and second-generation cuts can produce a hull Jolt refuses outright — every one of them under 1e-9 m³ and 0.6 mm at its thinnest, so the scene drops dust rather than bodying it.
-- The `impulse` estimate itself was checked against ground truth, the body's own mass times its velocity change across the same step: **0.91 of the truth** for a head-on hit, which is exactly the restitution the estimate does not model, and **1.67 times it** for a glancing one, which is the angular term it leaves out of the effective mass. Documented rather than changed — it is an estimate, and both numbers are the size of error the word implies.
-
-### Ergonomics
-
-Geometry was declared twice and drifted, a swarm of bodies had to be written by hand, and the frame loop was not yours.
-
-- **`useAutoCollider`** — the collider is read off the mesh the ref is attached to, so a size is written once, in the JSX, instead of once there and once in the hook. `"box"` and `"sphere"` come from the geometry's bounds, `"hull"` from its points, `"trimesh"` from its triangles. The mesh's own `scale` is applied rather than ignored, a sphere under a non-uniform scale says which number it used, and geometry that is not centred on its origin gets a `RotatedTranslatedShape` — otherwise a mesh modelled with its feet at zero collides half a body below itself, which looks like a physics bug and is not one.
-- **`useInstancedBodies`** — many bodies of one kind on one `InstancedMesh`: one shared Jolt shape, one `BodyCreationSettings` rewound per body, one batched add, one loop writing instance matrices that skips whatever Jolt has put to sleep. `collider` takes a descriptor for any of the ten collider kinds, or a factory for anything they do not cover. The api carries the bodies and `at(index)`, a deliberate subset of `BodyApi` — an instance has no mesh and no shape of its own, so the parts about either are absent rather than lying.
-- **Batch add and remove** — `AddBodiesPrepare` / `AddBodiesFinalize` / `AddBodiesAbort` / `RemoveBodies`, so a swarm walks the broadphase once instead of once per body. Measured, because Jolt's own examples do not use this path: **`AddBodiesPrepare` sorts the array it is handed**, so a hook keeping index → body must keep its own list, and `BodyInterface_AddState` is **not** ours to destroy — `destroy` on one throws and leaving it alone leaks nothing.
-- **`updateLoop: "independent"` and `api.step(delta?)`** — takes the world off R3F's frame loop and advances it by hand, running exactly what a frame runs: the same accumulator, the same step callbacks, the same event flushes. `step()` with no argument is one `timeStep`.
-- **`frameloop="demand"` now works.** `<Physics>` asks R3F for the next frame while any body is awake and stops asking once they have all slept, so a world no longer freezes mid-fall on demand — and genuinely stops rendering once it settles.
-- **`updatePriority`** replaces the hard-coded `-1`, with a warning if it is set positive: R3F hands rendering to the subscriber as soon as any frame priority is above zero, and the result is a black canvas rather than an error.
-- One shape builder rather than two: the seven primitive hooks, `useConvex`, `useCompound` and `useTrimesh` now build their colliders through the same descriptor path `useInstancedBodies` takes, so a collider means the same thing whichever way it is asked for.
-- Demo: **Instancing** rewritten onto the hook — the same 1050 bodies in seven draw calls, with the shape building, the batch add, the write-back and the teardown gone from the scene. Plus **Auto colliders** and **Manual stepping**. 56 → 58 scenes.
-
-### Contacts and filtering
-
-A contact reported that it happened and nothing about how hard, sensors were counted by hand, and two bodies of the same kind could not be made to ignore each other.
-
-- **Contact force on `ContactInfo`** — `impactSpeed`, the closing speed along the contact normal, and `impulse`, that speed times the pair's effective mass. Opt in per subscriber with `useBodyContacts(body, handlers, { contactForce: true })`; without it both stay `0` and nothing is computed, so existing subscribers pay nothing. **`impulse` is an estimate**: Jolt binds no applied contact impulse anywhere, and the library says so in the jsdoc, the README and the demo caption rather than implying it was measured. It leaves the angular terms out of the effective mass, which reads high for a glancing blow on a long lever.
-- **`useSensor`** — intersection events for a `sensor: true` body, plus the set of bodies currently inside it. That set is the reason it exists: a body can leave a trigger volume in two ways that are not moving. Jolt keeps a sensor contact only while the other body is **awake**, so a crate that settles inside fires an exit one step later without having moved; and a body destroyed while asleep inside gets no exit at all, because its contact went away when it slept. Both are handled, and the one case that survives — a sensor moving off a sleeping body — is documented with its fix.
-- **`collisionGroup` on every body hook**, plus **`useGroupFilterTable`** to build the filter and `api.setCollisionGroup` to change it later. This is the layer `group`/`mask` pair's opposite number: layers decide what a body *is*, group filters decide which *individuals* ignore each other. Two bodies in different groups always collide; two in the same group consult the table. It is the ragdoll self-collision mechanism, where adjacent bones overlap by design.
-- **`interactionGroups(group, mask)`** — the object-layer packing as a plain function, for the places that take a raw layer without a `useJolt()` call. It throws past 16 bits rather than dropping the high half quietly, which the README could previously only warn about in prose.
-- Measured rather than read, because two of these would have shipped as defects: every `Body` vector getter hands back the **same** wrapper over shared static storage, so reading body 2's velocity overwrites body 1's — written straight, the relative velocity at a contact is exactly zero every time. And a **kinematic** body reports a real inverse mass, 0.000125 for an 8000 kg slab, while the solver treats it as immovable — so the effective mass keys on `IsDynamic()` and not on the number, or a crate landing on a moving platform reads softer than one landing on the ground.
-- Three demo scenes: **Sensor volumes** (a trigger reporting what is in it, whose count holds after the balls fall asleep inside), **Contact force** (four weights dropped onto sprung platforms — they land at the same speed and the sink follows the impulse, 0.22 to 1.53 across the four), and **Collision groups** (two jointed chains of overlapping links, one filtered — the unfiltered one hangs a third longer because every link shoves the ones it is joined to).
-
-### Shapes
-
-Four colliders Jolt supports were unreachable, and the most common static collider of all — a ground plane — had to be faked with a very wide box.
-
-- **`usePlane`** — the ground, as a collider rather than a 100×0.01×100 slab. **Jolt's plane is not infinite**: it is a half space bounded by `halfExtent`, whose Jolt default of 1000 paints a two-kilometre wireframe quad over every scene with `<PhysicsDebug />` on. The hook defaults it to 100 and sizes the render mesh separately with `renderSize`, so the gap between the collider and what you can see is a choice rather than a surprise. Give it a `normal` and a `constant`, or a `point` it passes through.
-- **`useHeightField`** — terrain at a fraction of a triangle mesh's cost. `heights` takes a `(x, z) => number | null` sampler, a row-major `number[]` / `Float32Array`, or greyscale image data so a heightmap PNG drops straight in; all three index the same way and a `null` or `NaN` sample is a hole nothing collides with. The api adds `getMinHeight` / `getMaxHeight` / `getHeight`, `isNoCollision`, and `getHeights` / `setHeights` — the primitive craters are built on, with the render geometry re-triangulated in place so the mesh and the collider cannot drift.
-- **`useTaperedCylinder`** — a cylinder with two radii, and with one at zero, a cone. Flat ends are the whole difference from `useTaperedCapsule`: this stands where a tapered capsule rolls.
-- **`useEmpty`** — a body with no collision at all. It moves, sleeps, carries velocity and can be jointed to; it simply never touches anything. A one-sided constraint bolts to the world and cannot move, so this is the anchor for when it has to.
-- **`scale` at creation on every body hook.** It wraps the collider in the same `ScaledShape` `api.setScale` builds later, seeding one slot rather than two — so a later `setScale` replaces it instead of compounding with it, and both go through the same validity check.
-- **Full mass properties** — `massProperties: { mass?, inertia? }` plus `overrideMassProperties`, for a body whose shape does not describe how it should behave: a hollow shell, a weighted die, a flywheel. Both survive a `setScale`, which would otherwise recompute them from density × the new volume. Jolt has **no** centre-of-mass override — that comes from the shape.
-- **`buildQuality` and `triangleUserData` on `useTrimesh`.** The tag is read back through `api.getTriangleUserData(hit.subShapeID)`, which is how a collision reports a surface type for footstep audio or per-surface tyre grip.
-- **`subShapeID` on `RaycastHit`**, which the shape-cast and overlap results already carried. Without it there is nothing to look a triangle up by.
-- **`setMaterial` / `getMaterial` on `usePlane` and `useConvex`** — the only two classes that bind it. `PhysicsMaterial` carries a refcount and nothing else, no friction or restitution or name, so it is an identity token rather than a surface description; the README says so rather than letting anyone find out.
-- Measured rather than read, because it changed the code: `PlaneShapeSettings`'s `inHalfExtent` constructor argument is dropped by the bindings when no material is passed, and only the field takes. `ShapeResult.Get()` never downcasts, so a plane from it has no `GetHalfExtent` and a heightfield no `IsNoCollision` — everything subclass-shaped goes through `castObject`. `setHeights` quantises into the range the field was **built** with and clamps silently, so deformable terrain has to reserve headroom through `range` up front. And `getHeights` / `setHeights` work in whole blocks: a misaligned region asserts in a debug build and reads past the end of the heap in a release one, so the hook refuses instead.
-- Six demo scenes: **Plane** (balls roll off the visible floor and keep rolling), **Height field** (a noise generator with a hole punched through it, and `setHeights` raising a mound), **Terrain sources** (the three `heights` forms side by side, with a car to drive over them), **Tapered cylinder**, **Empty**, and **Surface types**.
-
-### Queries
-
-Raycasts were the only question the library could ask the world. Four more hooks, none of which move anything or add anything to the world.
-
-- **`useShapeCaster`** sweeps a real collider along a direction. A ray is a line with no width, so *would this fit through there* was not a question that could be asked before this.
-- **`useShapeOverlap`** reports what a shape would be touching, placed somewhere — trigger volumes, blast radii, "is this spawn point clear". `maxSeparationDistance` widens it to bodies near touching, and `internalEdgeRemoval` drops the ghost hits a shape gets from the interior edges of a triangle mesh.
-- **`usePointQuery`** — which body contains this point. The usual substitute, a very short ray, answers a different question: a ray has to *enter* a body, so one starting inside reports nothing.
-- **`useBroadphaseQuery`** — `castRay` / `collideAABox` / `collideSphere` / `collidePoint` / `collideOrientedBox` / `castAABox`, returning body ids and nothing else. Bounding boxes only, no shape ever looked at, so the answer is always a superset of the exact one. Jolt binds no ready-made broadphase collectors, so the library supplies its own and every hit costs one call into JS — affordable precisely because the answers are meant to be small.
-- All three narrow-phase hooks take `mode: "closest" | "any" | "all"`, which picks the collector and the return type together. This differs from the raycasters, which are three hooks; those cannot change.
-- **`ignoreBodies` and `broadPhaseLayer` on every query, raycasters included**, plus `setIgnoredBodies` at runtime. The second is usually necessary rather than convenient: the body doing the asking does not exist yet when the query hook mounts, and without it a self-query reports itself at zero distance.
-- **`overlapsAABox` / `overlapsOrientedBox`** as plain functions rather than hooks — box against box, no world involved.
-- A shape handed to a query is usually a body's own `api.shape`, which is `undefined` until that body mounts. The query waits for it, and holds a reference to it while it lives, so a query outliving its body is safe rather than a crash.
-- Three demo scenes: **Shape cast** (the same capsule swept at a gate it fits and one it does not), **Shape overlap** (a region highlighting what it contains, with the broadphase's answer drawn over the exact one), and **Point query**.
-
-### Step callbacks
-
-- **`useBeforePhysicsStep(callback)`** and **`useAfterPhysicsStep(callback)`** run once per physics step, which is not once per frame: a fixed timestep runs however many steps that frame's delta paid for. A force applied from a `useFrame` is therefore applied at the wrong strength, and by how much depends on the viewer's refresh rate — which is why buoyancy, thrusters and custom gravity fields need these.
-- Both receive `(delta, index)` — the step's own duration and its number.
-- They run **between** Jolt's steps rather than inside one, so unlike Jolt's own `PhysicsStepListener` there is no lock held and the world is safe to touch. The one rule is not to `setState` from them: that schedules a render per sub-step, from inside the step loop.
-- Subscribers run in mount order, and one subscribed from inside a step is held until the next step rather than run twice in the same one. Unsubscribing is exact under `<StrictMode>`, which mounts every effect twice — a step callback subscribed there fires once per step, not twice.
-- New **Step callbacks** demo scene: two rings in orbit under the same pull, one taking it per step and one per frame, each with the circle it should be tracing drawn through it. The per-frame ring leaves its circle. Switch the toolbar to `vary`, where one frame is one step, and both hold it.
-
-### World configuration
-
-- **`maxBodies` / `maxBodyPairs` / `maxContactConstraints` / `maxWorkerThreads`** on `<Physics>`. Jolt sizes these at construction, so they are read once at mount and a new value needs a new world (`key`). They are applied before `settingsOverride`, which still wins.
-- **A world that runs out of bodies now says so.** Jolt returns a null body when the pool is full and everything after that dereferences it; the cap is checked before the first allocation, so the failure is a sentence naming `maxBodies` rather than a wasm trap.
-- **`physicsSettings`** — the solver and sleep settings, applied over the defaults the world was built with, so an option you do not name keeps Jolt's default rather than becoming zero. Unlike the caps this one is live. Raising `numVelocitySteps` / `numPositionSteps` stiffens everything at once; the per-constraint overrides are the cheaper tool for one stretchy rope.
-- `maxWorkerThreads` replaces reaching into `settingsOverride` for it. Multithreading still needs a `…-multithread` build and COOP/COEP headers, and is still not the default.
-- **Documented, not fixed:** `<Physics debug>` is read by each hook at mount, so changing it rebuilds every body in the world. `<PhysicsDebug />` is the live toggle.
+- `ContactInfo.normal` now points from the body you subscribed to towards the body in `bodyID`. It was Jolt's manifold normal, which runs body 1 → body 2 in an ordering the subscriber cannot see, so it was backwards on one side of every contact. `useContactListener` is unaffected.
 
 ### Constraints
 
-Eight new hooks, one per Jolt constraint type — the largest gap in the library until now. Nothing joint-shaped was buildable before: no door, chain, lift, rope bridge or ragdoll.
+Eight hooks, one per Jolt constraint type. Nothing joint-shaped was buildable before this — no door, chain, lift, rope bridge or ragdoll.
 
-- **`useFixedConstraint`** · **`usePointConstraint`** · **`useHingeConstraint`** · **`useSliderConstraint`** · **`useDistanceConstraint`** · **`useConeConstraint`** · **`useSwingTwistConstraint`** · **`useSixDOFConstraint`**. Each takes two bodies and returns `[api]`, `undefined` until both bodies exist.
-- **Either side may be `null`**, which anchors to the world — a door in a frame that is not a body, a chain hanging from nothing. `undefined` means "that body is not created yet" and the joint waits for it, so a body hook's first-render `undefined` can be passed straight through.
-- **Motors** on the hinge, slider, swing-twist and six-DOF joints: `position` holds a target and carries load, `velocity` turns at a rate, `off` hands the joint back to the simulation. Targets and state are settable at runtime.
-- **Springs** on joint limits (`limitsSpring`) and inside motors, as either `{ frequency, damping }` or `{ stiffness, damping }`.
-- **Every runtime setter wakes both bodies.** A settled joint puts its bodies to sleep, and a sleeping body ignores a retargeted motor — the same trap `useConveyor`'s `wake` option exists for. `api.activate()` is exposed for the cases the library cannot see.
-- Shared across all eight: `enabled`, `priority`, solver step overrides, `settingsOverride`, and `debug`, which draws the joint as body 1's centre → its anchor → body 2's anchor → body 2's centre. The middle segment has zero length while the constraint holds, so a visible line there is the solver losing.
-- **`<PhysicsDebug />` draws joints too**, via `constraints` (on by default). Jolt exposes no way to enumerate a world's constraints, so the library keeps its own registry of the ones its hooks create — which does mean a constraint built by hand through `useJolt()` is not drawn, unlike a hand-built body. Every joint shares one line buffer, so a world full of them is still a single draw call.
-- `useFixedConstraint` returns a `TwoBodyConstraint` — Jolt binds `FixedConstraintSettings` but no matching class. A weld has no runtime controls, so nothing is lost.
-- **Ten demo scenes**, one per hook plus **Motors** and **Springs**. `<PhysicsDebug />` now starts *off* in every scene and the toolbar is the one control for it — the scenes no longer set the per-hook `debug` flag, which draws unconditionally and is deliberately independent of the world-wide overlay.
-- The **Distance** scene builds a rope out of the hook: one joint with equal min and max is a rigid rod, eleven short ones in series are a rope, and the two hang side by side from the same anchor. Rope needs `numPositionStepsOverride` / `numVelocityStepsOverride` per joint — a chain is solved a link at a time, so a correction at one end needs a pass per link to reach the other, and asking per joint beats raising the world-wide solver settings.
-- The **Motors** scene walks its position-motor targets over at a fixed rate rather than setting the far end in one go. A position motor takes a setpoint, not a speed, so it closes the gap as fast as its force limit allows — which is why a lift dropped faster than it rose and a target set on a limit overshot straight through it.
+- `useFixedConstraint`, `usePointConstraint`, `useHingeConstraint`, `useSliderConstraint`, `useDistanceConstraint`, `useConeConstraint`, `useSwingTwistConstraint`, `useSixDOFConstraint`. Each takes two bodies and returns `[api]`, `undefined` until both exist.
+- Either side may be `null` to anchor to the world. `undefined` means "not created yet", and the joint waits for it.
+- Motors on the hinge, slider, swing-twist and six-DOF joints: `position` holds a target and carries load, `velocity` turns at a rate, `off` hands the joint back to the simulation. Both settable at runtime.
+- Springs on joint limits (`limitsSpring`) and inside motors, as `{ frequency, damping }` or `{ stiffness, damping }`.
+- Shared options: `enabled`, `priority`, `numVelocityStepsOverride`, `numPositionStepsOverride`, `settingsOverride`, `debug`.
+- Every runtime setter wakes both bodies — a sleeping body ignores a retargeted motor. `api.activate()` for the cases the library cannot see.
+- `<PhysicsDebug constraints>` draws joints, on by default. Jolt cannot enumerate a world's constraints, so only hook-created ones are drawn.
+- `useFixedConstraint` returns a `TwoBodyConstraint`: Jolt binds `FixedConstraintSettings` but no matching class. A weld has no runtime controls, so nothing is lost.
+- A rope wants `numPositionStepsOverride` per joint rather than a raised world-wide solver setting — a chain is solved a link at a time.
+
+### Queries
+
+Four hooks beyond raycasts. None of them move anything or add anything to the world.
+
+- `useShapeCaster` sweeps a real collider along a direction. A ray is a line with no width, so "would this fit through there" could not be asked before.
+- `useShapeOverlap` reports what a shape would touch, placed somewhere. `maxSeparationDistance` widens it to bodies near touching; `internalEdgeRemoval` drops the ghost hits from a triangle mesh's interior edges.
+- `usePointQuery` — which body contains this point. A very short ray answers a different question: a ray has to *enter* a body, so one starting inside reports nothing.
+- `useBroadphaseQuery` — `castRay`, `collideAABox`, `collideSphere`, `collidePoint`, `collideOrientedBox`, `castAABox`, returning body ids only. Bounding boxes, so always a superset of the exact answer, and each hit costs one call into JS.
+- The three narrow-phase hooks take `mode: "closest" | "any" | "all"`, which picks the collector and the return type together.
+- `ignoreBodies` and `broadPhaseLayer` on every query including the raycasters, plus `setIgnoredBodies` at runtime. Without it a self-query reports itself at zero distance.
+- `overlapsAABox` and `overlapsOrientedBox` as plain functions — box against box, no world involved.
+- A query holds a reference to the shape it was given, so it is safe to outlive the body that shape came from.
+
+### Shapes
+
+- `usePlane` — the ground as a collider rather than a very wide box. **Jolt's plane is not infinite**: it is a half space bounded by `halfExtent`, defaulted to 100 here against Jolt's 1000, with `renderSize` sizing the mesh separately. Takes a `normal` and `constant`, or a `point` it passes through.
+- `useHeightField` — terrain at a fraction of a triangle mesh's cost. `heights` takes an `(x, z) => number | null` sampler, a row-major `number[]` / `Float32Array`, or greyscale image data; a `null` or `NaN` sample is a hole. Api: `getMinHeight`, `getMaxHeight`, `getHeight`, `isNoCollision`, `getHeights`, `setHeights`.
+- `setHeights` quantises into the range the field was **built** with and works in whole blocks, so deformable terrain reserves headroom through `range` up front and a misaligned region is refused.
+- `useTaperedCylinder` — a cylinder with two radii, and a cone with one at zero. Flat ends are the difference from `useTaperedCapsule`: this stands where that rolls.
+- `useEmpty` — a body with no collision at all. It moves, sleeps and can be jointed to, but never touches anything. The anchor for a one-sided constraint that has to move.
+- `scale` at creation on every body hook, seeding the same slot `api.setScale` uses, so a later `setScale` replaces it rather than compounding.
+- `massProperties: { mass?, inertia? }` and `overrideMassProperties`, for a body whose shape does not describe how it should behave. Both survive a `setScale`. Jolt has no centre-of-mass override — that comes from the shape.
+- `buildQuality` and `triangleUserData` on `useTrimesh`, read back with `api.getTriangleUserData(hit.subShapeID)` — surface types for footstep audio or per-surface tyre grip.
+- `subShapeID` on `RaycastHit`, which the shape-cast and overlap results already carried.
+- `setMaterial` and `getMaterial` on `usePlane` and `useConvex`, the only two classes that bind it. `PhysicsMaterial` carries no friction, restitution or name; it is an identity token.
+
+### Contacts and filtering
+
+- `impactSpeed` and `impulse` on `ContactInfo`, opt in per subscriber with `useBodyContacts(body, handlers, { contactForce: true })`. Without it both stay `0` and nothing is computed.
+- **`impulse` is an estimate.** Jolt binds no applied contact impulse, so it is derived and leaves the angular terms out of the effective mass — within about 10% of the true impulse head-on, about 70% high for a glancing hit. It is momentum, so it scales with the mass of what was hit: divide the inverse mass back out to threshold across bodies of different sizes.
+- `useSensor` — intersection events for a `sensor: true` body, plus the set of bodies currently inside it. Jolt keeps a sensor contact only while the other body is awake, so a body settling inside would otherwise report a spurious exit; that is handled.
+- `collisionGroup` on every body hook, `useGroupFilterTable` to build the filter, `api.setCollisionGroup` to change it later. Layers decide what a body *is*; group filters decide which individuals ignore each other. Different groups always collide; the same group consults the table. This is the ragdoll self-collision mechanism.
+- `interactionGroups(group, mask)` — the object-layer packing as a plain function, for places that take a raw layer without a `useJolt()` call. Throws past 16 bits rather than dropping the high half.
+- A kinematic body reports a real inverse mass while the solver treats it as immovable, so the effective mass keys on `IsDynamic()` — a crate landing on a moving platform reads the same as one landing on the ground.
+- The `impulse` estimate is no longer computed for a kind of event nobody subscribed to.
+
+### Ergonomics
+
+- `useAutoCollider` — the collider is read off the mesh the ref is attached to, so a size is written once, in the JSX. `"box"` and `"sphere"` from the geometry's bounds, `"hull"` from its points, `"trimesh"` from its triangles. The mesh's own `scale` is applied, and geometry not centred on its origin gets a `RotatedTranslatedShape`.
+- `useInstancedBodies` — many bodies of one kind on one `InstancedMesh`: one shared shape, one batched add, and a write-back that skips whatever Jolt has put to sleep. `collider` takes a descriptor for any of the ten collider kinds, or a factory. `at(index)` is a documented subset of `BodyApi`.
+- Batch add and remove — `AddBodiesPrepare` / `AddBodiesFinalize` / `AddBodiesAbort` / `RemoveBodies`, so a swarm walks the broadphase once instead of once per body. `AddBodiesPrepare` sorts the id array in place.
+- `updateLoop: "independent"` and `api.step(delta?)` take the world off R3F's frame loop and advance it by hand, running the same accumulator, step callbacks and event flushes a frame does.
+- `frameloop="demand"` now works. `<Physics>` asks for the next frame while any body is awake and stops once they have all slept.
+- `updatePriority` replaces the hard-coded `-1`, with a warning if set positive: R3F hands rendering to the subscriber above zero, and the result is a black canvas.
+- One shape builder for every collider hook, so a collider means the same thing whichever way it is asked for.
+
+### Step callbacks
+
+- `useBeforePhysicsStep(callback)` and `useAfterPhysicsStep(callback)` run once per physics **step**, which is not once per frame. A force applied from `useFrame` lands at the wrong strength by an amount that depends on the viewer's refresh rate — which is why buoyancy, thrusters and custom gravity fields need these.
+- Both receive `(delta, index)`: the step's own duration and its number.
+- They run **between** steps rather than inside one, so the world is safe to touch. The one rule is not to `setState` from them.
+- Subscribers run in mount order, and one subscribed from inside a step waits for the next. Unsubscribing is exact under `<StrictMode>`.
+
+### World configuration
+
+- `maxBodies`, `maxBodyPairs`, `maxContactConstraints` and `maxWorkerThreads` on `<Physics>`. Jolt sizes these at construction, so they are read once at mount and a new value needs a new world (`key`). Applied before `settingsOverride`, which still wins.
+- A world that runs out of bodies now throws a message naming `maxBodies` instead of trapping in wasm.
+- `physicsSettings` — the solver and sleep settings, applied over the world's own defaults and live. Raising `numVelocitySteps` / `numPositionSteps` stiffens everything at once; the per-constraint overrides are cheaper for one stretchy rope.
+- `maxWorkerThreads` still needs a `…-multithread` build and COOP/COEP headers, and is still not the default.
+- `<Physics debug>` is read by each hook at mount, so changing it rebuilds every body in the world. `<PhysicsDebug />` is the live toggle.
 
 ### Conveyor belts
 
-- **`useConveyor(api, options)`** turns a body's surface into a belt: whatever rests on it is dragged along while the body itself stays put. `linear` for walkways and belts, `angular` for turntables, and `setLinear` / `setAngular` / `stop` on the returned api for changing a belt while it runs.
-- **`surfaceVelocity` on the body hooks** declares the same thing at mount, for a belt whose speed never changes. Both routes share one record per body.
-- `space: "local"` (the default) rotates the velocity by the belt's own rotation, so a belt laid at an angle carries along itself rather than along world axes.
-- `wake` — on by default — starts the bodies resting on a belt when it begins moving. Without it a crate that had gone to sleep on a stopped belt would never notice, because a sleeping body reports no contacts at all.
-- A `useCharacter` is **not** carried: Jolt's character contact settings have no surface-velocity field.
+- `useConveyor(api, options)` turns a body's surface into a belt: whatever rests on it is dragged along while the body stays put. `linear` for walkways and belts, `angular` for turntables, with `setLinear`, `setAngular` and `stop` for changing one while it runs.
+- `surfaceVelocity` on the body hooks declares the same thing at mount.
+- `space: "local"` (the default) rotates the velocity by the belt's own rotation, so an angled belt carries along itself.
+- `wake`, on by default, starts the bodies resting on a belt when it begins moving — a sleeping body reports no contacts at all.
+- A `useCharacter` is not carried: Jolt's character contact settings have no surface-velocity field.
+
+### Demo
+
+59 scenes. New in 0.3.0:
+
+- **Constraints** — one scene per hook, plus Motors and Springs.
+- **Queries** — Shape cast, Shape overlap, Point query.
+- **Shapes** — Plane, Height field, Terrain sources, Tapered cylinder, Empty, Surface types.
+- **Events** — Sensor volumes, Contact force.
+- **Body options** — Collision groups, Auto colliders.
+- **Systems** — Step callbacks, Manual stepping, Breakable objects. Instancing is rewritten onto `useInstancedBodies`, the same 1050 bodies in seven draw calls.
+- `<PhysicsDebug />` starts off in every scene, and the toolbar is its one control.
 
 ### Fixes
 
-- Contact `onExit` no longer reports `userData: 0` for a body whose partner's listener had just unmounted. The cleanup cleared the remembered-userData entry under the listener's own id, but that map is keyed by the *other* body in a contact. The map is now bounded instead of pruned under the wrong key.
+- Contact `onExit` no longer reports `userData: 0` for a body whose partner's listener had just unmounted.
+
 
 ## 0.2.1
 

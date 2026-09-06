@@ -544,7 +544,7 @@ swarm?.at(7)?.applyImpulse([0, 4000, 0]);
 ```
 
 - **`at(index)` is a deliberate subset of `BodyApi`.** An instance has no mesh and no shape of its own, so the parts of that api about either are absent rather than lying: `setPositionAndRotation`, `setLinearVelocity`, `setAngularVelocity`, `applyImpulse`, `applyForce`, `wake`, `sleep`, `isSleeping`, plus `body`, `id` and `index`. It builds a fresh object per call, so holding one is safe.
-- **Instances keep the order `transforms` produced them.** Jolt's batch add sorts the id array it is handed — measured — so the hook keeps its own list and index 7 is always the body transform 7 described.
+- **Instances keep the order `transforms` produced them.** Jolt's batch add sorts the id array it is handed, so the hook keeps its own list: index 7 is always the body transform 7 described.
 - **Sleeping instances are skipped.** Reading a transform out of WASM is several boundary crossings; at these counts, paying only for the bodies still moving is the difference that makes the hook worth having. The instance matrix buffer is re-uploaded only when something in that swarm moved.
 - **`<PhysicsDebug />` draws every instance**, off one cached geometry. It is still a thousand wireframes: expect it to cost.
 
@@ -600,7 +600,7 @@ Both take `(delta, index)`: the duration of that step, and its number. `index` i
 - They run **between** Jolt's steps, not inside one. This is not Jolt's `PhysicsStepListener`: no lock is held, so reading positions, applying forces, even creating a body are all fine.
 - **Do not call `setState` from one.** A render scheduled from inside the step loop fires once per sub-step, from a `useFrame` at negative priority — the worst place in the frame to schedule one. Write to a ref and read it from a `useFrame` if something on screen has to change.
 - Nothing runs while `<Physics paused>`, because nothing is stepping.
-- With `timeStep="vary"` there is exactly one step per frame, so these behave like a `useFrame` — which is why the demo scene tells you to switch to `vary` and watch the difference disappear.
+- With `timeStep="vary"` there is exactly one step per frame, so these behave like a `useFrame`.
 - Subscribers run in the order they mounted. A callback that subscribes another one from inside a step is held until the next step rather than run twice.
 - Contact events are still delivered once per frame, after the last step, so a contact made in this step has not been dispatched when your `after` callback runs.
 
@@ -1012,9 +1012,9 @@ useBodyContacts(api?.body, { onEnter: (c) => bang(c.impulse) }, { contactForce: 
 
 `impactSpeed` is the closing speed along the contact normal in m/s, read before the solver ran. `impulse` is that speed times the pair's effective mass, in kg·m/s.
 
-**`impulse` is an estimate, not a measurement.** Jolt binds no applied contact impulse anywhere, so the library derives one: it answers "how much momentum had to be cancelled", and it leaves the angular terms out of the effective mass, which reads high for a glancing blow on a long lever. Measured against ground truth — the body's own mass times its velocity change across the same step — it came out at **0.91** of the truth for a head-on hit, the restitution it does not model, and **1.67** times it for a glancing one, the angular term it leaves out. It ranks a scrape against a crash reliably. Do not treat it as the solver's own number.
+**`impulse` is an estimate.** Jolt binds no applied contact impulse, so it is derived and leaves the angular terms out of the effective mass — within about 10% of the true impulse head-on, about 70% high for a glancing hit. Rank a scrape against a crash with it; do not treat it as the solver's own number.
 
-It is also closing *momentum*, so it scales with the mass of what was hit. If you are thresholding damage across bodies of different sizes, divide it back out — `impulse * body.GetMotionProperties().GetInverseMass()` is the velocity change the blow would have caused, which compares across a boulder and a pebble where the raw number does not.
+It is closing *momentum*, so it scales with the mass of what was hit. To threshold across bodies of different sizes, divide that back out: `impulse * body.GetMotionProperties().GetInverseMass()` is the velocity change the blow would have caused, and compares a boulder against a pebble where the raw number does not.
 
 A body that is not dynamic — static *or* kinematic — counts as immovable, which is what Jolt's solver does. A kinematic body reports a real inverse mass through the bindings, so reading that number instead would make the same drop onto a moving platform read softer than onto the ground.
 
@@ -1067,7 +1067,7 @@ Returns the physics context: `Jolt` (the module), `joltInterface`, `physicsSyste
 
 ## State management
 
-The library holds no store. Transforms are written straight onto `mesh.position` / `mesh.quaternion` inside `useFrame`, never through React state — pushing 60 Hz physics data through state or context re-renders the subtree every frame, which is the single biggest performance mistake in a React physics integration. Contact events are the exception, and they are deferred to a frame boundary so `setState` is safe.
+The library holds no store. Transforms are written straight onto `mesh.position` / `mesh.quaternion` inside `useFrame`, never through React state — pushing 60 Hz physics data through state or context re-renders the subtree every frame. Contact events are the exception, and are deferred to a frame boundary so `setState` is safe.
 
 ## Debug rendering
 
