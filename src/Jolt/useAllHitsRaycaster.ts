@@ -7,6 +7,7 @@ import {
   type RaycastHit,
   type RaycasterOptions,
 } from "./internal/raycast";
+import type { QueryBody } from "./internal/query";
 import type { Vec3Input } from "./types";
 
 export type UseAllHitsRaycasterOptions = RaycasterOptions;
@@ -15,6 +16,7 @@ export interface AllHitsRaycasterApi {
   ray: Jolt.RRayCast;
   collector: Jolt.CastRayAllHitCollisionCollector;
   cast: (origin?: Vec3Input, direction?: Vec3Input) => RaycastHit[];
+  setIgnoredBodies: (bodies: QueryBody[]) => void;
 }
 
 /**
@@ -37,7 +39,7 @@ export const useAllHitsRaycaster = (
       layer = layers.LAYER_MOVING,
     } = mount;
 
-    const context = createRaycastContext(api, layer);
+    const context = createRaycastContext(api, layer, mount);
     context.aim(origin, direction);
 
     const collector = new jolt.CastRayAllHitCollisionCollector();
@@ -67,7 +69,12 @@ export const useAllHitsRaycaster = (
     };
 
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRaycaster({ ray: context.ray, collector, cast });
+    setRaycaster({
+      ray: context.ray,
+      collector,
+      cast,
+      setIgnoredBodies: context.setIgnoredBodies,
+    });
 
     return () => {
       setRaycaster(undefined);

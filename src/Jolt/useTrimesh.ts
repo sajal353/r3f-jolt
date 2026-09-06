@@ -1,95 +1,61 @@
-import type {
-  BufferAttribute,
-  BufferGeometry,
-  InterleavedBufferAttribute,
-} from "three";
 import type Jolt from "jolt-physics";
-import { shapeFromResult, useBody, type BodyOptions } from "./internal/useBody";
-import { shapeToGeometry } from "./internal/shapeToGeometry";
+import {
+  useBody,
+  type BodyApiContext,
+  type BodyOptions,
+} from "./internal/useBody";
+import { createColliderShape } from "./internal/colliderShape";
+import type {
+  TrimeshBuildQuality,
+  TrimeshSource,
+} from "./internal/trimeshShape";
 
-export type TrimeshSource =
-  | BufferGeometry
-  | {
-      position: BufferAttribute | InterleavedBufferAttribute;
-      index?: ArrayLike<number>;
-    };
+export type { TrimeshBuildQuality, TrimeshSource };
 
 export interface UseTrimeshOptions extends Omit<BodyOptions, "motionType"> {
   mesh: TrimeshSource;
+  buildQuality?: TrimeshBuildQuality;
+  /**
+   * A 32-bit tag per triangle — a surface type, a material id, an index into
+   * whatever table you keep — read back off a hit through
+   * `api.getTriangleUserData(hit.subShapeID)`. Either one value per triangle,
+   * or a function called with the triangle's index.
+   *
+   * Costs four bytes a triangle in the shape, so it is opt-in.
+   */
+  triangleUserData?: ArrayLike<number> | ((triangleIndex: number) => number);
   motionType?: "static";
 }
 
-const readSource = (mesh: TrimeshSource) => {
-  const position =
-    "position" in mesh
-      ? mesh.position
-      : (mesh.getAttribute("position") as BufferAttribute);
-
-  const index =
-    "position" in mesh ? mesh.index : (mesh.getIndex()?.array ?? undefined);
-
-  if (!position) {
-    throw new Error(
-      "[r3f-jolt] useTrimesh: the mesh has no position attribute",
-    );
-  }
-
-  return { position, index };
-};
+export interface TrimeshExtras {
+  /**
+   * The tag `triangleUserData` gave the triangle a query landed on. Zero
+   * without it, and zero for a sub-shape id from some other body.
+   */
+  getTriangleUserData: (subShapeID: number) => number;
+}
 
 export const useTrimesh = (options: UseTrimeshOptions) => {
-  const { mesh } = options;
+  const { mesh, buildQuality, triangleUserData } = options;
 
-  return useBody<Jolt.Shape>(
-    (jolt) => {
-      const { position, index } = readSource(mesh);
-
-      const vertexList = new jolt.VertexList();
-      vertexList.reserve(position.count);
-
-      const vertex = new jolt.Float3(0, 0, 0);
-      for (let i = 0; i < position.count; i += 1) {
-        vertex.x = position.getX(i);
-        vertex.y = position.getY(i);
-        vertex.z = position.getZ(i);
-        vertexList.push_back(vertex);
-      }
-      jolt.destroy(vertex);
-
-      const indexCount = index ? index.length : position.count;
-      const triangleList = new jolt.IndexedTriangleList();
-      triangleList.reserve(indexCount / 3);
-
-      const triangle = new jolt.IndexedTriangle();
-      triangle.mMaterialIndex = 0;
-
-      for (let i = 0; i < indexCount; i += 3) {
-        triangle.set_mIdx(0, index ? index[i] : i);
-        triangle.set_mIdx(1, index ? index[i + 1] : i + 1);
-        triangle.set_mIdx(2, index ? index[i + 2] : i + 2);
-        triangleList.push_back(triangle);
-      }
-      jolt.destroy(triangle);
-
-      const materials = new jolt.PhysicsMaterialList();
-      materials.push_back(new jolt.PhysicsMaterial());
-
-      const settings = new jolt.MeshShapeSettings(
-        vertexList,
-        triangleList,
-        materials,
-      );
-      const result = settings.Create();
-      jolt.destroy(settings);
-      const shape = shapeFromResult<Jolt.Shape>(result, "useTrimesh");
-
-      jolt.destroy(materials);
-      jolt.destroy(triangleList);
-      jolt.destroy(vertexList);
-
-      return { shape, geometry: shapeToGeometry(jolt, shape) };
-    },
+  return useBody<Jolt.MeshShape, TrimeshExtras>(
+    (jolt) =>
+      createColliderShape(jolt, {
+        type: "trimesh",
+        mesh,
+        buildQuality,
+        triangleUserData,
+      }),
     { ...options, motionType: "static" },
     "trimesh",
+    ({ jolt, shape }: BodyApiContext<Jolt.MeshShape>): TrimeshExtras => ({
+      getTriangleUserData: (subShapeID: number) => {
+        const id = new jolt.SubShapeID();
+        id.SetValue(subShapeID);
+        const value = shape.GetTriangleUserData(id);
+        jolt.destroy(id);
+        return value;
+      },
+    }),
   );
 };

@@ -26,3 +26,6 @@ dist-ssr
 
 # Internal working notes (audit, progress tracker, roadmap)
 .notes/
+
+# Local commit helper (gpg-signed, run by hand)
+scripts/commit.sh

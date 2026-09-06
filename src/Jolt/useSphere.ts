@@ -1,6 +1,6 @@
-import { SphereGeometry } from "three";
 import type Jolt from "jolt-physics";
-import { finishShape, useBody, type BodyOptions } from "./internal/useBody";
+import { useBody, type BodyOptions } from "./internal/useBody";
+import { createColliderShape } from "./internal/colliderShape";
 
 export interface UseSphereOptions extends BodyOptions {
   radius: number;
@@ -8,13 +8,10 @@ export interface UseSphereOptions extends BodyOptions {
 }
 
 export const useSphere = (options: UseSphereOptions) => {
-  const { radius, segments = 32 } = options;
+  const { radius, segments } = options;
 
   return useBody<Jolt.SphereShape>(
-    (jolt) => ({
-      shape: finishShape(new jolt.SphereShape(radius, undefined)),
-      geometry: new SphereGeometry(radius, segments, segments),
-    }),
+    (jolt) => createColliderShape(jolt, { type: "sphere", radius, segments }),
     options,
     "sphere",
   );

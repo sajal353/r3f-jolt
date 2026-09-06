@@ -10,7 +10,11 @@ export {
   useTaperedCapsule,
   type UseTaperedCapsuleOptions,
 } from "@/Jolt/useTaperedCapsule";
-export { useConvex, type UseConvexOptions } from "@/Jolt/useConvex";
+export {
+  useConvex,
+  type UseConvexOptions,
+  type ConvexApi,
+} from "@/Jolt/useConvex";
 export {
   useCompound,
   type UseCompoundOptions,
@@ -20,7 +24,24 @@ export {
   useTrimesh,
   type UseTrimeshOptions,
   type TrimeshSource,
+  type TrimeshBuildQuality,
+  type TrimeshExtras,
 } from "@/Jolt/useTrimesh";
+export { usePlane, type UsePlaneOptions, type PlaneApi } from "@/Jolt/usePlane";
+export {
+  useHeightField,
+  type UseHeightFieldOptions,
+  type HeightFieldExtras,
+  type HeightFieldSamples,
+  type HeightFieldSampler,
+  type HeightFieldImage,
+} from "@/Jolt/useHeightField";
+export {
+  useTaperedCylinder,
+  type UseTaperedCylinderOptions,
+} from "@/Jolt/useTaperedCylinder";
+export { useEmpty, type UseEmptyOptions } from "@/Jolt/useEmpty";
+export type { ShapeMaterialApi } from "@/Jolt/internal/shapeMaterial";
 
 export {
   useCharacter,
@@ -61,10 +82,159 @@ export {
 
 export type { RaycasterOptions } from "@/Jolt/internal/raycast";
 
+export {
+  useShapeCaster,
+  type UseShapeCasterOptions,
+  type ShapeCasterApi,
+} from "@/Jolt/useShapeCaster";
+export {
+  useShapeOverlap,
+  type UseShapeOverlapOptions,
+  type ShapeOverlapApi,
+} from "@/Jolt/useShapeOverlap";
+export {
+  usePointQuery,
+  type UsePointQueryOptions,
+  type PointQueryApi,
+  type PointHit,
+} from "@/Jolt/usePointQuery";
+export {
+  useBroadphaseQuery,
+  type UseBroadphaseQueryOptions,
+  type BroadphaseQueryApi,
+} from "@/Jolt/useBroadphaseQuery";
+
+export {
+  overlapsAABox,
+  overlapsOrientedBox,
+  type AABoxInput,
+  type OrientedBoxInput,
+} from "@/Jolt/boxOverlap";
+
+export type {
+  QueryBody,
+  QueryMode,
+  QueryFilterOptions,
+  OverlapHit,
+  ShapeCastHit,
+} from "@/Jolt/internal/query";
+
+export {
+  useFixedConstraint,
+  type UseFixedConstraintOptions,
+  type FixedConstraintApi,
+} from "@/Jolt/useFixedConstraint";
+export {
+  usePointConstraint,
+  type UsePointConstraintOptions,
+  type PointConstraintApi,
+} from "@/Jolt/usePointConstraint";
+export {
+  useHingeConstraint,
+  type UseHingeConstraintOptions,
+  type HingeConstraintApi,
+  type HingeConstraintExtras,
+} from "@/Jolt/useHingeConstraint";
+export {
+  useSliderConstraint,
+  type UseSliderConstraintOptions,
+  type SliderConstraintApi,
+  type SliderConstraintExtras,
+} from "@/Jolt/useSliderConstraint";
+export {
+  useDistanceConstraint,
+  type UseDistanceConstraintOptions,
+  type DistanceConstraintApi,
+  type DistanceConstraintExtras,
+} from "@/Jolt/useDistanceConstraint";
+export {
+  useConeConstraint,
+  type UseConeConstraintOptions,
+  type ConeConstraintApi,
+  type ConeConstraintExtras,
+} from "@/Jolt/useConeConstraint";
+export {
+  useSwingTwistConstraint,
+  type UseSwingTwistConstraintOptions,
+  type SwingTwistConstraintApi,
+  type SwingTwistConstraintExtras,
+  type SwingType,
+} from "@/Jolt/useSwingTwistConstraint";
+export {
+  useSixDOFConstraint,
+  type UseSixDOFConstraintOptions,
+  type SixDOFConstraintApi,
+  type SixDOFConstraintExtras,
+  type SixDOFAxis,
+  type SixDOFAxisOptions,
+} from "@/Jolt/useSixDOFConstraint";
+
+export type {
+  ConstraintApi,
+  ConstraintApiContext,
+  ConstraintBody,
+  ConstraintOptions,
+} from "@/Jolt/internal/useConstraint";
+export type {
+  ConstraintSpace,
+  MotorState,
+  MotorLimits,
+  AngularMotorOptions,
+  LinearMotorOptions,
+  SpringOptions,
+  LimitOptions,
+} from "@/Jolt/internal/constraintSettings";
+
+export { useBeforePhysicsStep } from "@/Jolt/useBeforePhysicsStep";
+export { useAfterPhysicsStep } from "@/Jolt/useAfterPhysicsStep";
+export type { PhysicsSettingsOptions } from "@/Jolt/internal/physicsSettings";
+
 export { useContactListener } from "@/Jolt/useContactListener";
 export { useBodyContacts } from "@/Jolt/useBodyContacts";
+export {
+  useSensor,
+  type SensorHandlers,
+  type UseSensorOptions,
+} from "@/Jolt/useSensor";
+export {
+  useConveyor,
+  type UseConveyorOptions,
+  type ConveyorApi,
+} from "@/Jolt/useConveyor";
 
-export type { BodyOptions, BodyApi } from "@/Jolt/internal/useBody";
+export {
+  useInstancedBodies,
+  type UseInstancedBodiesOptions,
+  type InstancedBodiesApi,
+  type InstanceApi,
+  type InstanceTransform,
+} from "@/Jolt/useInstancedBodies";
+export {
+  useAutoCollider,
+  type UseAutoColliderOptions,
+  type AutoColliderKind,
+} from "@/Jolt/useAutoCollider";
+export type {
+  ColliderDescriptor,
+  ColliderFactory,
+  ColliderSource,
+} from "@/Jolt/internal/colliderShape";
+
+export type {
+  BodyOptions,
+  BodyApi,
+  BodyApiContext,
+  CollisionGroupOptions,
+} from "@/Jolt/internal/useBody";
+export {
+  useGroupFilterTable,
+  type GroupFilterTableApi,
+} from "@/Jolt/useGroupFilterTable";
+export { interactionGroups } from "@/Jolt/internal/interactionGroups";
+export type {
+  MassPropertiesOptions,
+  MassPropertiesOverride,
+} from "@/Jolt/internal/massProperties";
 
 /**
  * Triangulates any Jolt shape. The body hooks hand this back as `api.geometry`;
@@ -72,7 +242,10 @@ export type { BodyOptions, BodyApi } from "@/Jolt/internal/useBody";
  * thousand bodies through `useJolt()`, where a tapered capsule, a hull or a
  * compound has no equivalent primitive in three to draw it with.
  */
-export { shapeToGeometry } from "@/Jolt/internal/shapeToGeometry";
+export {
+  shapeToGeometry,
+  refillShapeGeometry,
+} from "@/Jolt/internal/shapeToGeometry";
 export {
   debugColors,
   debugMotionColors,
@@ -97,7 +270,13 @@ export type {
   ContactHandlers,
   ContactInfo,
   ContactRegistry,
+  SurfaceVelocity,
+  SurfaceVelocityHandle,
   BodyContactHandlers,
+  BodyContactOptions,
   ActivationHandlers,
   ActivationRegistry,
+  StepCallback,
+  StepPhase,
+  StepRegistry,
 } from "@/Jolt/types";

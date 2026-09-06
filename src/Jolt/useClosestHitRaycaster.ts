@@ -7,6 +7,7 @@ import {
   type RaycastHit,
   type RaycasterOptions,
 } from "./internal/raycast";
+import type { QueryBody } from "./internal/query";
 import type { Vec3Input } from "./types";
 
 export type { RaycastHit };
@@ -17,6 +18,7 @@ export interface ClosestHitRaycasterApi {
   ray: Jolt.RRayCast;
   collector: Jolt.CastRayClosestHitCollisionCollector;
   cast: (origin?: Vec3Input, direction?: Vec3Input) => RaycastHit;
+  setIgnoredBodies: (bodies: QueryBody[]) => void;
 }
 
 export const useClosestHitRaycaster = (
@@ -36,7 +38,7 @@ export const useClosestHitRaycaster = (
       layer = layers.LAYER_MOVING,
     } = mount;
 
-    const context = createRaycastContext(api, layer);
+    const context = createRaycastContext(api, layer, mount);
     context.aim(origin, direction);
 
     const collector = new jolt.CastRayClosestHitCollisionCollector();
@@ -56,7 +58,12 @@ export const useClosestHitRaycaster = (
     // reason there: no ref in the published value, so the rule's
     // ref-derived-setState exemption does not cover it.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setRaycaster({ ray: context.ray, collector, cast });
+    setRaycaster({
+      ray: context.ray,
+      collector,
+      cast,
+      setIgnoredBodies: context.setIgnoredBodies,
+    });
 
     return () => {
       setRaycaster(undefined);

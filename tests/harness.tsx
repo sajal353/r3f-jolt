@@ -4,6 +4,7 @@ import initDebugJolt from "jolt-physics/debug-wasm-compat";
 import type Jolt from "jolt-physics";
 import { Physics } from "@/Jolt/Physics";
 import type { JoltApi, JoltModule } from "@/Jolt/types";
+import type { PhysicsSettingsOptions } from "@/Jolt/internal/physicsSettings";
 import { useJolt } from "@/Jolt/useJolt";
 
 let modulePromise: Promise<JoltModule> | null = null;
@@ -70,6 +71,13 @@ export interface RenderOptions {
   gravity?: [number, number, number];
   timeStep?: number | "vary";
   interpolate?: boolean;
+  paused?: boolean;
+  maxBodies?: number;
+  physicsSettings?: PhysicsSettingsOptions;
+  updateLoop?: "follow" | "independent";
+  updatePriority?: number;
+  /** Runs after the assert handler is installed, so a test can override both. */
+  settingsOverride?: (settings: Jolt.JoltSettings, jolt: JoltModule) => void;
 }
 
 export type PhysicsRenderer = Awaited<
@@ -79,15 +87,36 @@ export type PhysicsRenderer = Awaited<
 const physicsTree = (
   children: ReactNode,
   module: JoltModule,
-  { strict = false, gravity, timeStep, interpolate }: RenderOptions,
+  {
+    strict = false,
+    gravity,
+    timeStep,
+    interpolate,
+    paused,
+    maxBodies,
+    physicsSettings,
+    updateLoop,
+    updatePriority,
+    settingsOverride,
+  }: RenderOptions,
 ) => {
+  const applySettings = (settings: Jolt.JoltSettings, jolt: JoltModule) => {
+    installAssertHandler(settings, jolt);
+    settingsOverride?.(settings, jolt);
+  };
+
   const tree = (
     <Physics
       module={module}
       gravity={gravity}
       timeStep={timeStep}
       interpolate={interpolate}
-      settingsOverride={installAssertHandler}
+      paused={paused}
+      maxBodies={maxBodies}
+      physicsSettings={physicsSettings}
+      updateLoop={updateLoop}
+      updatePriority={updatePriority}
+      settingsOverride={applySettings}
     >
       <CaptureApi />
       {children}

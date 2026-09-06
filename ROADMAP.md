@@ -31,62 +31,64 @@ Where this library is going, and why. Jolt Physics exposes far more than `r3f-jo
 
 Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, Path, Pulley, Gear and RackAndPinion. r3f-jolt exposes **none** of them, so no ragdoll, door, chain or lift is buildable today.
 
-- [ ] `useFixedConstraint`
-- [ ] `usePointConstraint`
-- [ ] `useHingeConstraint`
-- [ ] `useSliderConstraint`
-- [ ] `useDistanceConstraint`
-- [ ] `useConeConstraint` / `useSwingTwistConstraint`
-- [ ] `useSixDOFConstraint`
-- [ ] Shared constraint lifecycle helper — `AddConstraint`/`RemoveConstraint` + destroy, `disposed`-aware. The pre-0.2.0 `useCar` never removed its constraint or step listener on unmount; that is exactly this class of mistake, so it gets solved once, centrally
+- [x] `useFixedConstraint`
+- [x] `usePointConstraint`
+- [x] `useHingeConstraint`
+- [x] `useSliderConstraint`
+- [x] `useDistanceConstraint`
+- [x] `useConeConstraint` / `useSwingTwistConstraint`
+- [x] `useSixDOFConstraint`
+- [x] Shared constraint lifecycle helper — `AddConstraint`/`RemoveConstraint` + destroy, `disposed`-aware. The pre-0.2.0 `useCar` never removed its constraint or step listener on unmount; that is exactly this class of mistake, so it gets solved once, centrally
 
 ### Required by 0.4.0 and 0.5.0 — prerequisites, not nice-to-haves
 
-- [ ] `MotorSettings` + `SetMotorState` / `SetTargetAngle` / `SetTargetVelocity` on the applicable constraints — required for active ragdolls, doors, cranes and turrets
-- [ ] `SpringSettings` on constraints — shared by ragdoll joints, motorcycle lean and suspension
-- [ ] Constraint priority (`CalculateConstraintPriorities`) exposed on the constraint lifecycle helper
-- [ ] `useBeforePhysicsStep` / `useAfterPhysicsStep` — water buoyancy must run per sub-step, not per frame
+- [x] `MotorSettings` + `SetMotorState` / `SetTargetAngle` / `SetTargetVelocity` on the applicable constraints — required for active ragdolls, doors, cranes and turrets
+- [x] `SpringSettings` on constraints — shared by ragdoll joints, motorcycle lean and suspension
+- [x] Constraint priority exposed on the constraint lifecycle helper, as a `priority` option plus `api.setPriority`. **Amended:** `PhysicsSystem.CalculateConstraintPriorities` does not exist in the JS bindings — it is bound only on `RagdollSettings`. Per-constraint `SetConstraintPriority` is the whole of what is available
+- [x] `useBeforePhysicsStep` / `useAfterPhysicsStep` — water buoyancy must run per sub-step, not per frame. **Amended:** they run *between* `Step()` calls, not inside one. The accumulator drives the loop from JS, so each iteration already is a sub-step and a plain JS callback needs no `PhysicsStepListenerJS` — and, unlike a real step listener, holds no lock, so the world is safe to touch from one
 
 ### Queries and events
 
-- [ ] Shape casting (`CastShape`) with closest / any / all collectors — `CastShapeClosestHitCollisionCollector`, `…AnyHit…`, `…AllHit…`
-- [ ] Shape overlap (`CollideShape`) with closest / any / all collectors — the same three variants exist
-- [ ] Point queries (`CollidePoint`)
-- [ ] `useBroadphaseQuery` → `BroadPhaseQuery.CastRay` / `CollideAABox` / `CollideSphere` / `CollidePoint` / `CollideOrientedBox` / `CastAABox` — cheap "what might be near me" tests for AI perception and spatial culling, with no narrow-phase cost
-- [ ] `CollideShapeWithInternalEdgeRemoval` as an option on shape overlap — avoids ghost hits against dense triangle meshes
-- [ ] `SpecifiedBroadPhaseLayerFilter` alongside the default filters, for querying one specific broadphase layer
-- [ ] `OrientedBox.OverlapsAABox` / `OverlapsOrientedBox` exposed as cheap CPU-side overlap helpers
-- [ ] Sensor/intersection events (`onIntersectionEnter`/`Exit`) building on 0.2.1's `sensor`
-- [ ] Contact force payload (`totalForceMagnitude`, `maxForceDirection`) read from the manifold, so a consumer can tell a scrape from an impact
+- [x] Shape casting (`CastShape`) with closest / any / all collectors — `CastShapeClosestHitCollisionCollector`, `…AnyHit…`, `…AllHit…`. One `useShapeCaster` with a typed `mode` rather than three hooks
+- [x] Shape overlap (`CollideShape`) with closest / any / all collectors — the same three variants exist
+- [x] Point queries (`CollidePoint`)
+- [x] `useBroadphaseQuery` → `BroadPhaseQuery.CastRay` / `CollideAABox` / `CollideSphere` / `CollidePoint` / `CollideOrientedBox` / `CastAABox` — cheap "what might be near me" tests for AI perception and spatial culling, with no narrow-phase cost. **Amended:** no concrete broadphase collectors are bound — only the `*JS` bases, whose `AddHit` hands back a raw pointer — so the library supplies its own and every hit costs a call into JS. That is why it returns body ids only
+- [x] `CollideShapeWithInternalEdgeRemoval` as an option on shape overlap — avoids ghost hits against dense triangle meshes
+- [x] `SpecifiedBroadPhaseLayerFilter` alongside the default filters, for querying one specific broadphase layer. Plus `ignoreBodies` on every query including the raycasters, settable at runtime
+- [x] `OrientedBox.OverlapsAABox` / `OverlapsOrientedBox` exposed as cheap CPU-side overlap helpers — plain functions, not hooks
+- [x] Sensor/intersection events (`onIntersectionEnter`/`Exit`) building on 0.2.1's `sensor` — shipped as `useSensor`, which also keeps the set of bodies currently inside. **Worth recording: Jolt keeps a sensor contact only while the other body is awake**, so a body that settles inside a trigger fires an exit one step after it falls asleep without having moved, and one destroyed while asleep inside fires no exit at all. The hook holds that exit back and delivers it when the body really goes
+- [x] Contact force payload, so a consumer can tell a scrape from an impact. **Amended: `totalForceMagnitude` and `maxForceDirection` are not on the manifold** — `ContactManifold` binds a normal, a penetration depth, two sub-shape ids and the contact points, and no applied impulse is bound anywhere in the library, verified three times. So `impactSpeed` and `impulse` are **derived**: the closing speed along the normal, times the pair's effective mass, computed only for a subscriber that opted in. Labelled an estimate everywhere it appears
+- [x] `useConveyor` → `ContactSettings.mRelativeLinearSurfaceVelocity` / `mRelativeAngularSurfaceVelocity` — belts, moving walkways and turntables, with `setLinear` / `setAngular` for runtime control
+- [x] `surfaceVelocity` on the body hooks — the same belt declared at mount, for one that never changes speed
 
 ### Shapes
 
-- [ ] `usePlane` → `PlaneShapeSettings(plane, material?, halfExtent?)` — an infinite ground plane, the most common static collider there is, and today it has to be faked with a very wide box
-- [ ] Heightfield hook → `HeightFieldShapeSettings` — terrain without paying trimesh cost
-- [ ] Tapered-cylinder hook → `TaperedCylinderShapeSettings` (upstream's name; also how you get a cone)
-- [ ] `EmptyShape` → `EmptyShapeSettings` — a body with no collision, for markers and attachment points
-- [ ] Shape `scale` support at creation → `ScaledShapeSettings` (runtime `api.setScale` ships earlier, in 0.2.1)
-- [ ] Full mass properties (density, centre of mass, inertia tensor) via `mMassPropertiesOverride` — today only a scalar `mass`
-- [ ] `MeshShapeSettings.mBuildQuality` — trade mesh build time against runtime query speed, which matters when streaming terrain
-- [ ] Per-triangle user data on `MeshShape` — how you get surface types out of a collision, for footstep audio and per-surface tire grip
-- [ ] Heightfield extras: `GetMinHeightValue` / `GetMaxHeightValue`, `Get/SetMaterials` for per-cell surface types
-- [ ] `Shape.SetMaterial` / `PlaneShape.SetMaterial`
+- [x] `usePlane` → `PlaneShapeSettings(plane, material?, halfExtent?)` — the most common static collider there is, and today it has to be faked with a very wide box. **Amended: Jolt's plane is not infinite** — it is a half space bounded by `halfExtent`, whose Jolt default of 1000 puts a 2 km quad into every debug overlay, so the hook defaults it to 100 and sizes the render mesh separately. The constructor's `inHalfExtent` argument is also dropped by the bindings when no material is passed; only the `mHalfExtent` field takes
+- [x] `useHeightField` → `HeightFieldShapeSettings` — terrain without paying trimesh cost. `heights` takes a sampler function, a row-major array or greyscale image data
+- [x] `useTaperedCylinder` → `TaperedCylinderShapeSettings` (upstream's name; also how you get a cone)
+- [x] `useEmpty` → `EmptyShape` — a body with no collision, for markers, attachment points and the anchor of a joint that has to move
+- [x] Shape `scale` support at creation → wraps the collider in the same `ScaledShape` `api.setScale` builds, seeding one slot so the two paths cannot disagree (runtime `api.setScale` shipped earlier, in 0.2.1)
+- [x] Full mass properties via `mMassPropertiesOverride` — today only a scalar `mass`. **Amended: there is no centre-of-mass override.** `MassProperties` binds `mMass` and `mInertia` only; the centre of mass comes from the shape, so shifting it means an off-centre compound child. `massProperties: { mass?, inertia? }` plus `overrideMassProperties`
+- [x] `MeshShapeSettings.mBuildQuality` — trade mesh build time against runtime query speed, which matters when streaming terrain
+- [x] Per-triangle user data on `MeshShape` — how you get surface types out of a collision, for footstep audio and per-surface tire grip. Needed `subShapeID` added to `RaycastHit`, which the shape-cast and overlap results already carried
+- [x] Heightfield extras: `GetMinHeightValue` / `GetMaxHeightValue`, `getHeights` / `setHeights`, `isNoCollision`, and `materialIndices` for per-cell surface types. **Worth recording: `setHeights` clamps to the range the field was *built* with**, so terrain meant to be deformed has to reserve headroom through `range` up front; and Jolt reads and writes whole blocks, asserting on a misaligned region in a debug build and walking off the heap in a release one
+- [x] `Shape.SetMaterial` / `PlaneShape.SetMaterial`. **Amended: only `ConvexShape` and `PlaneShape` bind it**, so it is on `useConvex` and `usePlane` and nowhere else — and `PhysicsMaterial` binds a refcount and nothing else, no friction or restitution or name, so a material is an identity token rather than a surface description. Per-triangle user data is the mechanism for a mesh
 
 ### Ergonomics
 
-- [ ] Auto-collider generation from a wrapped mesh. Today geometry args must be duplicated between hook and JSX (`size: [100, 0.01, 100]` _and_ `<boxGeometry args={[100, 0.01, 100]} />`), and the two can drift apart silently
-- [ ] Instanced bodies — one hook driving an `InstancedMesh`, with per-instance access by index
-- [ ] Batch body add/remove — `AddBodiesPrepare` / `AddBodiesFinalize` / `AddBodiesAbort` / `RemoveBodies`. The supported way to spawn or despawn many bodies at once; adding them one at a time re-walks the broadphase each time. Instanced bodies should be built on this rather than looping `AddBody`
-- [ ] Per-body collision filtering via `mCollisionGroup` + an `interactionGroups()` helper for building the group/mask pair, layered on 0.2.0's configurable object layers
-- [ ] `updatePriority` prop (the `-1` step priority is hard-coded in 0.2.0)
-- [ ] `updateLoop: "follow" | "independent"`, manual stepping, `frameloop="demand"` support
+- [x] Auto-collider generation from a wrapped mesh — `useAutoCollider`, reading the collider off the mesh the ref is attached to, so the size is written once in the JSX. Box and sphere from the geometry's bounds, hull from its points, trimesh from its triangles, with the mesh's own `scale` applied. **Worth recording: geometry that is not centred on its origin needs a `RotatedTranslatedShape`**, and `RotatedTranslatedShapeSettings` takes a `ShapeSettings` rather than a `Shape`, so the primitive is built from settings on that path
+- [x] Instanced bodies — `useInstancedBodies`, one shared shape and one `InstancedMesh` for the whole swarm, with `at(index)` for per-instance access. The demo's hand-written instancing scene was rewritten onto it, which is what proved the api. Sleeping instances are skipped and the matrix buffer is uploaded only when something moved
+- [x] Batch body add/remove — `AddBodiesPrepare` / `AddBodiesFinalize` / `AddBodiesAbort` / `RemoveBodies` through `ArrayBodyID.data()`, and `useInstancedBodies` is built on it rather than looping `AddBody`. Two caveats: **`AddBodiesPrepare` sorts `ioBodies` in place**, so an index captured before the add does not name the same slot afterwards and the caller must keep its own list; and **`BodyInterface_AddState` is not ours to free** — `destroy` on one throws "Cannot destroy object", and leaving it alone leaks nothing
+- [x] Per-body collision filtering via `mCollisionGroup` + an `interactionGroups()` helper for building the group/mask pair, layered on 0.2.0's configurable object layers. `collisionGroup` at creation on every body hook, `useGroupFilterTable` to build the refcounted filter, `api.setCollisionGroup` to change it later — the ragdoll self-collision mechanism 0.4.0 needs, and the fix for two joined bodies still colliding
+- [x] `updatePriority` prop, defaulting to the `-1` it was hard-coded at, with a warning when it is set positive — R3F hands rendering to the subscriber as soon as any frame priority is above zero, so a positive value means a black canvas rather than an error
+- [x] `updateLoop: "follow" | "independent"` plus `api.step(delta?)`, which runs exactly what a frame runs — same accumulator, same step callbacks, same event flushes. `frameloop="demand"` works with it: `<Physics>` asks for the next frame while any body is awake and stops once they have all slept, so a world settles into genuinely not rendering rather than freezing mid-fall
 
 ### World configuration
 
-- [ ] `maxBodies` / `maxBodyPairs` / `maxContactConstraints` on `Physics` — `JoltSettings` defaults are hard-coded, so consumers hit a body cap they cannot raise
-- [ ] Solver settings passthrough (`PhysicsSettings`) — velocity/position iteration counts and the rest, currently fixed at Jolt's defaults
-- [ ] Multithreaded simulation guidance — the entry point is already selectable via 0.2.0's injected `module` prop, so what remains is `JoltSettings.mMaxWorkerThreads` plumbing plus honest docs on the COOP/COEP headers it requires. Main-thread by default
-- [ ] Typedoc API site + hosted examples
+- [x] `maxBodies` / `maxBodyPairs` / `maxContactConstraints` on `Physics` — `JoltSettings` defaults are hard-coded, so consumers hit a body cap they cannot raise. Plus `maxWorkerThreads`, and a guard in `useBody` so hitting the cap is an error message rather than a null dereference
+- [x] Solver settings passthrough (`PhysicsSettings`) — velocity/position iteration counts and the rest, currently fixed at Jolt's defaults. Live, applied over the world's own defaults. `GetPhysicsSettings()` hands back a **borrowed** struct, so destroying it would be a double free
+- [x] Multithreaded simulation guidance — the entry point is already selectable via 0.2.0's injected `module` prop, so what remains is `JoltSettings.mMaxWorkerThreads` plumbing plus honest docs on the COOP/COEP headers it requires. Main-thread by default
+- [ ] Typedoc API site + hosted examples. **Amended:** deferred out of 0.3.0 by decision — the readme and the demo are the documentation this release ships, and a generated site is a release-mechanics job rather than a feature one
 
 ---
 
@@ -152,6 +154,7 @@ The shared foundation for ragdolls _and_ skinned cloth. Its own module because b
 - [ ] `CharacterID` exposed, so a character stays identifiable after removal and character-vs-character collisions resolve deterministically
 - [ ] `HasCollidedWith` / `HasCollidedWithCharacter` / `GetActiveContacts` on the returned api
 - [ ] Full `CharacterContactListener` callback set — the current hook wires only `OnAdjustBodyVelocity`, `OnContactValidate`, `OnContactAdded` and `OnContactSolve`; jolt 0.32.0 added `OnContactPersisted`, `OnContactRemoved` and the four `OnCharacterContact*` variants
+- [ ] Carry a character on a conveyor belt. `CharacterContactSettings` has no surface-velocity field, so 0.3.0's `useConveyor` does not reach characters; the route is `OnContactSolve`'s `ioNewCharacterVelocity`
 
 ### Character-vs-character collision
 

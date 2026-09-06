@@ -1,6 +1,6 @@
-import { CapsuleGeometry } from "three";
 import type Jolt from "jolt-physics";
-import { finishShape, useBody, type BodyOptions } from "./internal/useBody";
+import { useBody, type BodyOptions } from "./internal/useBody";
+import { createColliderShape } from "./internal/colliderShape";
 
 export interface UseCapsuleOptions extends BodyOptions {
   height: number;
@@ -9,15 +9,11 @@ export interface UseCapsuleOptions extends BodyOptions {
 }
 
 export const useCapsule = (options: UseCapsuleOptions) => {
-  const { height, radius, segments = 32 } = options;
+  const { height, radius, segments } = options;
 
   return useBody<Jolt.CapsuleShape>(
-    (jolt) => ({
-      shape: finishShape(
-        new jolt.CapsuleShape(height * 0.5, radius, undefined),
-      ),
-      geometry: new CapsuleGeometry(radius, height, 8, segments),
-    }),
+    (jolt) =>
+      createColliderShape(jolt, { type: "capsule", height, radius, segments }),
     options,
     "capsule",
   );

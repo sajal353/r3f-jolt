@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
-import { Mesh, type BufferGeometry } from "three";
+import { Mesh, Vector3, type BufferGeometry } from "three";
 import type Jolt from "jolt-physics";
 import { useJolt } from "../useJolt";
 import { syncObject } from "./syncObject";
@@ -13,9 +13,15 @@ import {
   DEBUG_RENDER_ORDER,
 } from "./debugMaterial";
 import type { DebugShapeKind } from "./debugMaterial";
+import { applyMassProperties } from "./massProperties";
+import type {
+  MassPropertiesOptions,
+  MassPropertiesOverride,
+} from "./massProperties";
 import type {
   AxisTriple,
   BodyMaterial,
+  JoltApi,
   JoltModule,
   MotionType,
   QuatInput,
@@ -46,11 +52,37 @@ import type {
  * the first rescale would free the thing every later rescale needs.
  */
 
+export interface CollisionGroupOptions {
+  filter?: Jolt.GroupFilter;
+  groupID?: number;
+  subGroupID?: number;
+}
+
 export interface BodyOptions {
   position: Vec3Tuple;
   rotation?: QuatTuple;
   motionType: MotionType;
   mass?: number;
+  /**
+   * Mass and inertia in full, for a body whose shape does not describe how it
+   * should behave — a hollow shell, a weighted die, a flywheel. Supersedes the
+   * scalar `mass`, which stays the shorthand for the common case.
+   */
+  massProperties?: MassPropertiesOptions;
+  /**
+   * Which of the two Jolt should take from you rather than derive. Defaults to
+   * the narrowest mode covering what `massProperties` supplied.
+   */
+  overrideMassProperties?: MassPropertiesOverride;
+  /**
+   * Scales the collider at creation, by wrapping it in the same `ScaledShape`
+   * `api.setScale` builds later — so a later `setScale` replaces this rather
+   * than compounding with it, and both go through the same validity check.
+   *
+   * The collider and the hook's own debug mesh are scaled. **Your** mesh is
+   * yours: scale its geometry, or the `<mesh>` itself, to match.
+   */
+  scale?: Vec3Tuple;
   material?: BodyMaterial;
   initialVelocity?: Vec3Tuple;
   initialAngularVelocity?: Vec3Tuple;
@@ -63,11 +95,27 @@ export interface BodyOptions {
   group?: number;
   mask?: number;
   /**
+   * Which individual bodies ignore each other, one level below `group`/`mask`.
+   * Two bodies in **different** groups always collide; two in the same group
+   * collide only if the filter's table allows their two sub-groups.
+   *
+   * This is the ragdoll mechanism — adjacent bones overlap by design. Build the
+   * filter with `useGroupFilterTable`, and note it is read at **creation**, so
+   * a body needing one belongs in a child the table's owner renders once the
+   * table exists. `api.setCollisionGroup` is the later path.
+   */
+  collisionGroup?: CollisionGroupOptions;
+  /**
    * Required to later promote a `static` body to kinematic or dynamic. Without
    * it `SetMotionType` trips an assert that a release build does not catch.
    */
   allowDynamicOrKinematic?: boolean;
   sensor?: boolean;
+  surfaceVelocity?: {
+    linear?: Vec3Tuple;
+    angular?: Vec3Tuple;
+    space?: "local" | "world";
+  };
   linearDamping?: number;
   angularDamping?: number;
   gravityFactor?: number;
@@ -150,6 +198,7 @@ export interface BodyApi<S extends Jolt.Shape> {
   ) => void;
   setMotionType: (motionType: MotionType) => void;
   setLayer: (layer: number) => void;
+  setCollisionGroup: (group: CollisionGroupOptions) => void;
   setGravityFactor: (factor: number) => void;
   sleep: () => void;
   wake: () => void;
@@ -197,6 +246,23 @@ export interface ShapeResult<S extends Jolt.Shape> {
   debugGeometry?: () => BufferGeometry;
 }
 
+/**
+ * Handed to a hook's `extras` factory once the body exists, so a shape with its
+ * own vocabulary — a heightfield's samples, a plane's material — adds methods to
+ * the api without `useBody` knowing about any of them.
+ */
+export interface BodyApiContext<S extends Jolt.Shape> {
+  api: JoltApi;
+  jolt: JoltModule;
+  body: Jolt.Body;
+  shape: S;
+  geometry: BufferGeometry;
+  /** False once the body is killed, unmounted, or the world disposed. */
+  usable: () => boolean;
+  /** Wake the body after a change that should have a visible effect. */
+  activate: () => void;
+}
+
 export const finishShape = <S extends Jolt.Shape>(shape: S): S => {
   shape.AddRef();
   return shape;
@@ -221,6 +287,49 @@ export const shapeFromResult = <S extends Jolt.Shape>(
   const shape = finishShape(result.Get() as S);
   result.Clear();
   return shape;
+};
+
+/**
+ * `ShapeResult.Get()` hands back a base-`Shape` wrapper whatever it built —
+ * measured, and the generated types do not admit it: a `PlaneShape` from
+ * `Get()` has no `GetHalfExtent` and a `HeightFieldShape` no `IsNoCollision`.
+ * Anything needing a subclass's own methods has to `castObject` first, which
+ * wraps the same pointer, so ownership is unaffected.
+ */
+export const shapeFromResultAs = <
+  C extends new (...args: never[]) => Jolt.Shape,
+>(
+  jolt: JoltModule,
+  result: Jolt.ShapeResult,
+  Class: C,
+  hook: string,
+): InstanceType<C> =>
+  jolt.castObject(shapeFromResult<Jolt.Shape>(result, hook), Class);
+
+/**
+ * Jolt copies the group into whatever takes it and refs the filter on the way,
+ * so the one built here is a temporary — measured: assigning it to a
+ * `BodyCreationSettings` takes the filter's refcount up by one and destroying
+ * this brings it back down, leaving the settings' own copy holding a reference.
+ */
+const withCollisionGroup = (
+  jolt: JoltModule,
+  options: CollisionGroupOptions,
+  visit: (group: Jolt.CollisionGroup) => void,
+) => {
+  const { filter, groupID = 0, subGroupID = 0 } = options;
+
+  const group = filter
+    ? new jolt.CollisionGroup(filter, groupID, subGroupID)
+    : new jolt.CollisionGroup();
+
+  if (!filter) {
+    group.SetGroupID(groupID);
+    group.SetSubGroupID(subGroupID);
+  }
+
+  visit(group);
+  jolt.destroy(group);
 };
 
 const MAX_USER_DATA = 0xffffffff;
@@ -268,28 +377,37 @@ const resolveAllowedDOFs = (jolt: JoltModule, options: BodyOptions) => {
   return mask;
 };
 
-export const useBody = <S extends Jolt.Shape>(
+export const useBody = <S extends Jolt.Shape, E extends object = object>(
   createShape: (jolt: JoltModule) => ShapeResult<S>,
   options: BodyOptions,
   debugKind: DebugShapeKind,
+  extras?: (context: BodyApiContext<S>) => E,
+  /**
+   * Lets a caller own the mesh ref rather than take the one this returns —
+   * `useAutoCollider` needs to read the mesh's geometry inside `createShape`,
+   * which means holding the ref before `useBody` hands one back.
+   */
+  externalRef?: RefObject<Mesh | null>,
 ) => {
-  const ref = useRef<Mesh | null>(null);
+  const ownRef = useRef<Mesh | null>(null);
+  const ref = externalRef ?? ownRef;
   const api = useJolt();
   const scene = useThree((state) => state.scene);
 
   const aliveRef = useRef(false);
-  const [bodyApi, setBodyApi] = useState<BodyApi<S>>();
+  const [bodyApi, setBodyApi] = useState<BodyApi<S> & E>();
   const [tracker] = useState(createTransformTracker);
 
   // Body creation is init-once: these are snapshotted at mount and later prop
   // changes are ignored by design (rebuild with `key`). Holding the snapshot in
   // state rather than a ref keeps the effect's dependency list honest.
-  const [mount] = useState(() => ({ options, createShape, debugKind }));
+  const [mount] = useState(() => ({ options, createShape, debugKind, extras }));
 
   useEffect(() => {
     const {
       Jolt: jolt,
       bodyInterface,
+      physicsSystem,
       layers,
       groups,
       objectLayer,
@@ -299,13 +417,16 @@ export const useBody = <S extends Jolt.Shape>(
       debug: debugDefault,
     } = api;
 
-    const { options, createShape, debugKind } = mount;
+    const { options, createShape, debugKind, extras } = mount;
 
     const {
       position,
       rotation = [0, 0, 0, 1],
       motionType,
       mass,
+      massProperties,
+      overrideMassProperties,
+      scale,
       material,
       initialVelocity,
       initialAngularVelocity,
@@ -317,6 +438,7 @@ export const useBody = <S extends Jolt.Shape>(
       layer,
       group,
       mask,
+      collisionGroup,
       allowDynamicOrKinematic,
       sensor,
       linearDamping,
@@ -341,7 +463,42 @@ export const useBody = <S extends Jolt.Shape>(
     const isStatic = motionType === "static";
     const isMoving = !isStatic;
 
+    // Jolt hands back a null body when the pool is full, and everything after
+    // `CreateBody` dereferences it. Checked here, before the first allocation,
+    // so the failure is a sentence rather than a wasm trap — and so nothing
+    // has to be unwound to report it.
+    if (physicsSystem.GetNumBodies() >= physicsSystem.GetMaxBodies()) {
+      throw new Error(
+        `r3f-jolt: the world is full at ${physicsSystem.GetMaxBodies()} bodies. ` +
+          "Raise `maxBodies` on <Physics>. It is sized at construction, so the " +
+          "world has to be rebuilt (`key`) for a new value to take.",
+      );
+    }
+
     const { shape, geometry, debugGeometry } = createShape(jolt);
+
+    // One slot: a creation-time `scale` seeds it and `setScale` releases
+    // whatever is in it, so the two paths cannot disagree.
+    let scaledShape: Jolt.Shape | null = null;
+
+    if (scale) {
+      const requested = new jolt.Vec3(scale[0], scale[1], scale[2]);
+
+      if (shape.IsValidScale(requested)) {
+        scaledShape = new jolt.ScaledShape(shape, requested);
+        scaledShape.AddRef();
+      } else {
+        const valid = shape.MakeScaleValid(requested);
+        console.warn(
+          `[r3f-jolt] scale (${scale[0]}, ${scale[1]}, ${scale[2]}) is not valid ` +
+            "for this shape — spheres and capsules scale uniformly only. Jolt's " +
+            `MakeScaleValid suggests (${valid.GetX()}, ${valid.GetY()}, ` +
+            `${valid.GetZ()}). Ignoring.`,
+        );
+      }
+
+      jolt.destroy(requested);
+    }
 
     if (shapeUserData !== undefined) {
       validateUserData(shapeUserData, "shapeUserData");
@@ -376,7 +533,7 @@ export const useBody = <S extends Jolt.Shape>(
     );
 
     const bodySettings = new jolt.BodyCreationSettings(
-      shape,
+      scaledShape ?? shape,
       settingsPosition,
       settingsRotation,
       resolveMotionType(jolt, motionType),
@@ -410,6 +567,12 @@ export const useBody = <S extends Jolt.Shape>(
 
     if (sensor !== undefined) {
       bodySettings.mIsSensor = sensor;
+    }
+
+    if (collisionGroup) {
+      withCollisionGroup(jolt, collisionGroup, (value) => {
+        bodySettings.mCollisionGroup = value;
+      });
     }
 
     if (linearDamping !== undefined) {
@@ -454,6 +617,15 @@ export const useBody = <S extends Jolt.Shape>(
       bodySettings.mAllowedDOFs = resolvedDOFs;
     }
 
+    if (massProperties || overrideMassProperties) {
+      applyMassProperties(
+        jolt,
+        bodySettings,
+        massProperties ?? {},
+        overrideMassProperties,
+      );
+    }
+
     bodySettingsOverride?.(bodySettings);
 
     const body = bodyInterface.CreateBody(bodySettings);
@@ -462,9 +634,47 @@ export const useBody = <S extends Jolt.Shape>(
     jolt.destroy(settingsPosition);
     jolt.destroy(settingsRotation);
 
-    if (isDynamic && mass !== undefined) {
-      body.GetMotionProperties().ScaleToMass(mass);
+    // `massProperties` went in through the settings, so re-scaling here would
+    // undo the inertia it asked for.
+    const scalarMass = massProperties || overrideMassProperties ? undefined : mass;
+
+    if (isDynamic && scalarMass !== undefined) {
+      body.GetMotionProperties().ScaleToMass(scalarMass);
     }
+
+    // `SetShape` recomputes mass and inertia from density × the new volume, so
+    // a rescale would discard whatever was asked for. Snapshotting the resolved
+    // values rather than the options covers every override mode, including the
+    // one where Jolt derived the inertia itself.
+    const restoreMassProperties =
+      isDynamic && (massProperties || overrideMassProperties)
+        ? (() => {
+            const motion = body.GetMotionProperties();
+            const inverseMass = motion.GetInverseMass();
+            const diagonal = motion.GetInverseInertiaDiagonal();
+            const inverseInertia: Vec3Tuple = [
+              diagonal.GetX(),
+              diagonal.GetY(),
+              diagonal.GetZ(),
+            ];
+            const rotation = motion.GetInertiaRotation();
+            const inertiaRotation: QuatTuple = [
+              rotation.GetX(),
+              rotation.GetY(),
+              rotation.GetZ(),
+              rotation.GetW(),
+            ];
+
+            return () => {
+              const properties = body.GetMotionProperties();
+              properties.SetInverseMass(inverseMass);
+              properties.SetInverseInertia(
+                temps.vec3(inverseInertia),
+                temps.quat(inertiaRotation),
+              );
+            };
+          })()
+        : null;
 
     if (isMoving && maxLinearVelocity !== undefined) {
       body.GetMotionProperties().SetMaxLinearVelocity(maxLinearVelocity);
@@ -515,6 +725,7 @@ export const useBody = <S extends Jolt.Shape>(
         createDebugMaterial(debugKind),
       );
       debugMesh.renderOrder = DEBUG_RENDER_ORDER;
+      if (scale) debugMesh.scale.set(scale[0], scale[1], scale[2]);
       scene.add(debugMesh);
     }
 
@@ -551,9 +762,8 @@ export const useBody = <S extends Jolt.Shape>(
     };
 
     let grabbedFrom: MotionType | null = null;
-    let scaledShape: Jolt.Shape | null = null;
 
-    setBodyApi({
+    const bodyApiBase: BodyApi<S> = {
       body,
       shape,
       geometry,
@@ -676,6 +886,13 @@ export const useBody = <S extends Jolt.Shape>(
         bodyInterface.SetObjectLayer(id, value);
       },
 
+      setCollisionGroup: (value: CollisionGroupOptions) => {
+        if (!usable()) return;
+        withCollisionGroup(jolt, value, (group) => {
+          bodyInterface.SetCollisionGroup(id, group);
+        });
+      },
+
       setGravityFactor: (factor: number) => {
         if (!usable()) return;
         bodyInterface.SetGravityFactor(id, factor);
@@ -757,15 +974,30 @@ export const useBody = <S extends Jolt.Shape>(
 
         // SetShape recomputes mass from density × the new volume, silently
         // discarding whatever the caller asked for.
-        if (updateMassProperties && isDynamic && mass !== undefined) {
-          body.GetMotionProperties().ScaleToMass(mass);
+        if (updateMassProperties && isDynamic && scalarMass !== undefined) {
+          body.GetMotionProperties().ScaleToMass(scalarMass);
         }
+
+        if (updateMassProperties) restoreMassProperties?.();
 
         // The debug mesh holds the *unscaled* geometry, so scaling the Object3D
         // matches the ScaledShape exactly — no regeneration, no allocation.
         debugMesh?.scale.set(target.GetX(), target.GetY(), target.GetZ());
       },
-    });
+    };
+
+    setBodyApi({
+      ...bodyApiBase,
+      ...extras?.({
+        api,
+        jolt,
+        body,
+        shape,
+        geometry,
+        usable,
+        activate: () => bodyInterface.ActivateBody(id),
+      }),
+    } as BodyApi<S> & E);
 
     return () => {
       aliveRef.current = false;
@@ -810,6 +1042,23 @@ export const useBody = <S extends Jolt.Shape>(
     );
   }, [api, bodyApi, wantsActivationEvents, activationHandlers]);
 
+  const surfaceVelocity = mount.options.surfaceVelocity;
+
+  useEffect(() => {
+    if (!bodyApi || !surfaceVelocity) return;
+
+    const handle = api.contacts.addSurfaceVelocity(
+      bodyApi.body.GetID().GetIndexAndSequenceNumber(),
+      {
+        linear: new Vector3(...(surfaceVelocity.linear ?? [0, 0, 0])),
+        angular: new Vector3(...(surfaceVelocity.angular ?? [0, 0, 0])),
+        space: surfaceVelocity.space ?? "local",
+      },
+    );
+
+    return handle.release;
+  }, [api, bodyApi, surfaceVelocity]);
+
   useFrame(() => {
     if (!bodyApi || !aliveRef.current) return;
     if (!ref.current && !bodyApi.debugMesh) return;
@@ -828,5 +1077,8 @@ export const useBody = <S extends Jolt.Shape>(
     if (bodyApi.debugMesh) tracker.applyTo(bodyApi.debugMesh);
   });
 
-  return [ref, bodyApi] as [RefObject<Mesh | null>, BodyApi<S> | undefined];
+  return [ref, bodyApi] as [
+    RefObject<Mesh | null>,
+    (BodyApi<S> & E) | undefined,
+  ];
 };

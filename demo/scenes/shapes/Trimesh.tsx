@@ -1,7 +1,7 @@
 import { Suspense, useMemo } from "react";
 import { useGLTF } from "@react-three/drei";
 import { BufferAttribute, BufferGeometry, type Mesh } from "three";
-import { Floor, Tag } from "../../shared/Stage";
+import { Floor } from "../../shared/Stage";
 import { useSphere } from "@/Jolt/useSphere";
 import { useTrimesh } from "@/Jolt/useTrimesh";
 
@@ -90,9 +90,6 @@ export const Trimesh = () => (
     </Suspense>
     <Dropper />
 
-    <Tag position={[0, 5, 0]}>
-      trimesh bodies are always static — Jolt mesh shapes cannot be dynamic
-    </Tag>
   </>
 );
 

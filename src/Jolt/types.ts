@@ -72,14 +72,69 @@ export interface ContactInfo {
   userData: number;
   shapeUserData: number;
   point: Vector3;
+  /**
+   * Contact normal, pointing **from the body you subscribed to** towards the
+   * body in `bodyID` — so negating it is the direction you were pushed. Zero on
+   * `onExit`.
+   *
+   * `useContactListener` is unaffected: a raw listener gets Jolt's manifold
+   * untouched, whose normal runs from body 1 to body 2 in Jolt's own pair
+   * ordering.
+   */
   normal: Vector3;
   penetrationDepth: number;
+  /**
+   * Closing speed along the contact normal, in m/s, measured before the solver
+   * ran. Zero for a resting or separating contact, and zero on `onExit` — the
+   * manifold is gone by then.
+   *
+   * Only filled when the subscriber asked for it; see `BodyContactOptions`.
+   */
+  impactSpeed: number;
+  /**
+   * Estimated normal impulse, in kg·m/s — `impactSpeed` times the pair's
+   * effective mass.
+   *
+   * Jolt binds no applied impulse anywhere, so this is **derived, not
+   * reported**: it answers "how much momentum had to be cancelled" and ignores
+   * the angular terms in the effective mass, which reads high for a glancing
+   * blow on a long lever. Good for ranking a scrape against a crash. Not a
+   * substitute for the solver's own numbers.
+   *
+   * Only filled when the subscriber asked for it; see `BodyContactOptions`.
+   */
+  impulse: number;
 }
 
 export interface BodyContactHandlers {
   onEnter?: (contact: ContactInfo) => void;
   onStay?: (contact: ContactInfo) => void;
   onExit?: (contact: ContactInfo) => void;
+}
+
+/**
+ * `contactForce` costs about ten calls into WASM per contact per step, so it is
+ * off unless asked for and `impactSpeed` / `impulse` stay 0 without it.
+ */
+export interface BodyContactOptions {
+  contactForce?: boolean;
+}
+
+/** Mutate in place to change the belt; the registry reads it inside the step. */
+export interface SurfaceVelocity {
+  linear: Vector3;
+  angular: Vector3;
+  space: "local" | "world";
+}
+
+/**
+ * Jolt solves one relative velocity per contact, so a body has one record and
+ * later callers share it: `source` may be a record someone else registered, and
+ * `release` is then a no-op.
+ */
+export interface SurfaceVelocityHandle {
+  source: SurfaceVelocity;
+  release: () => void;
 }
 
 /**
@@ -94,7 +149,6 @@ export interface PhysicsTiming {
    * is a different clock whenever the timestep is fixed.
    */
   stepDelta: number;
-  /** Monotonic step count. A change means the world advanced since last frame. */
   stepCount: number;
   /**
    * How far the renderer is between the previous step and the current one, 0…1
@@ -102,8 +156,28 @@ export interface PhysicsTiming {
    * off or the timestep varies.
    */
   alpha: number;
-  /** Whether `<Physics interpolate>` is on. */
   interpolate: boolean;
+}
+
+/**
+ * Runs once per physics step, either side of it. `index` is the step's own
+ * number — the value `PhysicsTiming.stepCount` holds while a `"before"`
+ * callback runs, and one less than it holds while the matching `"after"` one
+ * does.
+ */
+export type StepCallback = (delta: number, index: number) => void;
+
+export type StepPhase = "before" | "after";
+
+/**
+ * The only registry with no Jolt object in it: these callbacks run *between*
+ * `Step()` calls rather than inside one, so there is no listener to install and
+ * nothing to free.
+ */
+export interface StepRegistry {
+  add: (phase: StepPhase, callback: StepCallback) => () => void;
+  run: (phase: StepPhase, delta: number, index: number) => void;
+  destroy: () => void;
 }
 
 export interface ActivationHandlers {
@@ -122,10 +196,34 @@ export interface ContactRegistry {
   addBodyListener: (
     bodyID: number,
     handlers: BodyContactHandlers,
+    options?: BodyContactOptions,
   ) => () => void;
+  addSurfaceVelocity: (
+    bodyID: number,
+    source: SurfaceVelocity,
+  ) => SurfaceVelocityHandle;
   subscribe: (callback: () => void) => () => void;
   getSnapshot: () => number;
   flush: () => void;
+  destroy: () => void;
+}
+
+/** One joint, as `<PhysicsDebug />` needs it: the constraint and both ends. */
+export interface ConstraintEntry {
+  constraint: Jolt.TwoBodyConstraint;
+  body1: Jolt.Body;
+  body2: Jolt.Body;
+}
+
+/**
+ * Jolt binds no way to enumerate a world's constraints, so the library tracks
+ * the ones its hooks create. A constraint built by hand through `useJolt()` is
+ * not in here and will not be drawn.
+ */
+export interface ConstraintRegistry {
+  add: (entry: ConstraintEntry) => () => void;
+  forEach: (visit: (entry: ConstraintEntry) => void) => void;
+  size: () => number;
   destroy: () => void;
 }
 
@@ -145,8 +243,19 @@ export interface JoltApi {
   objectLayer: (group: number, mask: number) => number;
   contacts: ContactRegistry;
   activation: ActivationRegistry;
+  constraints: ConstraintRegistry;
+  steps: StepRegistry;
   temps: Temps;
   timing: PhysicsTiming;
+  /**
+   * Advances the world by hand: the same accumulator, step callbacks and event
+   * flushes a frame runs. Meant for `updateLoop: "independent"`, where nothing
+   * else steps it; with `"follow"` this is an extra step on top of the frame's.
+   *
+   * `delta` defaults to one `timeStep`, so `step()` is exactly one step.
+   * Does nothing while the world is paused or disposed.
+   */
+  step: (delta?: number) => void;
   debug: boolean;
   /**
    * React unmounts a parent's effects before its children's, so `<Physics>`

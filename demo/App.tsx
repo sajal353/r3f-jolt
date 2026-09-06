@@ -7,13 +7,13 @@ import { categories, findScene } from "./scenes";
 
 const TIME_STEPS: { label: string; value: number | "vary" }[] = [
   { label: "1/60", value: 1 / 60 },
+  { label: "1/30", value: 1 / 30 },
   { label: "1/15", value: 1 / 15 },
   { label: "vary", value: "vary" },
 ];
 
 const App = () => {
   const [sceneName, setSceneName] = useState(categories[0].scenes[0].name);
-  const [debug, setDebug] = useState(false);
   const [debugOverride, setDebugOverride] = useState<boolean | null>(null);
   const [paused, setPaused] = useState(false);
   const [interpolate, setInterpolate] = useState(true);
@@ -31,7 +31,7 @@ const App = () => {
   // and times itself against the step, so at a fixed rate on a display that is
   // not exactly 60 Hz the two diverge, and a character riding a kinematic
   // platform slides by the difference.
-  const globalDebug = debugOverride ?? scene.physicsDebug !== false;
+  const globalDebug = debugOverride ?? scene.physicsDebug === true;
   const timeStep = stepOverride ?? scene.timeStep ?? "vary";
 
   return (
@@ -63,9 +63,6 @@ const App = () => {
 
       <div className="viewport">
         <div className="toolbar">
-          <button aria-pressed={debug} onClick={() => setDebug((v) => !v)}>
-            debug
-          </button>
           <button
             aria-pressed={globalDebug}
             onClick={() => setDebugOverride(!globalDebug)}
@@ -120,10 +117,10 @@ const App = () => {
               is the mount/unmount stress this demo is meant to apply. */}
           <Physics
             key={sceneName}
-            debug={debug}
             paused={paused}
             interpolate={interpolate}
             timeStep={timeStep}
+            updateLoop={scene.updateLoop}
           >
             {globalDebug && <PhysicsDebug />}
             <Suspense fallback={null}>
