@@ -6,6 +6,7 @@ import {
   type ConstraintBody,
   type ConstraintOptions,
 } from "./internal/useConstraint";
+import { readConeLoad } from "./internal/constraintLoad";
 import { resolvePair, resolveSpace } from "./internal/constraintSettings";
 import type { ConstraintSpace } from "./internal/constraintSettings";
 import type { JoltModule, Temps, Vec3Tuple } from "./types";
@@ -97,6 +98,7 @@ export const useConeConstraint = (
     {
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castCone,
+      load: readConeLoad,
       api: createConeApi,
     },
   );

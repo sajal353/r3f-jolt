@@ -256,7 +256,11 @@ export interface JoltApi {
    * Does nothing while the world is paused or disposed.
    */
   step: (delta?: number) => void;
-  debug: boolean;
+  /**
+   * The current `<Physics debug>`. Reading it does not subscribe to it; the
+   * hooks pick up a change on their own.
+   */
+  readonly debug: boolean;
   /**
    * React unmounts a parent's effects before its children's, so `<Physics>`
    * tears down first and every child hook cleans up afterwards. Destroying the

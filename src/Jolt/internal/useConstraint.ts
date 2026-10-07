@@ -2,7 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import type Jolt from "jolt-physics";
 import { useJolt } from "../useJolt";
-import { createConstraintDebugLines } from "./constraintDebug";
+import {
+  createConstraintDebugLines,
+  type ConstraintDebugLines,
+} from "./constraintDebug";
+import {
+  createDebugView,
+  useDebugFlag,
+  useDebugView,
+  type DebugView,
+} from "./debugView";
+import { createLoadWindow } from "./constraintLoad";
+import { useHandlerRef } from "./useHandlerRef";
 import type { BodyApi } from "./useBody";
 import type { ConstraintEntry, JoltApi, JoltModule, Temps } from "../types";
 
@@ -22,6 +33,19 @@ export interface ConstraintOptions {
   priority?: number;
   numVelocityStepsOverride?: number;
   numPositionStepsOverride?: number;
+  /**
+   * Newtons. The joint switches itself off on the first step the force holding
+   * it together goes over this, and `onBreak` fires; `setEnabled(true)` mends
+   * it. Motors and springs driving the joint do not count towards it.
+   */
+  breakForce?: number;
+  /** Newton-metres, the same way, for what holds the joint's rotation. */
+  breakTorque?: number;
+  /**
+   * Runs after the step that broke the joint, where the world is safe to
+   * touch, with the force and torque that broke it.
+   */
+  onBreak?: (load: ConstraintLoad) => void;
   debug?: boolean;
   settingsOverride?: (
     settings: Jolt.TwoBodyConstraintSettings,
@@ -62,10 +86,21 @@ export interface ConstraintApiContext<C extends Jolt.Constraint> {
   temps: Temps;
 }
 
+/**
+ * What a joint carried, as magnitudes: in `onBreak`, newtons and newton-metres
+ * averaged over the last 1/30 s; inside a `load` reader, one step's impulses.
+ */
+export interface ConstraintLoad {
+  force: number;
+  torque: number;
+}
+
 export interface ConstraintBuild<C extends Jolt.Constraint, E extends object> {
   settings: (jolt: JoltModule, temps: Temps) => Jolt.TwoBodyConstraintSettings;
   cast: (constraint: Jolt.TwoBodyConstraint, jolt: JoltModule) => C;
   api?: (context: ConstraintApiContext<C>) => E;
+  /** Absent where Jolt binds no `GetTotalLambda*` for the type. */
+  load?: (constraint: C, out: ConstraintLoad) => void;
 }
 
 const resolveBody = (api: JoltApi, value: ConstraintBody): Jolt.Body => {
@@ -139,6 +174,73 @@ const createSharedApi = <C extends Jolt.Constraint>(
 };
 
 /**
+ * Jolt resolves an impact over about two steps, so the span has to hold two
+ * 60 Hz steps for a hit to read the same at 60 Hz as at 240. It is also the
+ * longest step `timeStep: "vary"` will take.
+ */
+const BREAK_SPAN = 1 / 30;
+
+/**
+ * Checked after every step rather than every frame, so a joint breaks on the
+ * step it is overloaded. The load is averaged over `BREAK_SPAN` rather than
+ * read off one step, which is what keeps an impact's reading independent of
+ * the step rate.
+ */
+const watchLoad = <C extends Jolt.Constraint>(
+  api: JoltApi,
+  constraint: C,
+  readLoad: ConstraintBuild<C, object>["load"],
+  breakForce: number | undefined,
+  breakTorque: number | undefined,
+  activate: () => void,
+  onBreak: (load: ConstraintLoad) => void,
+) => {
+  if (breakForce === undefined && breakTorque === undefined) {
+    return () => {};
+  }
+
+  if (!readLoad) {
+    console.warn(
+      "[r3f-jolt] breakForce / breakTorque ignored: Jolt binds no " +
+        "GetTotalLambda* for this constraint type. A useSixDOFConstraint with " +
+        "every axis fixed holds the same and can break.",
+    );
+    return () => {};
+  }
+
+  const impulses: ConstraintLoad = { force: 0, torque: 0 };
+  const load: ConstraintLoad = { force: 0, torque: 0 };
+  const recent = createLoadWindow(BREAK_SPAN);
+
+  const checkLoad = (delta: number) => {
+    if (api.state.disposed) return;
+
+    // A disabled or sleeping joint carries nothing new, and history from
+    // before it stopped would be counted against it when it starts again.
+    if (!constraint.GetEnabled() || !constraint.IsActive()) {
+      recent.clear();
+      return;
+    }
+
+    readLoad(constraint, impulses);
+    recent.push(delta, impulses);
+    recent.average(load);
+
+    const overForce = breakForce !== undefined && load.force > breakForce;
+    const overTorque = breakTorque !== undefined && load.torque > breakTorque;
+
+    if (!overForce && !overTorque) return;
+
+    constraint.SetEnabled(false);
+    recent.clear();
+    activate();
+    onBreak({ ...load });
+  };
+
+  return api.steps.add("after", checkLoad);
+};
+
+/**
  * The shared constraint lifecycle. `AddConstraint` takes the **only** reference,
  * so the hook holds one of its own — without it `RemoveConstraint` deletes the
  * constraint outright and the teardown that follows is a double free.
@@ -159,10 +261,12 @@ export const useConstraint = <
   const scene = useThree((state) => state.scene);
 
   const aliveRef = useRef(false);
-  const debugRef = useRef<(() => void) | null>(null);
+  const debugViewRef = useRef<DebugView<ConstraintDebugLines> | null>(null);
+  const drawDebugRef = useRef<(() => void) | null>(null);
   const [constraintApi, setConstraintApi] = useState<ConstraintApi<C> & E>();
 
   const [mount] = useState(() => ({ options, build }));
+  const breakHandler = useHandlerRef(options.onBreak);
 
   useEffect(() => {
     if (body1 === undefined || body2 === undefined) return;
@@ -173,11 +277,10 @@ export const useConstraint = <
       bodyInterface,
       temps,
       state,
-      debug: debugDefault,
     } = api;
 
     const { options, build } = mount;
-    const { priority, debug = debugDefault, settingsOverride } = options;
+    const { priority, breakForce, breakTorque, settingsOverride } = options;
 
     const first = resolveBody(api, body1);
     const second = resolveBody(api, body2);
@@ -207,12 +310,21 @@ export const useConstraint = <
     };
     const unregister = api.constraints.add(entry);
 
-    const debugView = debug ? createConstraintDebugLines() : null;
+    const buildDebugLines = () => {
+      const lines = createConstraintDebugLines();
+      scene.add(lines.lines);
+      return lines;
+    };
 
-    if (debugView) {
-      scene.add(debugView.lines);
-      debugRef.current = () => debugView.update((draw) => draw(entry));
-    }
+    const releaseDebugLines = (lines: ConstraintDebugLines) => {
+      scene.remove(lines.lines);
+      lines.dispose();
+    };
+
+    const debugView = createDebugView(buildDebugLines, releaseDebugLines);
+    debugViewRef.current = debugView;
+    drawDebugRef.current = () =>
+      debugView.current?.update((draw) => draw(entry));
 
     aliveRef.current = true;
 
@@ -240,28 +352,40 @@ export const useConstraint = <
       temps,
     });
 
+    const stopWatching = watchLoad(
+      api,
+      typed,
+      build.load,
+      breakForce,
+      breakTorque,
+      activate,
+      (broke) => breakHandler.current?.(broke),
+    );
+
     setConstraintApi({ ...shared, ...extras } as ConstraintApi<C> & E);
 
     return () => {
       aliveRef.current = false;
-      debugRef.current = null;
+      stopWatching();
+      drawDebugRef.current = null;
       unregister();
       setConstraintApi(undefined);
 
-      if (debugView) {
-        scene.remove(debugView.lines);
-        debugView.dispose();
-      }
+      debugView.hide();
+      debugViewRef.current = null;
 
       if (state.destroyed) return;
 
       physicsSystem.RemoveConstraint(constraint);
       constraint.Release();
     };
-  }, [api, body1, body2, mount, scene]);
+  }, [api, body1, body2, mount, scene, breakHandler]);
+
+  const debug = useDebugFlag(mount.options.debug);
+  useDebugView(constraintApi, debugViewRef, debug);
 
   useFrame(() => {
-    debugRef.current?.();
+    drawDebugRef.current?.();
   });
 
   return [constraintApi] as [(ConstraintApi<C> & E) | undefined];

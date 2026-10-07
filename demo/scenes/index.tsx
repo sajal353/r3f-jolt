@@ -43,6 +43,7 @@ import { ConeAndSwingTwistScene } from "./constraints/ConeAndSwingTwist";
 import { SixDOFConstraintScene } from "./constraints/SixDOF";
 import { MotorsScene } from "./constraints/Motors";
 import { SpringsScene } from "./constraints/Springs";
+import { BreakingJointsScene } from "./constraints/Breaking";
 
 import { ClosestHit } from "./queries/ClosestHit";
 import { AnyHit } from "./queries/AnyHit";
@@ -600,6 +601,22 @@ export const categories: Category[] = [
             freely and the spring only decides how it settles at the stop. Low
             frequency and damping oscillate; high values arrive and stay.
             Re-dropped every six seconds.
+          </>
+        ),
+      },
+      {
+        name: "Breaking joints",
+        Component: BreakingJointsScene,
+        hook: "breakForce",
+        hint: (
+          <>
+            Each plank hangs from two point joints. At rest they carry under
+            500 N, but a crate landing on the plank loads them far harder, and
+            more the further it falls: about 3 kN from 1 m and 7 kN from 3 m.
+            At 5 kN the 1 m drop holds and the 3 m drop snaps a joint, leaving
+            the plank swinging from the other; <code>onBreak</code> reports the
+            load that did it. The load is averaged over 1/30 s, so this holds at
+            any frame rate. Re-hung every six seconds.
           </>
         ),
       },

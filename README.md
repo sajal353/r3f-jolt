@@ -133,6 +133,8 @@ It is forced off for `timeStep="vary"`, which already lands exactly one step on 
 
 Static bodies are never interpolated, and a body that has just been created or teleported with `setPositionAndRotation` snaps rather than sliding in from where it used to be.
 
+A sleeping body is drawn at the exact pose it came to rest in and is not read again until it wakes, so a scene of settled bodies costs nothing per frame. A sleeping body moved through `bodyInterface` without activating it is not redrawn until it wakes; `api.setPositionAndRotation` handles this for you.
+
 ### Units
 
 Jolt is tuned for metres, kilograms and seconds. A 1-unit cube weighing 20 is a sensible crate. Very small or very large shapes need solver tuning; prefer scaling your world to metres.
@@ -143,7 +145,7 @@ Jolt is tuned for metres, kilograms and seconds. A 1-unit cube weighing 20 is a 
 | ------------------- | ----------------- | ------------------------------------------------- |
 | `gravity`           | `[0, -9.81, 0]`   | Live — changing it calls `SetGravity`             |
 | `paused`            | `false`           | Stops stepping; bodies stay alive                 |
-| `debug`             | `false`           | Default for every child hook's `debug`. Read once, at mount |
+| `debug`             | `false`           | Default for every child hook's `debug`. Live      |
 | `timeStep`          | `1/60`            | Or `"vary"` for frame-delta stepping              |
 | `interpolate`       | `true`            | Render between steps; ignored when `timeStep="vary"` |
 | `maxSubSteps`       | `4`               | Fixed steps allowed per frame                     |
@@ -160,9 +162,9 @@ Jolt is tuned for metres, kilograms and seconds. A 1-unit cube weighing 20 is a 
 | `init`              | `wasm-compat`     | A custom module initialiser                       |
 | `settingsOverride`  | —                 | `(settings, jolt) => void`, applied last          |
 
-Everything above the `physicsSettings` row except `gravity`, `paused` and `physicsSettings` is read when the world is built. Changing one afterwards does nothing until the world is rebuilt, which you do by giving `<Physics>` a new `key`.
+Everything above the `physicsSettings` row except `gravity`, `paused`, `debug` and `physicsSettings` is read when the world is built. Changing one afterwards does nothing until the world is rebuilt, which you do by giving `<Physics>` a new `key`.
 
-`debug` is the sharpest edge of that: every hook reads it at mount, so changing it *does* take effect — by destroying and rebuilding every body in the world, which drops them back to their starting transforms. Reach for [`<PhysicsDebug />`](#physicsdebug--everything-in-the-world) instead, which is a live toggle and draws more.
+`debug` adds and removes the per-hook overlays of every hook that does not set its own `debug`, without touching a body. A hook's own `debug` is read once, at mount.
 
 ### Solver settings
 
@@ -711,6 +713,20 @@ Every point and axis option comes in three forms: a shared one (`point`, `hingeA
 
 `limits: { min, max }` bounds a hinge (radians) or a slider (metres), and `limitsSpring` makes that bound springy rather than hard. A spring is `{ frequency, damping }` or `{ stiffness, damping }` — setting `stiffness` selects that mode.
 
+### Breaking
+
+`breakForce` (newtons) and `breakTorque` (newton-metres) switch a joint off on the first step that loads it past the limit, and `onBreak({ force, torque })` fires after that step with the load that did it. `setEnabled(true)` mends it.
+
+The load is averaged over the last 1/30 s, so the same impact breaks the same joint at any step rate. A steady load reads its true value; an impact reads its impulse spread over 1/30 s.
+
+```tsx
+usePointConstraint(null, plank, { point: [0, 4, 0], breakForce: 5000, onBreak });
+```
+
+- The load is what holds the joint together. Limits count; motors do not.
+- A limit only takes load once it is reached, so a joint whose limit catches a falling body reads an impact well above the static load.
+- `useFixedConstraint` cannot break: Jolt binds no load readout for it, and setting either option warns. A `useSixDOFConstraint` with every axis `"fixed"` holds the same and can break.
+
 ### Worth knowing
 
 - **Every runtime setter wakes both bodies.** A settled joint puts its bodies to sleep, and a sleeping body ignores a retargeted motor until something else wakes it. The hooks call Jolt's `ActivateConstraint` for you; `api.activate()` is there if you need it directly.
@@ -1100,7 +1116,7 @@ Unlike bodies, joints are drawn from the library's own registry: Jolt exposes no
 
 ### Per-hook `debug` — one body
 
-`debug` on a hook (or `<Physics debug>` for all of them) overlays a wireframe of that collider only, coloured by shape kind. Better when you are looking at one thing. Colours come from the exported `debugColors`, so you can match them in your own UI.
+`debug` on a hook (or `<Physics debug>` for all of them, live) overlays a wireframe of that collider only, coloured by shape kind. Better when you are looking at one thing. Colours come from the exported `debugColors`, so you can match them in your own UI.
 
 | Hook                     | Colour                       |
 | ------------------------ | ---------------------------- |
@@ -1165,19 +1181,19 @@ pnpm install
 pnpm dev
 ```
 
-59 scenes in seven categories, one per hook or feature:
+60 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
 | **Shapes**       | all 12 shape hooks, one scene each · terrain from all three `heights` forms · per-triangle surface types |
 | **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · collision groups · auto colliders · motion quality |
 | **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale · conveyor    |
-| **Constraints**  | all 8 constraint hooks · motors · springs · rope built from chained distance joints                 |
+| **Constraints**  | all 8 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
 | **Systems**      | character · car · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
 
-Toolbar toggles for `<PhysicsDebug />`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
+Toolbar toggles for `<PhysicsDebug />`, `<Physics debug>`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 
 Switching scenes remounts the whole world, which doubles as the mount/unmount stress test.
 

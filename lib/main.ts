@@ -173,6 +173,7 @@ export type {
   ConstraintApi,
   ConstraintApiContext,
   ConstraintBody,
+  ConstraintLoad,
   ConstraintOptions,
 } from "@/Jolt/internal/useConstraint";
 export type {

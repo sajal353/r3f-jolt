@@ -15,6 +15,7 @@ const TIME_STEPS: { label: string; value: number | "vary" }[] = [
 const App = () => {
   const [sceneName, setSceneName] = useState(categories[0].scenes[0].name);
   const [debugOverride, setDebugOverride] = useState<boolean | null>(null);
+  const [debug, setDebug] = useState(false);
   const [paused, setPaused] = useState(false);
   const [interpolate, setInterpolate] = useState(true);
   const [stepOverride, setStepOverride] = useState<number | "vary" | null>(
@@ -69,6 +70,9 @@ const App = () => {
           >
             PhysicsDebug
           </button>
+          <button aria-pressed={debug} onClick={() => setDebug((v) => !v)}>
+            debug
+          </button>
           <button aria-pressed={paused} onClick={() => setPaused((v) => !v)}>
             {paused ? "paused" : "running"}
           </button>
@@ -118,6 +122,7 @@ const App = () => {
           <Physics
             key={sceneName}
             paused={paused}
+            debug={debug}
             interpolate={interpolate}
             timeStep={timeStep}
             updateLoop={scene.updateLoop}

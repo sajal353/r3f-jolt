@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import initJolt from "jolt-physics/wasm-compat";
 import type Jolt from "jolt-physics";
-import { joltContext } from "./context";
+import { joltContext, physicsDebugContext } from "./context";
 import { createActivationRegistry } from "./internal/activation";
 import { createConstraintRegistry } from "./internal/constraints";
 import { createContactRegistry } from "./internal/contacts";
@@ -51,8 +51,7 @@ export interface PhysicsProps {
   paused?: boolean;
   /**
    * Turns the per-hook `debug` flag on for every hook that does not set it.
-   * Each hook reads it once, at mount, so changing it rebuilds every body in
-   * the world — `<PhysicsDebug />` is the toggle to reach for at runtime.
+   * Live: changing it adds or removes their overlays without touching a body.
    */
   debug?: boolean;
   timeStep?: number | "vary";
@@ -126,8 +125,9 @@ export const Physics = ({
   init = defaultInit,
   settingsOverride,
 }: PhysicsProps) => {
-  const [world, setWorld] = useState<Omit<JoltApi, "debug"> | null>(null);
+  const [world, setWorld] = useState<JoltApi | null>(null);
   const accumulatorRef = useRef(0);
+  const debugRef = useRef(debug);
   const invalidate = useThree((state) => state.invalidate);
 
   // One mutable clock for the world, handed to every consumer by reference so a
@@ -334,6 +334,9 @@ export const Physics = ({
         temps,
         timing: timingRef.current,
         step: (delta?: number) => advanceRef.current(delta),
+        get debug() {
+          return debugRef.current;
+        },
         state,
       });
     };
@@ -378,6 +381,10 @@ export const Physics = ({
     }
   }, [timeStep, interpolate]);
 
+  useEffect(() => {
+    debugRef.current = debug;
+  }, [debug]);
+
   const [gravityX, gravityY, gravityZ] = gravity;
 
   useEffect(() => {
@@ -420,12 +427,13 @@ export const Physics = ({
     advance(delta);
   }, updatePriority);
 
-  const value = useMemo(
-    () => (world ? { ...world, debug } : null),
-    [world, debug],
+  if (!world) return null;
+
+  return (
+    <joltContext.Provider value={world}>
+      <physicsDebugContext.Provider value={debug}>
+        {children}
+      </physicsDebugContext.Provider>
+    </joltContext.Provider>
   );
-
-  if (!value) return null;
-
-  return <joltContext.Provider value={value}>{children}</joltContext.Provider>;
 };

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0
+
+### Constraints
+
+- `breakForce` (N) and `breakTorque` (N·m) on every constraint hook except `useFixedConstraint`, which Jolt gives no load readout for. The load is averaged over the last 1/30 s, so an impact breaks the same joint at any step rate. The joint switches itself off on the first step past the limit; `onBreak({ force, torque })` reports the load, and `setEnabled(true)` mends it. `ConstraintLoad` is exported.
+
+### Debug rendering
+
+- `<Physics debug>` is live. Toggling it adds and removes the per-hook overlays without touching a body; it used to rebuild every body in the world, and a joint in the same component as one of its bodies was then rebuilt against the destroyed body.
+- `api.debugMesh`, `debugGroup`, `debugMeshStanding` and `debugMeshCrouching` follow the toggle, and `JoltApi.debug` reads the current value.
+- A creation-time `scale` that is refused as invalid no longer scales the debug mesh.
+
+### Performance
+
+- A sleeping body is drawn at its exact resting pose and not read out of Jolt again until it wakes.
+
+### Demo
+
+- **Constraints › Breaking joints**, and a `debug` toolbar toggle for `<Physics debug>`.
+
 ## 0.3.0
 
 ### Breaking changes

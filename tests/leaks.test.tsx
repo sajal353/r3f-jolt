@@ -219,6 +219,43 @@ const DebuggedJoint = () => {
 };
 
 /**
+ * Every joint type that can break, half of them overloaded so they do. The
+ * load is read through `GetTotalLambda*` every step, and a returned `Vec3` or
+ * `Vector2` that was a fresh heap object rather than a shared temporary would
+ * show here.
+ */
+const BreakingJoints = () => {
+  const { anchor, hanging } = useJointedPair();
+
+  usePointConstraint(anchor, hanging, { point: [0, 5, 0], breakForce: 1 });
+  useHingeConstraint(anchor, hanging, {
+    point: [0, 5, 0],
+    hingeAxis: [0, 0, 1],
+    normalAxis: [1, 0, 0],
+    breakTorque: 1e6,
+  });
+  useSliderConstraint(anchor, hanging, {
+    point: [0, 5, 0],
+    sliderAxis: [1, 0, 0],
+    normalAxis: [0, 1, 0],
+    breakForce: 1e6,
+  });
+  useDistanceConstraint(anchor, hanging, {
+    point1: [0, 6, 0],
+    point2: [0, 5, 0],
+    breakForce: 1,
+  });
+  useConeConstraint(anchor, hanging, { point: [0, 5, 0], breakTorque: 1e6 });
+  useSwingTwistConstraint(anchor, hanging, {
+    position: [0, 5, 0],
+    breakTorque: 1,
+  });
+  useSixDOFConstraint(anchor, hanging, { breakForce: 1e6, breakTorque: 1e6 });
+
+  return null;
+};
+
+/**
  * Every query hook at once, each in a different mode, plus a few hundred calls
  * of each. Two different leaks are possible here and only one of them shows on
  * a mount cycle: the hand-rolled `*JS` broadphase collectors are torn down per
@@ -435,6 +472,12 @@ describe("mount/unmount leak checks", () => {
 
   it("all eight constraint hooks leave the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<Joints />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("joints watched for breaking leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<BreakingJoints />, 60);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });

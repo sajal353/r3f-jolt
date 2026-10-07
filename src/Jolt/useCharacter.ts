@@ -7,6 +7,12 @@ import {
   createDebugMaterial,
   disposeDebugMaterial,
 } from "./internal/debugMaterial";
+import {
+  createDebugView,
+  useDebugFlag,
+  useDebugView,
+  type DebugView,
+} from "./internal/debugView";
 import { shapeFromResult } from "./internal/useBody";
 import type { QuatTuple, Vec3Tuple } from "./types";
 
@@ -75,6 +81,11 @@ export interface CharacterApi {
   debugMeshCrouching: Mesh | null;
 }
 
+interface CharacterDebugMeshes {
+  standing: Mesh;
+  crouching: Mesh;
+}
+
 const mergeOptions = (
   overrides: Partial<CharacterShapeOptions> | undefined,
 ): CharacterShapeOptions => ({
@@ -94,6 +105,7 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     crouched: false,
   });
 
+  const debugViewRef = useRef<DebugView<CharacterDebugMeshes> | null>(null);
   const [characterApi, setCharacterApi] = useState<CharacterApi>();
 
   // Init-once, like the body hooks: snapshot at mount, rebuild with `key`.
@@ -106,14 +118,12 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       physicsSystem,
       layers,
       state,
-      debug: debugDefault,
     } = api;
 
     const {
       position,
       rotation = [0, 0, 0, 1],
       up = [0, 1, 0],
-      debug = debugDefault,
       mass = 1000,
       layer = layers.LAYER_MOVING,
     } = mount;
@@ -302,22 +312,30 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
 
     const tempVec3 = new jolt.Vec3();
 
-    let debugMeshStanding: Mesh | null = null;
-    let debugMeshCrouching: Mesh | null = null;
-
-    if (debug) {
-      debugMeshStanding = new Mesh(
+    const buildDebugMeshes = (): CharacterDebugMeshes => {
+      const standing = new Mesh(
         standingGeometry,
         createDebugMaterial("character"),
       );
-      debugMeshCrouching = new Mesh(
+      const crouching = new Mesh(
         crouchingGeometry,
         createDebugMaterial("character"),
       );
-      debugMeshCrouching.visible = false;
-      scene.add(debugMeshStanding);
-      scene.add(debugMeshCrouching);
-    }
+      standing.visible = !stateRef.current.crouched;
+      crouching.visible = stateRef.current.crouched;
+      scene.add(standing, crouching);
+      return { standing, crouching };
+    };
+
+    const releaseDebugMeshes = ({ standing, crouching }: CharacterDebugMeshes) => {
+      for (const mesh of [standing, crouching]) {
+        scene.remove(mesh);
+        disposeDebugMaterial(mesh);
+      }
+    };
+
+    const debugView = createDebugView(buildDebugMeshes, releaseDebugMeshes);
+    debugViewRef.current = debugView;
 
     const linearVelocity = new Vector3();
     const verticalVelocity = new Vector3();
@@ -353,8 +371,11 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
           joltInterface.GetTempAllocator(),
         );
 
-        if (debugMeshStanding) debugMeshStanding.visible = !crouched;
-        if (debugMeshCrouching) debugMeshCrouching.visible = crouched;
+        const debugMeshes = debugView.current;
+        if (debugMeshes) {
+          debugMeshes.standing.visible = !crouched;
+          debugMeshes.crouching.visible = crouched;
+        }
       }
 
       const moveSpeed = crouched
@@ -449,21 +470,23 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       );
     };
 
+    // Getters, because the overlay comes and goes with `<Physics debug>`
+    // while the api object itself must stay the same.
     setCharacterApi({
       character,
       update,
-      debugMeshStanding,
-      debugMeshCrouching,
+      get debugMeshStanding() {
+        return debugView.current?.standing ?? null;
+      },
+      get debugMeshCrouching() {
+        return debugView.current?.crouching ?? null;
+      },
     });
 
     return () => {
       setCharacterApi(undefined);
-
-      for (const mesh of [debugMeshStanding, debugMeshCrouching]) {
-        if (!mesh) continue;
-        scene.remove(mesh);
-        disposeDebugMaterial(mesh);
-      }
+      debugView.hide();
+      debugViewRef.current = null;
 
       standingGeometry.dispose();
       crouchingGeometry.dispose();
@@ -490,6 +513,9 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       jolt.destroy(broadPhaseFilter);
     };
   }, [api, mount, scene]);
+
+  const debug = useDebugFlag(mount.debug);
+  useDebugView(characterApi, debugViewRef, debug);
 
   useFrame(() => {
     if (!characterApi) return;

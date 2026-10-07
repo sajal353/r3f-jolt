@@ -96,6 +96,12 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 
 **Agreed scope:** active + passive ragdolls · auto-fit skeleton binding with per-bone overrides · water volumes with flow · soft bodies & cloth.
 
+### Carried over from 0.3.0
+
+- [x] `breakForce` / `breakTorque` + `onBreak` on the constraint hooks, read from Jolt's `GetTotalLambda*`. Ragdoll joints and destructible structures need it. **Amended:** not on `useFixedConstraint` — Jolt binds `FixedConstraintSettings` but no `FixedConstraint` class, so there is nothing to read the load from
+- [x] `<Physics debug>` live, without rebuilding the world
+- [x] Sleeping bodies skip the per-frame transform readback, as instanced bodies already did
+
 ### Skeleton bridge — `internal/skeleton.ts`
 
 The shared foundation for ragdolls _and_ skinned cloth. Its own module because both consume it.

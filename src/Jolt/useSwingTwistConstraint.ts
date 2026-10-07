@@ -6,6 +6,7 @@ import {
   type ConstraintBody,
   type ConstraintOptions,
 } from "./internal/useConstraint";
+import { readSwingTwistLoad } from "./internal/constraintLoad";
 import {
   applyMotor,
   resolveMotorState,
@@ -214,6 +215,7 @@ export const useSwingTwistConstraint = (
     {
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castSwingTwist,
+      load: readSwingTwistLoad,
       api: (context) => createSwingTwistApi(context, options),
     },
   );

@@ -72,6 +72,7 @@ export interface RenderOptions {
   timeStep?: number | "vary";
   interpolate?: boolean;
   paused?: boolean;
+  debug?: boolean;
   maxBodies?: number;
   physicsSettings?: PhysicsSettingsOptions;
   updateLoop?: "follow" | "independent";
@@ -93,6 +94,7 @@ const physicsTree = (
     timeStep,
     interpolate,
     paused,
+    debug,
     maxBodies,
     physicsSettings,
     updateLoop,
@@ -112,6 +114,7 @@ const physicsTree = (
       timeStep={timeStep}
       interpolate={interpolate}
       paused={paused}
+      debug={debug}
       maxBodies={maxBodies}
       physicsSettings={physicsSettings}
       updateLoop={updateLoop}
