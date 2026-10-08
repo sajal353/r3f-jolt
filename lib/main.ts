@@ -50,7 +50,15 @@ export {
   type CharacterApi,
   type CharacterShapeOptions,
   type CharacterUpdateOptions,
+  type CharacterShapes,
+  type CharacterActiveContact,
 } from "@/Jolt/useCharacter";
+export type {
+  CharacterContactHandlers,
+  CharacterBodyContact,
+  CharacterToCharacterContact,
+  CharacterContactVelocities,
+} from "@/Jolt/internal/characterContacts";
 
 export {
   useCar,

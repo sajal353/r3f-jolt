@@ -499,6 +499,8 @@ export const createContactRegistry = (
       };
     },
 
+    surfaceVelocityOf: (bodyID) => surfaceVelocities.get(bodyID),
+
     subscribe: (callback) => {
       storeSubscribers.add(callback);
       return () => storeSubscribers.delete(callback);

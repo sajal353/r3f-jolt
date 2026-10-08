@@ -646,7 +646,7 @@ Three things worth knowing:
 
 - **Friction does the dragging.** A belt with `friction: 0` carries nothing, and a light crate on a slow belt slips before it grips.
 - **Sleeping bodies report no contacts at all**, so a crate that dozed off on a stopped belt would never notice it start. `wake` handles this and is on by default; turn it off only if you are managing activation yourself.
-- **A `useCharacter` is not carried.** `CharacterVirtual` runs its own contact listener, and Jolt's character contact settings have no surface-velocity field to write.
+- **A `useCharacter` is carried too**, friction or not: it reads the belt as the ground's own velocity.
 
 ## Constraints
 
@@ -824,9 +824,20 @@ useFrame((_, delta) => {
 
 `update(direction, jump, crouched, deltaTime, options?)` — `direction` is a world-space `Vector3` and is **not** mutated. The trailing options are `{ ignoreHorizontalMovementLock?, addToVelocity?, overrideUpdate? }`.
 
-`options` is optional and deep-merged with the defaults. Alongside the movement settings it exposes `maxSlopeAngle`, `maxStrength`, `characterPadding`, `penetrationRecoverySpeed` and `predictiveContactDistance`. A non-vertical `up` is supported at the top level.
+`options` is optional and deep-merged with the defaults. Alongside the movement settings it exposes `maxSlopeAngle`, `maxStrength`, `characterPadding`, `penetrationRecoverySpeed`, `predictiveContactDistance` and `enhancedInternalEdgeRemoval` (stops catching on a triangle mesh's inner edges). A non-vertical `up` is supported at the top level.
 
 The character's position is its **feet**, so a settled character on a floor whose top face is `y = 0` reports `y ≈ 0`. The shape is swapped only when the crouch state actually changes, and debug meshes track the character every frame whether or not you call `update`.
+
+Top-level options, all init-once:
+
+- `shape: { standing, crouching? }` replaces the capsules with compound children placed from the feet (the same children `useCompound` takes).
+- `innerBody: true | { standing, crouching? }` adds a kinematic body that follows the character, so raycasts, sensors and the solver see it. Without it a `CharacterVirtual` is invisible to the rest of the world. `innerBodyLayer` and `innerBodyIDOverride` set its layer and a fixed body ID.
+- `collideWithCharacters` (on by default) adds the character to the world's character-vs-character registry, so characters block each other.
+- `userData` is what the character reports itself as in other characters' contacts.
+
+The api adds `characterID`, `innerBodyID`, `hasCollidedWith(bodyID)`, `hasCollidedWithCharacter(api | characterID)` and `getActiveContacts(target?)`, which fills plain objects instead of allocating each call.
+
+All eleven `CharacterContactListener` callbacks are options and stay live: `onContactValidate`, `onCharacterContactValidate`, `onContactAdded`, `onContactPersisted`, `onContactRemoved`, `onCharacterContactAdded`, `onCharacterContactPersisted`, `onCharacterContactRemoved`, `onContactSolve`, `onCharacterContactSolve` and `onAdjustBodyVelocity`. They run synchronously inside `update`, and the contact object passed to them is reused: copy what you keep. Normals point from the character towards what it touches. Belts from `useConveyor` carry a character.
 
 ## Ragdolls
 
@@ -1230,7 +1241,7 @@ pnpm install
 pnpm dev
 ```
 
-63 scenes in seven categories, one per hook or feature:
+64 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
@@ -1240,7 +1251,7 @@ pnpm dev
 | **Constraints**  | all 8 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
-| **Systems**      | character · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
+| **Systems**      | character · character contacts · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
 
 Toolbar toggles for `<PhysicsDebug />`, `<Physics debug>`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 

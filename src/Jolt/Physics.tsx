@@ -224,6 +224,7 @@ export const Physics = ({
       constraints: ReturnType<typeof createConstraintRegistry>;
       steps: ReturnType<typeof createStepRegistry>;
       temps: Temps;
+      characters: Jolt.CharacterVsCharacterCollisionSimple;
       state: { disposed: boolean; destroyed: boolean };
     } | null = null;
 
@@ -285,6 +286,7 @@ export const Physics = ({
       const constraints = createConstraintRegistry();
       const steps = createStepRegistry();
       const temps = createTemps(jolt);
+      const characters = new jolt.CharacterVsCharacterCollisionSimple();
 
       const objectLayer = (group: number, mask: number) =>
         jolt.ObjectLayerPairFilterMask.prototype.sGetObjectLayer(group, mask);
@@ -297,6 +299,7 @@ export const Physics = ({
         constraints,
         steps,
         temps,
+        characters,
         state,
       };
 
@@ -308,6 +311,7 @@ export const Physics = ({
         constraints.destroy();
         steps.destroy();
         temps.destroy();
+        jolt.destroy(characters);
         jolt.destroy(joltInterface);
         created = null;
         return;
@@ -332,6 +336,7 @@ export const Physics = ({
         constraints,
         steps,
         temps,
+        characters,
         timing: timingRef.current,
         step: (delta?: number) => advanceRef.current(delta),
         get debug() {
@@ -359,6 +364,7 @@ export const Physics = ({
           world.constraints.destroy();
           world.steps.destroy();
           world.temps.destroy();
+          world.jolt.destroy(world.characters);
           world.jolt.destroy(world.joltInterface);
         });
       }

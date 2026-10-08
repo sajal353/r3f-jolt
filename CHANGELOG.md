@@ -8,6 +8,14 @@
 - `useRagdoll(model, options)`: modes `passive`, `hardKeying`, `softKeying` and `motors`, switched at runtime with `setMode` on the same bodies; `kinematicBones` for a partial ragdoll; `mixer` for the animation to follow; `keyingFrequency`, `keyingDamping`, `motorStrength`, `motorTorque`, plus layer, group, mask and material options. The api has `bodyOf`, `boneOf`, `applyImpulse`, the velocity setters, `getRootTransform`, `bounds`, `setPose`, `blendToAnimation`, `setKinematicBones`, `activate`, `isActive`, `resetWarmStart`.
 - `selectRagdollBones`, `classifyBone`, `NON_PHYSICAL_BONES` and the config types are exported.
 
+### Characters
+
+- `useCharacter` options `shape` (compound children instead of the capsules), `innerBody` with `innerBodyLayer` and `innerBodyIDOverride`, `collideWithCharacters` (on by default), `userData`, and `options.enhancedInternalEdgeRemoval`.
+- All eleven `CharacterContactListener` callbacks as options: `onContactValidate`, `onCharacterContactValidate`, `onContactAdded`, `onContactPersisted`, `onContactRemoved`, `onCharacterContactAdded`, `onCharacterContactPersisted`, `onCharacterContactRemoved`, `onContactSolve`, `onCharacterContactSolve`, `onAdjustBodyVelocity`.
+- The api adds `characterID`, `innerBodyID`, `hasCollidedWith`, `hasCollidedWithCharacter` and `getActiveContacts`.
+- Characters block each other through one `CharacterVsCharacterCollisionSimple` per world, `JoltApi.characters`.
+- `useConveyor` belts carry characters.
+
 ### Constraints
 
 - `breakForce` (N) and `breakTorque` (N·m) on every constraint hook except `useFixedConstraint`, which Jolt gives no load readout for. The load is averaged over the last 1/30 s, so an impact breaks the same joint at any step rate. The joint switches itself off on the first step past the limit; `onBreak({ force, torque })` reports the load, and `setEnabled(true)` mends it. `ConstraintLoad` is exported.
@@ -26,10 +34,12 @@
 
 - `useSwingTwistConstraint`: the `normalHalfConeAngle` and `planeHalfConeAngle` docs had the two swapped. `normalHalfConeAngle` limits rotation about the plane axis.
 - A compound child's `rotation` is normalized before Jolt sees it.
+- `useCharacter` puts its weight on what it stands on. It passed its up vector where Jolt takes gravity, so a body under it felt nothing.
 
 ### Demo
 
 - **Constraints › Breaking joints**, and a `debug` toolbar toggle for `<Physics debug>`.
+- **Systems › Character contacts**: an inner body, characters that block each other, a belt and a turntable, and the contact callbacks.
 - **Systems › Ragdoll**, **Systems › Ragdoll character** (a `useCharacter` runner with jump and fall animations that goes limp on `R` or a fast fall, and gets up with a face-up or face-down get-up clip) and **Systems › Ragdoll fit**, on a Quaternius mannequin (CC0) with two Mixamo get-up clips.
 
 ## 0.3.0

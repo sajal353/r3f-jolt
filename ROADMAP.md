@@ -153,19 +153,19 @@ The shared foundation for ragdolls _and_ skinned cloth. Its own module because b
 
 ### Character upgrades
 
-- [ ] **Inner rigid body** — `mInnerBodyShape` / `SetInnerBodyShape` / `GetInnerBodyID`. `CharacterVirtual` has no body in the simulation, so today other bodies pass straight through it. An inner body fixes that, and is the answer to the most common complaint about virtual characters
-- [ ] `mInnerBodyIDOverride` — pin the inner body's ID, which exists specifically to keep client/server simulations deterministic
-- [ ] `mEnhancedInternalEdgeRemoval` on the character — stops the character catching on internal edges of triangle-mesh terrain
-- [ ] Compound shapes as the character shape (jolt 0.37.0), not just a capsule — for non-humanoid or asymmetric characters
-- [ ] `CharacterID` exposed, so a character stays identifiable after removal and character-vs-character collisions resolve deterministically
-- [ ] `HasCollidedWith` / `HasCollidedWithCharacter` / `GetActiveContacts` on the returned api
-- [ ] Full `CharacterContactListener` callback set — the current hook wires only `OnAdjustBodyVelocity`, `OnContactValidate`, `OnContactAdded` and `OnContactSolve`; jolt 0.32.0 added `OnContactPersisted`, `OnContactRemoved` and the four `OnCharacterContact*` variants
-- [ ] Carry a character on a conveyor belt. `CharacterContactSettings` has no surface-velocity field, so 0.3.0's `useConveyor` does not reach characters; the route is `OnContactSolve`'s `ioNewCharacterVelocity`
+- [x] **Inner rigid body** — `mInnerBodyShape` / `SetInnerBodyShape` / `GetInnerBodyID`. `CharacterVirtual` has no body in the simulation, so today other bodies pass straight through it. An inner body fixes that, and is the answer to the most common complaint about virtual characters
+- [x] `mInnerBodyIDOverride` — pin the inner body's ID, which exists specifically to keep client/server simulations deterministic
+- [x] `mEnhancedInternalEdgeRemoval` on the character — stops the character catching on internal edges of triangle-mesh terrain
+- [x] Compound shapes as the character shape (jolt 0.37.0), not just a capsule — for non-humanoid or asymmetric characters
+- [x] `CharacterID` exposed, so a character stays identifiable after removal and character-vs-character collisions resolve deterministically. Read-only: `CharacterID` cannot be built with a chosen value, so setting one is left for the determinism work
+- [x] `HasCollidedWith` / `HasCollidedWithCharacter` / `GetActiveContacts` on the returned api
+- [x] Full `CharacterContactListener` callback set — the current hook wires only `OnAdjustBodyVelocity`, `OnContactValidate`, `OnContactAdded` and `OnContactSolve`; jolt 0.32.0 added `OnContactPersisted`, `OnContactRemoved` and the four `OnCharacterContact*` variants
+- [x] Carry a character on a conveyor belt. `CharacterContactSettings` has no surface-velocity field, so 0.3.0's `useConveyor` does not reach characters. Done through `OnAdjustBodyVelocity` rather than `OnContactSolve`, as Jolt's own character sample does: the belt becomes the ground's velocity
 
 ### Character-vs-character collision
 
-- [ ] `CharacterVsCharacterCollisionSimple` registry on `Physics`; `Add`/`Remove` as `useCharacter` instances mount and unmount, so characters stop walking through each other (multiplayer / crowds)
-- [ ] `SetCharacterVsCharacterCollision` wired in `useCharacter`
+- [x] `CharacterVsCharacterCollisionSimple` registry on `Physics`; `Add`/`Remove` as `useCharacter` instances mount and unmount, so characters stop walking through each other (multiplayer / crowds)
+- [x] `SetCharacterVsCharacterCollision` wired in `useCharacter`
 
 ### Water volumes with flow
 

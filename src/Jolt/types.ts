@@ -202,6 +202,7 @@ export interface ContactRegistry {
     bodyID: number,
     source: SurfaceVelocity,
   ) => SurfaceVelocityHandle;
+  surfaceVelocityOf: (bodyID: number) => SurfaceVelocity | undefined;
   subscribe: (callback: () => void) => () => void;
   getSnapshot: () => number;
   flush: () => void;
@@ -246,6 +247,11 @@ export interface JoltApi {
   constraints: ConstraintRegistry;
   steps: StepRegistry;
   temps: Temps;
+  /**
+   * Every `useCharacter` with `collideWithCharacters` adds itself here, so the
+   * characters in one world block each other.
+   */
+  characters: Jolt.CharacterVsCharacterCollisionSimple;
   timing: PhysicsTiming;
   /**
    * Advances the world by hand: the same accumulator, step callbacks and event

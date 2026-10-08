@@ -189,3 +189,13 @@ export const useBeam = (color: ColorRepresentation): Beam => {
 
   return beam;
 };
+
+/** Turn the short way round, so reversing spins rather than snapping. */
+export const turnTowards = (current: number, target: number, delta: number) => {
+  const difference =
+    ((((target - current) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2)) -
+    Math.PI;
+
+  return current + difference * Math.min(1, delta * 12);
+};
+

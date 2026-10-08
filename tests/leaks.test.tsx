@@ -85,6 +85,59 @@ const CrouchingCharacter = () => {
   return null;
 };
 
+/** Inner bodies, a compound, both crouch shapes, the registry and every handler, on a belt. */
+const UpgradedCharacters = () => {
+  const [, belt] = useBox({
+    size: [10, 0.2, 10],
+    position: [0, 0.1, 0],
+    motionType: "static",
+  });
+  useConveyor(belt, { linear: [1, 0, 0] });
+
+  const noop = () => {};
+  const [first] = useCharacter({
+    position: [0, 1, 0],
+    innerBody: true,
+    onContactAdded: noop,
+    onContactPersisted: noop,
+    onContactRemoved: noop,
+    onCharacterContactAdded: noop,
+    onCharacterContactPersisted: noop,
+    onCharacterContactRemoved: noop,
+    onContactSolve: noop,
+    onCharacterContactSolve: noop,
+    onAdjustBodyVelocity: noop,
+    onContactValidate: () => true,
+    onCharacterContactValidate: () => true,
+  });
+  const [second] = useCharacter({
+    position: [1.5, 1, 0],
+    innerBody: {
+      standing: [{ type: "sphere", position: [0, 0.5, 0], radius: 0.4 }],
+    },
+    shape: {
+      standing: [
+        { type: "box", position: [0, 0.4, 0], size: [0.8, 0.8, 0.8] },
+        { type: "sphere", position: [0, 1.1, 0], radius: 0.3 },
+      ],
+      crouching: [{ type: "box", position: [0, 0.3, 0], size: [0.8, 0.6, 0.8] }],
+    },
+    options: { enhancedInternalEdgeRemoval: true },
+  });
+  const frame = useRef(0);
+  const contacts = useRef([]);
+
+  useFrame((_, delta) => {
+    frame.current += 1;
+    const crouched = frame.current % 20 < 10;
+    first?.update(direction, false, crouched, delta);
+    second?.update(direction.clone().negate(), false, crouched, delta);
+    first?.getActiveContacts(contacts.current);
+  });
+
+  return null;
+};
+
 const Car = () => {
   const [api] = useCar({
     position: [0, 2, 0],
@@ -488,6 +541,12 @@ describe("mount/unmount leak checks", () => {
 
   it("useCharacter crouch toggling does not leak", async () => {
     const { baseline, after } = await cycles(<CrouchingCharacter />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useCharacter upgrades leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<UpgradedCharacters />, 60);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });

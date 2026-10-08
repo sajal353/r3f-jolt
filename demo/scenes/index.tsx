@@ -58,6 +58,7 @@ import { SensorVolumes } from "./events/SensorVolumes";
 import { ContactForce } from "./events/ContactForce";
 
 import { Character } from "./systems/Character";
+import { CharacterContacts } from "./systems/CharacterContacts";
 import { Car } from "./systems/Car";
 import { RagdollScene } from "./systems/Ragdoll";
 import { RagdollFitScene } from "./systems/RagdollFit";
@@ -770,6 +771,21 @@ export const categories: Category[] = [
             <code>maxSlopeAngle</code> and red ones are past it — the readout
             says which the character is on. It also climbs stairs, shoves
             crates, and rides the platform. Its position is its <b>feet</b>.
+          </>
+        ),
+      },
+      {
+        name: "Character contacts",
+        Component: CharacterContacts,
+        hook: "useCharacter",
+        hint: (
+          <>
+            <code>WASD</code> to move, <code>Space</code> to jump. The grey
+            characters block you and turn orange while you touch them (
+            <code>onCharacterContactAdded</code>). The belt and turntable carry
+            you through <code>useConveyor</code>. Balls land on your{" "}
+            <code>innerBody</code>, and the readout lists what the contact
+            callbacks say you touch.
           </>
         ),
       },
