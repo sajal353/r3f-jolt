@@ -106,50 +106,50 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 
 The shared foundation for ragdolls _and_ skinned cloth. Its own module because both consume it.
 
-- [ ] Build a `Jolt.Skeleton` from a three.js `SkinnedMesh` bone hierarchy via `AddJoint(new Jolt.JPHString(name, len), parentIndex)`
-- [ ] Topologically sort bones parent-before-child — `Skeleton.AreJointsCorrectlyOrdered()` requires it and three.js `skeleton.bones` order is not guaranteed. Assert with it after building, or ragdolls break on some rigs and not others
-- [ ] Call `CalculateParentJointIndices()`
-- [ ] Maintain a stable bone-name → joint-index map, exposed for overrides and debugging
-- [ ] Derive a **low-detail ragdoll skeleton** from a bone subset — production ragdolls use ~15 bodies for a 100+ bone rig. Fewer bodies is both faster and more stable, and twist/IK/helper bones must never become bodies
-- [ ] Two-way mapper between the full animation skeleton and the ragdoll skeleton. Upstream C++ has `SkeletonMapper`; **it is not bound in JS**, so this is ours to write
-- [ ] Map both directions every frame: animation → ragdoll to drive it, ragdoll → animation to render the simulated result on the full-detail rig
-- [ ] `PhysicsSystem.SetSimShapeFilter` — lets one body carry a cheap simulation shape and a detailed query shape, filtering collisions between sub-shapes of the same body. Same problem the low-detail ragdoll solves, so design the two together rather than having them fight
-- [ ] `SkeletalAnimation.SetIsLooping` / `IsLooping` for the driving animation
-- [ ] `SkeletonPose` setup: `SetSkeleton`, `SetRootOffset`, per-joint `GetJoint(i)` → `SkeletalAnimationJointState` write of translation + rotation, then `CalculateJointMatrices()`
-- [ ] **Jolt pose → three.js bones**: `GetJointMatrices()` yields _model-space_ `Mat44`; three.js bones need local matrices. Convert by composing with the parent's inverse, accounting for `skeleton.boneInverses` (bind pose). **This is the riskiest code in the phase** — get it subtly wrong and characters look _almost_ right, the worst failure mode. Unit-test the round-trip against a known rig before building anything on it
-- [ ] **three.js bones → Jolt pose** (for `DriveToPoseUsingMotors`): read animated bone world matrices into joint states, then `CalculateJointStates()`
-- [ ] Allocation-free: `Mat44MemRef` heap views + reusable scratch `Matrix4`/`Quaternion`; this runs every frame per ragdoll
-- [ ] Handle non-uniform bone scale, and warn rather than silently producing wrong colliders
+- [x] Build a `Jolt.Skeleton` from a three.js `SkinnedMesh` bone hierarchy via `AddJoint(new Jolt.JPHString(name, len), parentIndex)`
+- [x] Topologically sort bones parent-before-child — `Skeleton.AreJointsCorrectlyOrdered()` requires it and three.js `skeleton.bones` order is not guaranteed. Assert with it after building, or ragdolls break on some rigs and not others
+- [x] Call `CalculateParentJointIndices()`
+- [x] Maintain a stable bone-name → joint-index map, exposed for overrides and debugging
+- [x] Derive a **low-detail ragdoll skeleton** from a bone subset — production ragdolls use ~15 bodies for a 100+ bone rig. Fewer bodies is both faster and more stable, and twist/IK/helper bones must never become bodies
+- [x] Two-way mapper between the full animation skeleton and the ragdoll skeleton. Upstream C++ has `SkeletonMapper`; **it is not bound in JS**, so this is ours to write
+- [x] Map both directions every frame: animation → ragdoll to drive it, ragdoll → animation to render the simulated result on the full-detail rig
+- [ ] `PhysicsSystem.SetSimShapeFilter` — lets one body carry a cheap simulation shape and a detailed query shape, filtering collisions between sub-shapes of the same body. Same problem the low-detail ragdoll solves, so design the two together rather than having them fight **Amended:** not wrapped. Measured with 8 piled ragdolls on the release build: a no-op `SimShapeFilterJS` runs 373 times a step at about 0.45 µs each, +4–7% on a 2.6 ms step — affordable, but the low-detail ragdoll already keeps simulation shapes cheap, so nothing here needs it. Reachable through `useJolt().physicsSystem`
+- [ ] `SkeletalAnimation.SetIsLooping` / `IsLooping` for the driving animation. **Amended:** the driving animation is a three.js `AnimationMixer` and the bridge reads the posed bones, so no Jolt animation is sampled; looping is the `AnimationAction`'s `loop`
+- [x] `SkeletonPose` setup: `SetSkeleton`, `SetRootOffset`, per-joint `GetJoint(i)` → `SkeletalAnimationJointState` write of translation + rotation, then `CalculateJointMatrices()`. **Amended:** `SetSkeleton` and `SetRootOffset` are in place; the bridge writes joint matrices and derives the states with `CalculateJointStates()`, and the get-up blends in world space, so no local-state write is needed
+- [x] **Jolt pose → three.js bones**: `GetJointMatrices()` yields _model-space_ `Mat44`; three.js bones need local matrices. Convert by composing with the parent's inverse, accounting for `skeleton.boneInverses` (bind pose). **This is the riskiest code in the phase** — get it subtly wrong and characters look _almost_ right, the worst failure mode. Unit-test the round-trip against a known rig before building anything on it
+- [x] **three.js bones → Jolt pose** (for `DriveToPoseUsingMotors`): read animated bone world matrices into joint states, then `CalculateJointStates()`
+- [x] Allocation-free: `Mat44MemRef` heap views + reusable scratch `Matrix4`/`Quaternion`; this runs every frame per ragdoll
+- [x] Handle non-uniform bone scale, and warn rather than silently producing wrong colliders
 
 ### `useRagdoll` — passive + active
 
-- [ ] Build `RagdollSettings`: `mSkeleton`, `mParts` (`ArrayRagdollPart`: a `BodyCreationSettings` + constraint settings per bone), `mAdditionalConstraints`
-- [ ] Call the required setup **in order**: `Stabilize()`, `DisableParentChildCollisions()`, `CalculateBodyIndexToConstraintIndex()`, `CalculateConstraintIndexToBodyIdxPair()`, `CalculateConstraintPriorities()` — skipping any of these produces a jittering or exploding ragdoll
-- [ ] `CreateRagdoll(collisionGroup, userData, physicsSystem)` → `Ragdoll`
-- [ ] Self-collision control via `GroupFilterTable(numGroups)` + `DisableCollision(sub1, sub2)` for adjacent bones, and a `CollisionGroup(filter, groupID, subGroupID)` per part
-- [ ] Lifecycle through the 0.3.0 shared constraint/body helper: `AddToPhysicsSystem` on mount, `RemoveFromPhysicsSystem` + destroy on unmount, `disposed`-aware. A ragdoll is one body **and** one constraint per ragdoll part, so the `useCar` leak class costs dozens of leaked objects per instance here rather than a handful
-- [ ] Mode `"passive"` — free simulation; drive the `SkinnedMesh` from `GetPose()`
-- [ ] Mode `"hardKeying"` — kinematic bodies via `DriveToPoseUsingKinematics(pose, deltaTime)`: animation wins, physics only reacts to the environment. Cheapest and most stable
-- [ ] Mode `"softKeying"` — velocities set on **dynamic** bodies to chase the target pose, so the ragdoll can be pushed off its animation (hard keying cannot be)
-- [ ] Mode `"motors"` — `DriveToPoseUsingMotors(prevPose, pose, deltaTime)`: true active ragdoll for hit reactions
-- [ ] Partial ragdoll: per-bone `dynamic | kinematic` so an arm goes limp while the body keeps animating
-- [ ] Blend back to animation (get-up): capture the ragdoll pose, crossfade toward the animation pose over N frames, then hand control back
-- [ ] `ResetWarmStart()` after teleporting or a pose snap
-- [ ] api: `applyImpulse`, `setLinearVelocity` / `setLinearAndAngularVelocity`, `getRootTransform`, `bodies`, `constraints`, `bounds` (`GetWorldSpaceBounds`), `activate`, `isActive`
-- [ ] Debug view of ragdoll bodies + constraint frames, hooked into `<PhysicsDebug />`
+- [x] Build `RagdollSettings`: `mSkeleton`, `mParts` (`ArrayRagdollPart`: a `BodyCreationSettings` + constraint settings per bone), `mAdditionalConstraints` **Amended:** `mAdditionalConstraints` stays empty: a skeleton is a tree, so every joint is a part's `mToParent`
+- [x] Call the required setup **in order**: `Stabilize()`, `DisableParentChildCollisions()`, `CalculateBodyIndexToConstraintIndex()`, `CalculateConstraintIndexToBodyIdxPair()`, `CalculateConstraintPriorities()` — skipping any of these produces a jittering or exploding ragdoll
+- [x] `CreateRagdoll(collisionGroup, userData, physicsSystem)` → `Ragdoll`
+- [x] Self-collision control via `GroupFilterTable(numGroups)` + `DisableCollision(sub1, sub2)` for adjacent bones, and a `CollisionGroup(filter, groupID, subGroupID)` per part **Amended:** `DisableParentChildCollisions(jointMatrices, 0.05)` builds the `GroupFilterTable` and the per-part `CollisionGroup`s itself, and also parts that overlap at rest; `useGroupFilterTable` is not involved. Each ragdoll gets its own group ID, so two ragdolls collide
+- [x] Lifecycle through the 0.3.0 shared constraint/body helper: `AddToPhysicsSystem` on mount, `RemoveFromPhysicsSystem` + destroy on unmount, `disposed`-aware. A ragdoll is one body **and** one constraint per ragdoll part, so the `useCar` leak class costs dozens of leaked objects per instance here rather than a handful **Amended:** its own effect in `useRagdoll` rather than the shared helper, which takes one body or one constraint; the leak test covers every mode and the get-up
+- [x] Mode `"passive"` — free simulation; drive the `SkinnedMesh` from `GetPose()` **Amended:** the bones are drawn from the interpolated bodies rather than `GetPose()`, so ragdolls interpolate like every other body
+- [x] Mode `"hardKeying"` — kinematic bodies via `DriveToPoseUsingKinematics(pose, deltaTime)`: animation wins, physics only reacts to the environment. Cheapest and most stable
+- [x] Mode `"softKeying"` — velocities set on **dynamic** bodies to chase the target pose, so the ragdoll can be pushed off its animation (hard keying cannot be) **Amended:** a critically damped spring on each body's velocity, integrated implicitly and with gravity cancelled, rather than setting it — setting it erased every shove on the next step
+- [x] Mode `"motors"` — `DriveToPoseUsingMotors(prevPose, pose, deltaTime)`: true active ragdoll for hit reactions **Amended:** the one-pose `DriveToPoseUsingMotors(pose)`. Motor springs are stiffness-based and sized per joint by what hangs off it: a frequency spring is sized by the child body alone, and a spine joint holding up the chest, head and arms sagged until gravity balanced it
+- [x] Partial ragdoll: per-bone `dynamic | kinematic` so an arm goes limp while the body keeps animating **Amended:** `kinematicBones`, in every mode but `passive`
+- [x] Blend back to animation (get-up): capture the ragdoll pose, crossfade toward the animation pose over N frames, then hand control back **Amended:** in world space over `seconds` of step time, the parts kinematic throughout
+- [x] `ResetWarmStart()` after teleporting or a pose snap
+- [x] api: `applyImpulse`, `setLinearVelocity` / `setLinearAndAngularVelocity`, `getRootTransform`, `bodies`, `constraints`, `bounds` (`GetWorldSpaceBounds`), `activate`, `isActive`
+- [x] Debug view of ragdoll bodies + constraint frames, hooked into `<PhysicsDebug />`
 
 ### `useCharacterModel` — auto-fit binding with per-bone overrides
 
-- [ ] Cluster skinned vertices per bone from the `skinIndex`/`skinWeight` attributes (weight-thresholded)
-- [ ] Fit a capsule per bone in bone-local space from that point cloud: radius from a distance percentile (not the max — outliers ruin it), half-height from the extent along the bone→child axis
-- [ ] Box or convex fit as an opt-in alternative for hands, feet and hips
-- [ ] Mass distribution from anthropometric ratios keyed off bone-name heuristics, total normalized to a `mass` prop
-- [ ] Default joint limits per bone class using `SwingTwistConstraintSettings` — shoulders/hips wide cone, elbows/knees narrow with near-zero twist, spine limited
-- [ ] Overrides API: `{ [boneName]: { shape, mass, constraint, exclude } }`
-- [ ] Exclude non-physical bones (twist/IK/helper) by default via name patterns; log what was excluded
-- [ ] Use `boneInverses` so fitting happens in bind pose, not whatever pose the mesh currently holds
-- [ ] Debug overlay of the fitted colliders on the mesh — the primary tuning tool, so build it early
-- [ ] Escape hatch: dump the generated config as JSON so a rig can be tuned once and committed
+- [x] Cluster skinned vertices per bone from the `skinIndex`/`skinWeight` attributes (weight-thresholded)
+- [x] Fit a capsule per bone in bone-local space from that point cloud: radius from a distance percentile (not the max — outliers ruin it), half-height from the extent along the bone→child axis **Amended:** pelvis and spine default to boxes: a torso segment is as wide as it is tall, so its capsule rounded up to a sphere as deep as the chest is wide
+- [x] Box or convex fit as an opt-in alternative for hands, feet and hips
+- [x] Mass distribution from anthropometric ratios keyed off bone-name heuristics, total normalized to a `mass` prop
+- [x] Default joint limits per bone class using `SwingTwistConstraintSettings` — shoulders/hips wide cone, elbows/knees narrow with near-zero twist, spine limited **Amended:** knees and elbows are one-way: the parent's twist axis is turned by half the range, so the symmetric cone covers 0…range in the direction the joint bends
+- [x] Overrides API: `{ [boneName]: { shape, mass, constraint, exclude } }` **Amended:** the key is `joint`, not `constraint`
+- [x] Exclude non-physical bones (twist/IK/helper) by default via name patterns; log what was excluded **Amended:** logged when the fit overlay is shown, and always listed in `model.excluded`
+- [x] Use `boneInverses` so fitting happens in bind pose, not whatever pose the mesh currently holds
+- [x] Debug overlay of the fitted colliders on the mesh — the primary tuning tool, so build it early
+- [x] Escape hatch: dump the generated config as JSON so a rig can be tuned once and committed
 
 ### Character upgrades
 
@@ -199,15 +199,15 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 
 ### Verification
 
-- [ ] Unit test the skeleton bridge round-trip: three.js bones → `SkeletonPose` → back to bones reproduces the original pose within epsilon
-- [ ] Test `AreJointsCorrectlyOrdered()` passes for a bone hierarchy deliberately supplied out of order
-- [ ] Test a ragdoll mount/unmount cycle returns `GetNumBodies()` **and** constraint count to baseline, `sGetFreeMemory` flat over N cycles
-- [ ] Test ragdoll self-collision: adjacent bones do not push each other apart at rest
+- [x] Unit test the skeleton bridge round-trip: three.js bones → `SkeletonPose` → back to bones reproduces the original pose within epsilon
+- [x] Test `AreJointsCorrectlyOrdered()` passes for a bone hierarchy deliberately supplied out of order
+- [x] Test a ragdoll mount/unmount cycle returns `GetNumBodies()` **and** constraint count to baseline, `sGetFreeMemory` flat over N cycles
+- [x] Test ragdoll self-collision: adjacent bones do not push each other apart at rest
 - [ ] Test buoyancy runs per sub-step (a body bobs identically at a 30 Hz and a 120 Hz fixed step)
 - [ ] Test water enter/exit events fire once per crossing, not per frame
 - [ ] Test soft-body vertex readback allocates nothing across N frames
-- [ ] Demo: ragdoll scene with a real glTF character — passive flop, hit reaction via motors, get-up blend
-- [ ] Demo: auto-fit collider debug overlay on that character
+- [x] Demo: ragdoll scene with a real glTF character — passive flop, hit reaction via motors, get-up blend
+- [x] Demo: auto-fit collider debug overlay on that character
 - [ ] Demo: pool with a current, floating crates, swimming character
 - [ ] Demo: cape skinned to the character (shares the skeleton bridge's joint matrices)
 

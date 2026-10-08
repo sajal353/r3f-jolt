@@ -2,6 +2,12 @@
 
 ## 0.4.0
 
+### Ragdolls
+
+- `useCharacterModel(object, options)` fits a ragdoll to a skinned character from its skin in the bind pose: bones picked by name, capsules on limbs and head, boxes on the torso, anthropometric masses, swing-twist limits by bone kind with one-way knees and elbows. Options `mass`, `bones`, `exclude`, `overrides`, `minWeight`, `radiusPercentile`, `config`, `debug` (the fit drawn on the bones). Returns `{ mesh, meshes, config, excluded, toJSON }`.
+- `useRagdoll(model, options)`: modes `passive`, `hardKeying`, `softKeying` and `motors`, switched at runtime with `setMode` on the same bodies; `kinematicBones` for a partial ragdoll; `mixer` for the animation to follow; `keyingFrequency`, `keyingDamping`, `motorStrength`, `motorTorque`, plus layer, group, mask and material options. The api has `bodyOf`, `boneOf`, `applyImpulse`, the velocity setters, `getRootTransform`, `bounds`, `setPose`, `blendToAnimation`, `setKinematicBones`, `activate`, `isActive`, `resetWarmStart`.
+- `selectRagdollBones`, `classifyBone`, `NON_PHYSICAL_BONES` and the config types are exported.
+
 ### Constraints
 
 - `breakForce` (N) and `breakTorque` (N·m) on every constraint hook except `useFixedConstraint`, which Jolt gives no load readout for. The load is averaged over the last 1/30 s, so an impact breaks the same joint at any step rate. The joint switches itself off on the first step past the limit; `onBreak({ force, torque })` reports the load, and `setEnabled(true)` mends it. `ConstraintLoad` is exported.
@@ -16,9 +22,15 @@
 
 - A sleeping body is drawn at its exact resting pose and not read out of Jolt again until it wakes.
 
+### Fixes
+
+- `useSwingTwistConstraint`: the `normalHalfConeAngle` and `planeHalfConeAngle` docs had the two swapped. `normalHalfConeAngle` limits rotation about the plane axis.
+- A compound child's `rotation` is normalized before Jolt sees it.
+
 ### Demo
 
 - **Constraints › Breaking joints**, and a `debug` toolbar toggle for `<Physics debug>`.
+- **Systems › Ragdoll**, **Systems › Ragdoll character** (a `useCharacter` runner with jump and fall animations that goes limp on `R` or a fast fall, and gets up with a face-up or face-down get-up clip) and **Systems › Ragdoll fit**, on a Quaternius mannequin (CC0) with two Mixamo get-up clips.
 
 ## 0.3.0
 

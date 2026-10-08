@@ -5,7 +5,9 @@ import {
   BoxGeometry,
   SphereGeometry,
   Vector3,
+  type AnimationMixer,
   type BufferGeometry,
+  type Object3D,
 } from "three";
 import { useFrame } from "@react-three/fiber";
 import { useCar } from "@/Jolt/useCar";
@@ -30,6 +32,8 @@ import { useGroupFilterTable } from "@/Jolt/useGroupFilterTable";
 import { useBodyContacts } from "@/Jolt/useBodyContacts";
 import { useInstancedBodies } from "@/Jolt/useInstancedBodies";
 import { useAutoCollider } from "@/Jolt/useAutoCollider";
+import { useCharacterModel } from "@/Jolt/useCharacterModel";
+import { useRagdoll, type RagdollMode } from "@/Jolt/useRagdoll";
 import {
   addBodies,
   destroyBodies,
@@ -46,6 +50,7 @@ import {
   step,
   unmount,
 } from "./harness";
+import { loadMannequin, playAt } from "./mannequin";
 
 const Ground = () => {
   useBox({ size: [50, 1, 50], position: [0, -0.5, 0], motionType: "static" });
@@ -420,6 +425,35 @@ const AutoCollider = ({
   );
 };
 
+const RAGDOLL_MODES: RagdollMode[] = [
+  "hardKeying",
+  "softKeying",
+  "motors",
+  "passive",
+];
+
+/**
+ * Every mode in turn, a get-up blend and the fit overlay: each allocates its
+ * own scratch on the Jolt side, so a mode that forgot to free one would show
+ * here.
+ */
+const Ragdoll = ({ scene, mixer }: { scene: Object3D; mixer: AnimationMixer }) => {
+  const model = useCharacterModel(scene, { debug: true });
+  const [ragdoll] = useRagdoll(model, { mixer, kinematicBones: ["pelvis"] });
+  const frame = useRef(0);
+
+  useFrame(function cycleModes() {
+    if (!ragdoll) return;
+    frame.current += 1;
+    if (frame.current % 10 !== 0) return;
+    const turn = frame.current / 10;
+    if (turn === RAGDOLL_MODES.length + 1) ragdoll.blendToAnimation(0.1);
+    else ragdoll.setMode(RAGDOLL_MODES[turn % RAGDOLL_MODES.length]);
+  });
+
+  return null;
+};
+
 const cycles = async (element: React.ReactElement, frames: number) => {
   const module = await loadDebugModule();
 
@@ -497,6 +531,17 @@ describe("mount/unmount leak checks", () => {
    * The step registry is deliberately absent from this file — it creates no
    * Jolt objects at all, so there is nothing here for it to leak.
    */
+  it("useRagdoll and useCharacterModel leave the heap flat across cycles", async () => {
+    const { scene, animations } = await loadMannequin();
+    const mixer = playAt(scene, animations, "Walk_Loop", 0);
+    const { baseline, after } = await cycles(
+      <Ragdoll scene={scene} mixer={mixer} />,
+      80,
+    );
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
   it("useGroupFilterTable leaves the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<GroupFilter />, 60);
     expect(after).toBe(baseline);

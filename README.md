@@ -828,6 +828,55 @@ useFrame((_, delta) => {
 
 The character's position is its **feet**, so a settled character on a floor whose top face is `y = 0` reports `y ≈ 0`. The shape is swapped only when the crouch state actually changes, and debug meshes track the character every frame whether or not you call `update`.
 
+## Ragdolls
+
+`useCharacterModel` fits a ragdoll to a skinned character; `useRagdoll` builds it and drives the bones.
+
+```tsx
+const { scene, animations } = useGLTF("/character.glb");
+const [mixer] = useState(() => new AnimationMixer(scene));
+
+const model = useCharacterModel(scene, { mass: 70 });
+const [ragdoll] = useRagdoll(model, { mode: "hardKeying", mixer });
+
+// later: ragdoll.setMode("passive"), ragdoll.blendToAnimation(0.8)
+```
+
+### `useCharacterModel(object, options?)`
+
+Fits from the skin in its **bind pose**, so the current animation does not matter. Every `SkinnedMesh` sharing the first one's skeleton contributes.
+
+- **Bones:** picked by name (UE/Quaternius and Mixamo naming): pelvis, the lowest and highest spine bones, head, upper arm, forearm, hand, thigh, calf, foot. Fingers, toes, twist/IK/helper and end bones, the root and clavicles never become bodies (`NON_PHYSICAL_BONES`); they ride on their nearest kept ancestor, listed in `model.excluded`. `bones` names the set explicitly, `exclude` replaces the patterns.
+- **Shapes:** capsules on limbs and head, boxes on pelvis and spine, from the vertices each bone carries (`minWeight` 0.5) — length from the 5th–95th percentile along the bone, radius from the `radiusPercentile` (0.9) of distances.
+- **Mass:** `mass` (70 kg) spread by anthropometric share.
+- **Joints:** swing-twist with limits by bone kind; knees and elbows bend one way only.
+- **`overrides`:** `{ [bone]: { shape: "capsule" | "box" | "convex" | CompoundChild, mass, joint, exclude } }`.
+- **`debug`:** draws the fitted bodies on the bones, following the animation. Defaults to `<Physics debug>`.
+- **`toJSON()`** returns the config; pass it back as `config` to skip fitting.
+
+Returns `{ mesh, meshes, config, excluded, toJSON }`. `selectRagdollBones` and `classifyBone` are exported for custom selections.
+
+### `useRagdoll(model, options?)`
+
+One body per fitted bone, joined by swing-twist constraints, built in the bind pose and snapped onto the character as it stands. Parents and children never collide, nor do parts overlapping at rest; two ragdolls do.
+
+| `mode`         | Bodies                | Drawn from  |
+| -------------- | --------------------- | ----------- |
+| `"passive"`    | dynamic, limp         | the bodies  |
+| `"hardKeying"` | kinematic, on the animation exactly | the animation |
+| `"softKeying"` | dynamic, sprung toward the animation (`keyingFrequency` 3 Hz, `keyingDamping` 1, gravity cancelled) | the bodies |
+| `"motors"`     | dynamic, joint motors toward the animation's joint angles (`motorStrength` 10, `motorTorque` cap) | the bodies |
+
+- `setMode` switches at runtime on the same bodies; velocity carries over.
+- `kinematicBones` keeps the named bones kinematic and on the animation in every mode but `passive` — legs that stay planted while the upper body reacts. `setKinematicBones` changes them.
+- `mixer` is the animation to follow. **The hook updates it**, just before reading the pose; do not also update it elsewhere (drei's `useAnimations` does).
+- `motorStrength` is how many times over a joint's motor can hold what hangs off it; a joint sags at most about 1/strength radians.
+- Also `layer`, `group`, `mask`, `userData`, `friction`, `restitution`, `linearDamping`, `angularDamping`, `gravityFactor`.
+
+The api: `ragdoll`, `rig`, `bodies`, `bones`, `constraints`, `mode`, `setMode`, `setKinematicBones`, `bodyOf(bone)`, `boneOf(bodyID)`, `applyImpulse(impulse, bone?, point?)`, `setLinearVelocity`, `setLinearAndAngularVelocity`, `getRootTransform`, `bounds`, `setPose` (teleport onto the bones), `blendToAnimation(seconds, then?)` (get-up: blends joint by joint from where the ragdoll lies into whatever the mixer plays — a get-up clip — then hands over to `then`), `activate`, `isActive`, `resetWarmStart`.
+
+Bodies are interpolated like any other and `<PhysicsDebug />` draws them and their joints. Jolt's `Stabilize()` evens out neighbouring masses, so a hand ends up heavier than `config` says.
+
 ## `useCar`
 
 A wheeled vehicle built on `VehicleConstraint`.
@@ -1181,7 +1230,7 @@ pnpm install
 pnpm dev
 ```
 
-60 scenes in seven categories, one per hook or feature:
+63 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
@@ -1191,7 +1240,7 @@ pnpm dev
 | **Constraints**  | all 8 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
-| **Systems**      | character · car · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
+| **Systems**      | character · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
 
 Toolbar toggles for `<PhysicsDebug />`, `<Physics debug>`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 

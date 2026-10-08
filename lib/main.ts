@@ -186,6 +186,33 @@ export type {
   LimitOptions,
 } from "@/Jolt/internal/constraintSettings";
 
+export {
+  useCharacterModel,
+  type CharacterModel,
+  type UseCharacterModelOptions,
+} from "@/Jolt/useCharacterModel";
+export {
+  useRagdoll,
+  type RagdollApi,
+  type RagdollMode,
+  type UseRagdollOptions,
+} from "@/Jolt/useRagdoll";
+export {
+  classifyBone,
+  selectRagdollBones,
+  type BoneClass,
+  type FitShapeKind,
+  type RagdollBoneConfig,
+  type RagdollBoneOverride,
+  type RagdollConfig,
+  type RagdollFitOptions,
+  type RagdollJointConfig,
+} from "@/Jolt/internal/ragdollFit";
+export {
+  NON_PHYSICAL_BONES,
+  type SkeletonRig,
+} from "@/Jolt/internal/skeleton";
+
 export { useBeforePhysicsStep } from "@/Jolt/useBeforePhysicsStep";
 export { useAfterPhysicsStep } from "@/Jolt/useAfterPhysicsStep";
 export type { PhysicsSettingsOptions } from "@/Jolt/internal/physicsSettings";

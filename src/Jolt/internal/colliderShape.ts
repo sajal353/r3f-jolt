@@ -174,6 +174,22 @@ const describeInvalidChild = (child: CompoundChild): string | null => {
 };
 
 /**
+ * Jolt asserts on a rotation that is not unit length to within about 1e-5,
+ * which a quaternion typed in by hand, or saved to four decimals, is not.
+ */
+const normalizedRotation = (rotation: QuatTuple | undefined): QuatTuple => {
+  if (!rotation) return [0, 0, 0, 1];
+  const length = Math.hypot(...rotation);
+  if (length === 0) return [0, 0, 0, 1];
+  return [
+    rotation[0] / length,
+    rotation[1] / length,
+    rotation[2] / length,
+    rotation[3] / length,
+  ];
+};
+
+/**
  * One compound child, built as a shape in its own right. A child carrying a
  * position or rotation is wrapped in a `RotatedTranslatedShape`, which is how a
  * collider ends up somewhere other than its body's origin — the case a mesh
@@ -192,7 +208,7 @@ export const createChildShape = (
   const inner = createChildSettings(jolt, child);
 
   const [x, y, z] = child.position;
-  const [rx, ry, rz, rw] = child.rotation ?? [0, 0, 0, 1];
+  const [rx, ry, rz, rw] = normalizedRotation(child.rotation);
   const centred = x === 0 && y === 0 && z === 0;
   const upright = rx === 0 && ry === 0 && rz === 0 && rw === 1;
 

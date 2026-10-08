@@ -47,6 +47,10 @@ export const createTransformTracker = () => {
   };
 
   return {
+    /** The pose to draw, as of the last `update` or `rest`. */
+    position: position as Readonly<Vector3>,
+    rotation: rotation as Readonly<Quaternion>,
+
     update: (body: Jolt.Body, timing: PhysicsTiming) => {
       resting = false;
 

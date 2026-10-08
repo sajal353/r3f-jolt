@@ -59,6 +59,9 @@ import { ContactForce } from "./events/ContactForce";
 
 import { Character } from "./systems/Character";
 import { Car } from "./systems/Car";
+import { RagdollScene } from "./systems/Ragdoll";
+import { RagdollFitScene } from "./systems/RagdollFit";
+import { RagdollCharacterScene } from "./systems/RagdollCharacter";
 import { Interpolation } from "./systems/Interpolation";
 import { StepCallbacks } from "./systems/StepCallbacks";
 import { DebugRendering } from "./systems/DebugRendering";
@@ -781,6 +784,57 @@ export const categories: Category[] = [
             real <code>WheeledVehicleController</code>: engine, transmission,
             differentials, anti-roll bars. Handbrake is rear-only; the service
             brake splits 80/20 front/rear.
+          </>
+        ),
+      },
+      {
+        name: "Ragdoll",
+        Component: RagdollScene,
+        hook: "useRagdoll",
+        hint: (
+          <>
+            <b>Click to throw.</b> Left: <code>passive</code>, dropped on the
+            steps. Middle: <code>motors</code> drive the joints toward the idle
+            animation, legs held by <code>kinematicBones</code> — hits knock it
+            about and it recovers. Right: <code>hardKeying</code> walks it;{" "}
+            <b>knock down</b> switches to <code>passive</code> on the same
+            bodies, and <code>blendToAnimation</code> blends it into a get-up
+            clip for how it landed — back or front.
+          </>
+        ),
+      },
+      {
+        name: "Ragdoll character",
+        Component: RagdollCharacterScene,
+        hook: "useCharacter, useRagdoll",
+        hint: (
+          <>
+            <code>WASD</code> to walk, <code>Shift</code> to sprint,{" "}
+            <code>Space</code> to jump — no steering in the air —,{" "}
+            <code>R</code> to go limp and <code>R</code> again to get up. A{" "}
+            <code>useCharacter</code> controller moves it and a{" "}
+            <code>hardKeying</code> ragdoll follows the animation, shoving
+            crates. Falling fast — off the ledge, say — it goes{" "}
+            <code>passive</code> in the air, and once it settles gets up with a
+            get-up clip picked for whether it lies on its back or its front,
+            blended in by <code>blendToAnimation</code>.
+            The ragdoll has a collision group the controller&apos;s mask leaves
+            out, so the two never fight.
+          </>
+        ),
+      },
+      {
+        name: "Ragdoll fit",
+        Component: RagdollFitScene,
+        hook: "useCharacterModel",
+        hint: (
+          <>
+            <code>useCharacterModel</code> fits a body per bone from the skin in
+            its bind pose — capsules on the limbs, boxes on the torso — with
+            masses from anthropometric shares and joint limits by bone kind.
+            The overlay rides the bones, so the fit can be judged against any
+            animation. <b>log JSON</b> prints the config to tune and pass back
+            as <code>config</code>.
           </>
         ),
       },
