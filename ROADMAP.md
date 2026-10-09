@@ -190,8 +190,8 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 - [x] `CalculateVolumeConstraintVolumes()` for closed volumes
 - [x] LRA / tether constraints for cloth (`mLRAType` = `EuclideanDistance` | `GeodesicDistance`, `mLRAMaxDistanceMultiplier`) — the standard fix for a cape stretching when the wearer sprints. `CreateConstraints` can auto-generate them
 - [x] Note for the 0.2.1 imperative api: `AddForce` on a soft body applies to the **whole body** as of jolt 0.31.0, not per vertex as it did before. **Amended:** Jolt's `AddImpulse` and `SetLinearVelocity` write the rigid velocity a soft body never reads, so `useSoftBody`'s `applyImpulse` and `setLinearVelocity` write the vertices instead
-- [ ] **Skinned cloth on a character**: `mSkinnedConstraints` + `SoftBodyMotionProperties.SkinVertices(rootTransform, jointMatrices, numJoints, hardSkinAll, tempAllocator)`, fed the _same_ joint matrices the skeleton bridge produces. This is the cape-on-a-character path, and it is nearly free once that bridge exists
-- [ ] `SetEnableSkinConstraints` / `SetSkinnedMaxDistanceMultiplier` for how far cloth may leave the skinned shape
+- [x] **Skinned cloth on a character**: `mSkinnedConstraints` + `SoftBodyMotionProperties.SkinVertices(rootTransform, jointMatrices, numJoints, hardSkinAll, tempAllocator)`, fed the _same_ joint matrices the skeleton bridge produces. This is the cape-on-a-character path, and it is nearly free once that bridge exists. **Amended:** fed three.js's own bone matrices rather than the bridge's, which keeps a subset of bones and strips scale, so the cloth lands exactly where the skin is drawn; `useSoftBody`'s `skin` option
+- [x] `SetEnableSkinConstraints` / `SetSkinnedMaxDistanceMultiplier` for how far cloth may leave the skinned shape
 - [x] Ray and shape casts against soft bodies via `SoftBodyShape`, so cloth is hittable rather than invisible to queries. **Amended:** Jolt already routes queries through `SoftBodyShape`; `api.faceOf(subShapeID)` maps a hit to the geometry's triangle
 - [x] Render sync: read `SoftBodyMotionProperties.GetVertices()` into a `BufferAttribute` each frame via a heap view + `needsUpdate` — allocation-free, and recompute normals only on request (not cheap). **Amended:** normals are recomputed whenever the vertices move, opt out with `normals: false` — next to the solver they cost almost nothing, and a lit cloth with stale normals looks broken
 - [x] `SoftBodyContactListenerJS` for cloth contact events, multiplexed like the rigid contact listener
@@ -209,7 +209,7 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 - [x] Demo: ragdoll scene with a real glTF character — passive flop, hit reaction via motors, get-up blend
 - [x] Demo: auto-fit collider debug overlay on that character
 - [ ] Demo: pool with a current, floating crates, swimming character
-- [ ] Demo: cape skinned to the character (shares the skeleton bridge's joint matrices)
+- [x] Demo: cape skinned to the character (shares the skeleton bridge's joint matrices). **Amended:** on the Ragdoll character, skinned from three.js's bone matrices
 
 ---
 

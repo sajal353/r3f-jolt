@@ -1,5 +1,6 @@
 import { Vector3, type BufferGeometry } from "three";
 import type { JoltModule } from "../types";
+import { hardSkinned, writeSkin, type SkinBinding } from "./softBodySkin";
 
 /**
  * A render geometry and the simulated mesh behind it. three.js splits vertices
@@ -144,6 +145,7 @@ export const createSharedSettings = (
   geometry: BufferGeometry,
   topology: SoftBodyTopology,
   options: SoftBodyConstraintOptions,
+  skin?: SkinBinding,
 ) => {
   const {
     compliance,
@@ -163,6 +165,11 @@ export const createSharedSettings = (
   shared.AddRef();
 
   const isPinned = pinnedVertices(topology, geometry, pinned);
+  if (skin) {
+    for (let index = 0; index < topology.count; index += 1) {
+      if (hardSkinned(skin, index)) isPinned[index] = 1;
+    }
+  }
   let free = 0;
   for (const flag of isPinned) if (!flag) free += 1;
   const inverseMass = mass !== undefined && mass > 0 ? free / mass : 1;
@@ -228,6 +235,8 @@ export const createSharedSettings = (
     }
     shared.CalculateVolumeConstraintVolumes();
   }
+
+  if (skin) writeSkin(jolt, shared, skin, isPinned);
 
   shared.Optimize();
 

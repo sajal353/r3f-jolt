@@ -32,6 +32,7 @@
 - `useBodyContacts` and `useSensor` report soft-body contacts, on both sides of the pair; `useSoftBodyContactListener` is the raw listener. `SoftBodyContactHandlers` is exported.
 - Soft bodies float in `<WaterVolume>` per vertex, and `<PhysicsDebug>` draws them from their live vertices.
 - `<Physics>` keeps a demand frame loop running while a soft body is awake.
+- Skinned cloth: `skin: { mesh, bone, maxDistance, backStopDistance, backStopRadius }` binds a soft body to a `SkinnedMesh`'s bones, weighted by the geometry's `skinIndex`/`skinWeight` or to one bone. Live `skinConstraints` and `skinnedMaxDistanceMultiplier`; `api.snapToSkin()`. The cloth is drawn against the bones as they stand when it renders, so it does not trail a moving character. `SoftBodySkinOptions` is exported.
 
 ### Constraints
 
@@ -56,6 +57,7 @@
 ### Demo
 
 - **Systems › Cloth**: a flag in gusting wind, a curtain on a rail, a tablecloth, a beach ball and a jelly cube to throw balls at. A beach ball floats in **Systems › Water**.
+- **Systems › Ragdoll character** wears a cape skinned to the upper spine.
 - **Constraints › Breaking joints**, and a `debug` toolbar toggle for `<Physics debug>`.
 - **Systems › Water**: a pool with waves drawn by a shader that matches the physics, ripples from splashes and from the swimmer, faint lines along a current, crates, stones, buoys and logs, and the mannequin swimming with its swim clips.
 - **Systems › Character contacts**: an inner body, characters that block each other, a belt and a turntable, and the contact callbacks.

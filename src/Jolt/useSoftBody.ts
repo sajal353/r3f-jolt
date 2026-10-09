@@ -24,6 +24,12 @@ import {
 } from "./internal/softBodyVertices";
 import { createVertexTracker } from "./internal/softBodyTracker";
 import {
+  bindSkin,
+  createSkinDriver,
+  type SkinDriver,
+  type SoftBodySkinOptions,
+} from "./internal/softBodySkin";
+import {
   createDebugView,
   useDebugFlag,
   useDebugView,
@@ -45,6 +51,7 @@ import { readVector } from "./internal/query";
 import type { QuatTuple, Vec3Input, Vec3Tuple } from "./types";
 
 export type { BendType, LRAType } from "./internal/softBodyBuild";
+export type { SoftBodySkinOptions } from "./internal/softBodySkin";
 
 export interface UseSoftBodyOptions
   extends SoftBodyConstraintOptions,
@@ -87,6 +94,16 @@ export interface UseSoftBodyOptions
   airDrag?: number;
   /** Recompute normals when the vertices move. Off for unlit materials. */
   normals?: boolean;
+  /**
+   * Skins the cloth to a character: placed from the mesh, so `position` and
+   * `rotation` are ignored. Call the hook after whatever moves the bones — a
+   * mixer, `useRagdoll` — so it draws on this frame's pose.
+   */
+  skin?: SoftBodySkinOptions;
+  /** Off, only the vertices held to the skin follow it. Default on. Live. */
+  skinConstraints?: boolean;
+  /** Scales every `skin.maxDistance`. Default 1. Live. */
+  skinnedMaxDistanceMultiplier?: number;
   settingsOverride?: (
     shared: Jolt.SoftBodySharedSettings,
     creation: Jolt.SoftBodyCreationSettings,
@@ -130,6 +147,11 @@ export interface SoftBodyApi {
   isPinned: (index: number) => boolean;
   pin: (index: number, pinned: boolean) => void;
   setWind: (wind: Vec3Input) => void;
+  /**
+   * Puts every vertex back on the skin, at rest, on the next step: after
+   * teleporting the character. Does nothing without `skin`.
+   */
+  snapToSkin: () => void;
   /**
    * The geometry triangle a ray hit, from its `subShapeID`; -1 for an ID that
    * did not come from this body.
@@ -340,6 +362,18 @@ const blowWind = (
 
 const ZERO: Vec3Tuple = [0, 0, 0];
 
+const boundsPoint = new Vector3();
+
+const boundsOf = (positions: Float32Array, target: Box3) => {
+  target.makeEmpty();
+  for (let index = 0; index < positions.length; index += 3) {
+    target.expandByPoint(
+      boundsPoint.set(positions[index], positions[index + 1], positions[index + 2]),
+    );
+  }
+  return target;
+};
+
 /** Roughly ½ × air density × the drag coefficient of a flat sheet. */
 const DEFAULT_AIR_DRAG = 1;
 
@@ -365,6 +399,9 @@ export const useSoftBody = (
     motion: Jolt.SoftBodyMotionProperties;
     geometry: BufferGeometry;
     normals: Float32Array;
+    skin: SkinDriver | null;
+    /** The tracker's vertices moved onto the live skin. */
+    drawn: Float32Array;
     usable: () => boolean;
   } | null>(null);
 
@@ -382,8 +419,6 @@ export const useSoftBody = (
     } = api;
     const { geometry: source, options } = mount;
     const {
-      position = [0, 0, 0],
-      rotation = [0, 0, 0, 1],
       weld = 1e-4,
       iterations,
       linearDamping,
@@ -412,7 +447,22 @@ export const useSoftBody = (
     }
 
     const topology = weldGeometry(source, weld);
-    const shared = createSharedSettings(jolt, source, topology, options);
+    const binding = options.skin
+      ? bindSkin(source, topology, options.skin)
+      : undefined;
+    const shared = createSharedSettings(
+      jolt,
+      source,
+      topology,
+      options,
+      binding,
+    );
+    const position: Vec3Tuple = binding
+      ? [binding.origin.x, binding.origin.y, binding.origin.z]
+      : (options.position ?? [0, 0, 0]);
+    const rotation: QuatTuple = binding
+      ? [0, 0, 0, 1]
+      : (options.rotation ?? [0, 0, 0, 1]);
 
     const resolvedLayer =
       layer ??
@@ -482,6 +532,9 @@ export const useSoftBody = (
 
     const renderGeometry = cloneForRender(source);
     const tracker = createVertexTracker(layout.count);
+    const skin = binding
+      ? createSkinDriver(jolt, binding, topology.positions)
+      : null;
 
     let added = false;
     let alive = true;
@@ -507,6 +560,8 @@ export const useSoftBody = (
       motion,
       geometry: renderGeometry,
       normals: new Float32Array(layout.count * 3),
+      skin,
+      drawn: new Float32Array(skin ? layout.count * 3 : 0),
       usable,
     };
 
@@ -646,6 +701,10 @@ export const useSoftBody = (
         windRef.current.set(x, y, z);
       },
 
+      snapToSkin: () => {
+        skin?.snap();
+      },
+
       faceOf: (subShapeID) => {
         if (!alive || state.disposed) return -1;
         if (subShapeID >>> faceBits !== unusedBits) return -1;
@@ -674,11 +733,23 @@ export const useSoftBody = (
       blowWind(jolt.HEAPF32, layout, wind, drag, delta);
     });
 
+    const tempAllocator = api.joltInterface.GetTempAllocator();
+    const unsubscribeSkin = skin
+      ? steps.add("before", function skinSoftBody() {
+          if (!usable()) return;
+          const { moved, hard } = skin.skin(body, motion, tempAllocator);
+          // Jolt leaves a sleeping cloth where it lay as the bones walk off.
+          if (moved && !bodyInterface.IsActive(id)) bodyInterface.ActivateBody(id);
+          if (hard) tracker.reset();
+        })
+      : null;
+
     setSoftApi(result);
 
     return () => {
       alive = false;
       unsubscribeWind();
+      unsubscribeSkin?.();
       setSoftApi(undefined);
       internals.current = null;
 
@@ -689,6 +760,7 @@ export const useSoftBody = (
       if (state.destroyed) return;
 
       jolt.destroy(subShape);
+      skin?.dispose();
       if (added) {
         api.contacts.forgetSoftBody(bodyID);
         bodyInterface.RemoveBody(id);
@@ -705,6 +777,8 @@ export const useSoftBody = (
     restitution,
     gravityFactor,
     linearDamping,
+    skinConstraints,
+    skinnedMaxDistanceMultiplier,
     wind,
     airDrag = DEFAULT_AIR_DRAG,
   } = options;
@@ -723,6 +797,12 @@ export const useSoftBody = (
       if (linearDamping !== undefined) motion.SetLinearDamping(linearDamping);
       if (friction !== undefined) softApi.body.SetFriction(friction);
       if (restitution !== undefined) softApi.body.SetRestitution(restitution);
+      if (skinConstraints !== undefined) {
+        motion.SetEnableSkinConstraints(skinConstraints);
+      }
+      if (skinnedMaxDistanceMultiplier !== undefined) {
+        motion.SetSkinnedMaxDistanceMultiplier(skinnedMaxDistanceMultiplier);
+      }
 
       // The first pass only restates what creation already set.
       if (appliedRef.current) softApi.wake();
@@ -737,6 +817,8 @@ export const useSoftBody = (
       restitution,
       gravityFactor,
       linearDamping,
+      skinConstraints,
+      skinnedMaxDistanceMultiplier,
     ],
   );
 
@@ -756,27 +838,42 @@ export const useSoftBody = (
   useDebugView(softApi, debugViewRef, debug);
 
   const wantsNormals = options.normals !== false;
+  const [skinBounds] = useState(() => new Box3());
 
   useFrame(function syncSoftBody() {
     const inner = internals.current;
     if (!softApi || !inner || !inner.usable()) return;
 
-    const { layout, topology, tracker, normals, geometry: target } = inner;
+    const { layout, topology, tracker, normals, skin, drawn, geometry: target } =
+      inner;
     const body = softApi.body;
+    const active = body.IsActive();
+    const timing = api.timing;
 
-    const changed = body.IsActive()
-      ? tracker.update(api.Jolt, body, layout, api.timing)
+    let changed = active
+      ? tracker.update(api.Jolt, body, layout, timing)
       : tracker.rest(api.Jolt, body, layout);
+
+    let positions = tracker.local;
+    let bounds = tracker.bounds;
+    if (skin) {
+      const alpha = active && timing.interpolate ? timing.alpha : 1;
+      if (skin.correct(tracker.local, drawn, alpha, timing.stepCount)) {
+        changed = true;
+      }
+      positions = drawn;
+      bounds = boundsOf(drawn, skinBounds);
+    }
 
     if (changed) {
       writeRender(
         topology,
-        tracker.local,
+        positions,
         target.getAttribute("position") as BufferAttribute,
       );
 
       if (wantsNormals) {
-        computeNormals(topology.faces, tracker.local, normals);
+        computeNormals(topology.faces, positions, normals);
         writeRender(
           topology,
           normals,
@@ -787,7 +884,7 @@ export const useSoftBody = (
       const box = target.boundingBox;
       const sphere = target.boundingSphere;
       if (box && sphere) {
-        box.copy(tracker.bounds);
+        box.copy(bounds);
         box.getCenter(sphere.center);
         sphere.radius =
           box.min.distanceTo(box.max) / 2 + (vertexRadius ?? 0);

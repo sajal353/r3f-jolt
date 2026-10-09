@@ -933,6 +933,24 @@ Soft bodies are the most expensive thing in Jolt. Step time grows with vertices 
 
 A few hundred vertices per cloth and a couple of thousand in a scene leave room for everything else.
 
+### Skinned cloth
+
+`skin` puts cloth on a character: a cape, a skirt, a banner on a back. Each vertex follows bones the way a skinned mesh does, and may stray from there only as far as you allow.
+
+```tsx
+const [ref, cape] = useSoftBody(capeGeometry, {
+  skin: { mesh: model.mesh, maxDistance: (point) => (point.y > 1.52 ? 0 : 0.5) },
+  iterations: 10,
+});
+```
+
+- **`skin.mesh`** is the `SkinnedMesh` whose skeleton the cloth follows. The geometry is in that mesh's own space, as a garment exported with the character is, and it is weighted through its own `skinIndex`/`skinWeight` (indices into `mesh.skeleton.bones`), or entirely to **`skin.bone`**. The cloth is placed from the mesh, so `position` and `rotation` are ignored.
+- **`skin.maxDistance`** (number or `(position, index) => number`, metres) is how far a vertex may leave its skinned position; unlimited by default. `0` holds a vertex to the skin, and so do `pinned` vertices. **`skin.backStopDistance`** and **`skin.backStopRadius`** keep a vertex out of a sphere behind the skinned surface — the body under the cloth. "Behind" is against the face normals, so wind faces counter-clockwise seen from outside. Use it where cloth rests on the body, like a cape's top over the shoulders: on hanging cloth that keeps touching it, the hard push out jitters.
+- Live: **`skinConstraints`** (`true`; off, only the held vertices follow) and **`skinnedMaxDistanceMultiplier`** (`1`). **`snapToSkin()`** puts every vertex back on the skin, at rest, on the next step: after teleporting the character.
+- The bones are three.js's own matrices, scale included, so the cloth sits exactly where the skin is drawn. They go to Jolt before every step, and the cloth is drawn against the bones as they are when it renders, so it does not trail the character. **Call `useSoftBody` after whatever moves the bones** (a mixer, `useRagdoll`) so it draws on this frame's pose.
+- Hold pinned and `maxDistance: 0` vertices to bones that move together. If the skin stretches the distances between held vertices, the rigid edges between them can never be met and the cloth shakes, harder with more `iterations`. A little `bendCompliance` (`0.001`) keeps air drag from rippling the cloth near a held edge.
+- Collide cloth with a ragdoll's torso at most: collision is per vertex, so a thin limb slips between vertices and tangles it, and cloth trapped under a lying body thrashes. A ragdolling character's cape wants `skinConstraints: false`, since the skin may lie under the floor.
+
 ## Ragdolls
 
 `useCharacterModel` fits a ragdoll to a skinned character; `useRagdoll` builds it and drives the bones.

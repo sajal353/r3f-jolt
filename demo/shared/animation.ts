@@ -158,16 +158,18 @@ export interface GetUpPlan {
  * frame lies where the ragdoll does: its pelvis on the ragdoll's, its head
  * pointing the same way.
  */
+/** Lying on its back: the chest, across the shoulders and up the spine, faces up. */
+export const chestFacesUp = ({ pelvis, head, leftShoulder, rightShoulder }: LyingBody) =>
+  new Vector3()
+    .crossVectors(leftShoulder.clone().sub(rightShoulder), head.clone().sub(pelvis))
+    .y > 0;
+
 export const planGetUp = (
   body: LyingBody,
   start: (move: GetUpMove) => GetUpStart,
 ): GetUpPlan => {
-  const { pelvis, head, leftShoulder, rightShoulder } = body;
-  const chestFacing = new Vector3().crossVectors(
-    leftShoulder.clone().sub(rightShoulder),
-    head.clone().sub(pelvis),
-  );
-  const move = chestFacing.y > 0 ? GET_UP.faceUp : GET_UP.faceDown;
+  const { pelvis, head } = body;
+  const move = chestFacesUp(body) ? GET_UP.faceUp : GET_UP.faceDown;
   const clip = start(move);
 
   const yaw = headingOf(pelvis, head) - clip.heading;

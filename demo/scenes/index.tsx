@@ -857,7 +857,7 @@ export const categories: Category[] = [
       {
         name: "Ragdoll character",
         Component: RagdollCharacterScene,
-        hook: "useCharacter, useRagdoll",
+        hook: "useCharacter, useRagdoll, useSoftBody",
         hint: (
           <>
             <code>WASD</code> to walk, <code>Shift</code> to sprint,{" "}
@@ -870,7 +870,9 @@ export const categories: Category[] = [
             get-up clip picked for whether it lies on its back or its front,
             blended in by <code>blendToAnimation</code>.
             The ragdoll has a collision group the controller&apos;s mask leaves
-            out, so the two never fight.
+            out, so the two never fight. The cape is cloth skinned to the
+            upper spine through <code>skin</code>: its top edge is held to the
+            shoulders and the rest may stray further the lower it hangs.
           </>
         ),
       },

@@ -65,6 +65,7 @@ export {
   type SoftBodyApi,
   type BendType,
   type LRAType,
+  type SoftBodySkinOptions,
 } from "@/Jolt/useSoftBody";
 export { useSoftBodyContactListener } from "@/Jolt/useSoftBodyContactListener";
 export type {

@@ -2,12 +2,17 @@ import { useRef, useState } from "react";
 import { describe, expect, it } from "vitest";
 import type Jolt from "jolt-physics";
 import {
+  Bone,
   BoxGeometry,
+  BufferGeometry,
+  Group,
+  MeshBasicMaterial,
   PlaneGeometry,
+  Skeleton,
+  SkinnedMesh,
   SphereGeometry,
   Vector3,
   type AnimationMixer,
-  type BufferGeometry,
   type Object3D,
 } from "three";
 import { useFrame } from "@react-three/fiber";
@@ -263,8 +268,45 @@ const SoftBodies = () => {
       <PhysicsDebug />
       <WaterVolume position={[-3, -2.5, 0]} size={[4, 3, 4]} />
       {shown && <Jelly />}
+      {shown && <SkinnedCloth />}
     </>
   );
+};
+
+const skinnedRig = () => {
+  const armature = new Group();
+  const chest = new Bone();
+  chest.name = "chest";
+  chest.position.set(0, 3, 0);
+  armature.add(chest);
+  const mesh = new SkinnedMesh(new BufferGeometry(), new MeshBasicMaterial());
+  armature.add(mesh);
+  armature.updateMatrixWorld(true);
+  mesh.bind(new Skeleton([chest]));
+  const sway = (x: number) => {
+    chest.position.x = x;
+  };
+  return { sway, mesh };
+};
+
+const capeGeometry = new PlaneGeometry(1, 1, 4, 4).translate(0, 2.5, 0.2);
+
+const SkinnedCloth = () => {
+  const [{ sway, mesh }] = useState(skinnedRig);
+  const frame = useRef(0);
+  const [, cape] = useSoftBody(capeGeometry, {
+    skin: { mesh, bone: "chest", maxDistance: 0.3, backStopDistance: 0.05, backStopRadius: 0.2 },
+    pinned: (point) => point.y > 2.99,
+    skinnedMaxDistanceMultiplier: 0.8,
+  });
+
+  useFrame(function moveBones() {
+    frame.current += 1;
+    sway(Math.sin(frame.current / 5));
+    if (frame.current % 20 === 0) cape?.snapToSkin();
+  });
+
+  return null;
 };
 
 const Jelly = () => {

@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { KeyboardControls, useKeyboardControls } from "@react-three/drei";
-import { Vector3 } from "three";
+import { DoubleSide, Vector3 } from "three";
 import { useMannequin } from "../../shared/mannequin";
+import { chestFacesUp } from "../../shared/animation";
+import { CAPE_BONE, createCape, createCapeTexture } from "../../shared/cape";
 import { useBox } from "@/Jolt/useBox";
 import { useCharacter } from "@/Jolt/useCharacter";
 import { useCharacterModel } from "@/Jolt/useCharacterModel";
 import { useJolt } from "@/Jolt/useJolt";
 import { useRagdoll, type RagdollApi } from "@/Jolt/useRagdoll";
+import { useSoftBody } from "@/Jolt/useSoftBody";
+import { useSoftBodyContactListener } from "@/Jolt/useSoftBodyContactListener";
 import { interactionGroups } from "@/Jolt/internal/interactionGroups";
 import type { Vec3Tuple } from "@/Jolt/types";
 
@@ -24,13 +28,18 @@ const controls = [
 /**
  * The controller and the ragdoll overlap by design, so they must not collide:
  * the ragdoll gets a group of its own that the controller's mask leaves out.
- * Everything else the ragdoll should land on or knock over takes it in.
+ * Everything else the ragdoll should land on or knock over takes it in, the
+ * cape included — but see `capeTouches`.
  */
 const STATIC = 1 << 0;
 const MOVING = 1 << 1;
 const RAGDOLL = 1 << 2;
-const STATIC_LAYER = interactionGroups(STATIC, MOVING | RAGDOLL);
-const CRATE_LAYER = interactionGroups(MOVING, STATIC | MOVING | RAGDOLL);
+const CLOTH = 1 << 3;
+const STATIC_LAYER = interactionGroups(STATIC, MOVING | RAGDOLL | CLOTH);
+const CRATE_LAYER = interactionGroups(MOVING, STATIC | MOVING | RAGDOLL | CLOTH);
+const CLOTH_LAYER = interactionGroups(CLOTH, STATIC | MOVING | RAGDOLL);
+/** The ragdoll bodies the cape rests against while the character is on its feet. */
+const TORSO = /pelvis|spine/;
 
 const MOVE_SPEED = 6.5;
 const WALK = 0.4;
@@ -146,7 +155,7 @@ const JUMP_START = { from: 0.08, timeScale: 1 };
 const JUMP_LAND = { from: 0, timeScale: 1.5 };
 
 const Runner = () => {
-  const { temps } = useJolt();
+  const { temps, bodyInterface } = useJolt();
   const { character, mixer, play, playOnce, place, getUp } = useMannequin(
     [0, 0, 4],
     "Idle_Loop",
@@ -156,8 +165,36 @@ const Runner = () => {
     mode: "hardKeying",
     mixer,
     group: RAGDOLL,
-    mask: STATIC | MOVING,
+    mask: STATIC | MOVING | CLOTH,
   });
+  // After the ragdoll, which animates the bones: the cape is drawn on this
+  // frame's pose, not last frame's.
+  const [cape] = useState(createCape);
+  const [capeTexture] = useState(createCapeTexture);
+  const [limp, setLimp] = useState(false);
+  const [capeRef, capeApi] = useSoftBody(cape.geometry, {
+    skin: {
+      mesh: model.mesh,
+      bone: CAPE_BONE,
+      maxDistance: (_, index) => cape.slack[index],
+      backStopDistance: (_, index) => cape.clearance[index],
+      backStopRadius: 0.2,
+    },
+    pinned: (_, index) => cape.pinned(index),
+    mass: 1.5,
+    iterations: 10,
+    linearDamping: 1,
+    // A little stiffness damps the short ripples air drag excites by the
+    // shoulders; free bending flickered at a walk.
+    bendCompliance: 0.001,
+    vertexRadius: 0.02,
+    friction: 0.5,
+    layer: CLOTH_LAYER,
+    // Limp, the skin can lie under the floor; held to it, the cape fights the
+    // floor. It drapes from its pinned edge instead.
+    skinConstraints: !limp,
+  });
+
   const [controller] = useCharacter({
     position: [0, 0, 4],
     options: {
@@ -201,6 +238,45 @@ const Runner = () => {
     gettingUp: false,
     /** R was down last frame: the toggle fires on the press, not while held. */
     ragdollKey: false,
+    /** Limp on its back, so the cape is under it. */
+    faceUp: false,
+    lying: {
+      pelvis: new Vector3(),
+      head: new Vector3(),
+      leftShoulder: new Vector3(),
+      rightShoulder: new Vector3(),
+    },
+  });
+
+  const bodyAt = (api: RagdollApi, bone: string, target: Vector3) => {
+    const at = bodyInterface.GetPosition(api.bodyOf(bone)!);
+    return target.set(at.GetX(), at.GetY(), at.GetZ());
+  };
+
+  /**
+   * Cloth collides at its vertices only, so a swinging limb slips between
+   * them and tangles it: on its feet the cape touches only the torso it hangs
+   * against. Limp and face down, it lies over the whole ragdoll. Face up it
+   * touches none of it and drapes through: trapped under a body lying on it,
+   * it thrashed and never let the body settle.
+   */
+  const [capeTouches] = useState(() => ({ ragdoll: new Set<number>(), torso: new Set<number>() }));
+  useEffect(() => {
+    if (!ragdoll) return;
+    ragdoll.bones.forEach((bone, index) => {
+      const id = ragdoll.bodies[index].GetIndexAndSequenceNumber();
+      capeTouches.ragdoll.add(id);
+      if (TORSO.test(bone)) capeTouches.torso.add(id);
+    });
+  }, [ragdoll, capeTouches]);
+  useSoftBodyContactListener({
+    onSoftBodyContactValidate: (_cape, other) => {
+      const id = other.GetID().GetIndexAndSequenceNumber();
+      if (!capeTouches.ragdoll.has(id)) return true;
+      const now = state.current;
+      if (now.down === null) return capeTouches.torso.has(id);
+      return !now.faceUp;
+    },
   });
 
   // The camera follows the character, and the canvas outlives the scene.
@@ -250,6 +326,7 @@ const Runner = () => {
     const now = state.current;
     api.setMode("passive");
     api.setLinearVelocity(now.velocity);
+    setLimp(true);
     now.down = 0;
     now.held = held;
     now.gettingUp = false;
@@ -259,6 +336,7 @@ const Runner = () => {
 
   const standUp = (api: RagdollApi) => {
     const now = state.current;
+    setLimp(false);
     const plan = getUp(api, "Idle_Loop", function stood() {
       state.current.gettingUp = false;
     });
@@ -290,6 +368,12 @@ const Runner = () => {
 
     if (now.down !== null) {
       now.down += delta;
+      now.faceUp = chestFacesUp({
+        pelvis: bodyAt(ragdoll, "pelvis", now.lying.pelvis),
+        head: bodyAt(ragdoll, "Head", now.lying.head),
+        leftShoulder: bodyAt(ragdoll, "upperarm_l", now.lying.leftShoulder),
+        rightShoulder: bodyAt(ragdoll, "upperarm_r", now.lying.rightShoulder),
+      });
 
       const settled =
         now.down >= SETTLE_SECONDS && (!ragdoll.isActive() || now.down >= MAX_DOWN);
@@ -394,7 +478,14 @@ const Runner = () => {
     }
   }, RUNNER_PRIORITY);
 
-  return <primitive object={character} />;
+  return (
+    <>
+      <primitive object={character} />
+      <mesh ref={capeRef} geometry={capeApi?.geometry} castShadow receiveShadow>
+        <meshStandardMaterial map={capeTexture} side={DoubleSide} roughness={0.8} />
+      </mesh>
+    </>
+  );
 };
 
 export const RagdollCharacterScene = () => (
