@@ -115,6 +115,13 @@ export interface UseCharacterOptions extends CharacterContactHandlers {
   innerBodyIDOverride?: number;
   /** Blocks and is blocked by every other character that has it on. On by default. */
   collideWithCharacters?: boolean;
+  /**
+   * Off by default: the character walks through cloth, and its `innerBody`, if
+   * it has one, is what pushes the cloth aside. Jolt's character queries
+   * against a soft body report contacts well short of it, so a character
+   * colliding with one stops a metre away.
+   */
+  collideWithSoftBodies?: boolean;
   options?: Partial<CharacterShapeOptions>;
 }
 
@@ -332,6 +339,17 @@ const mergeOptions = (
   radius: { ...defaultCharacterOptions.radius, ...overrides?.radius },
 });
 
+const skipSoftBodies = (jolt: JoltModule) => {
+  const filter = new jolt.BodyFilterJS();
+  filter.ShouldCollide = function anyBody() {
+    return true;
+  };
+  filter.ShouldCollideLocked = function notSoft(inBody: number) {
+    return !jolt.wrapPointer(inBody, jolt.Body).IsSoftBody();
+  };
+  return filter;
+};
+
 export const useCharacter = (hookOptions: UseCharacterOptions) => {
   const api = useJolt();
   const scene = useThree((state) => state.scene);
@@ -374,6 +392,7 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       innerBodyLayer = layer,
       innerBodyIDOverride,
       collideWithCharacters = true,
+      collideWithSoftBodies = false,
     } = mount;
 
     const options = mergeOptions(mount.options);
@@ -388,7 +407,9 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       joltInterface.GetObjectLayerPairFilter(),
       layer,
     );
-    const bodyFilter = new jolt.BodyFilter();
+    const bodyFilter = collideWithSoftBodies
+      ? new jolt.BodyFilter()
+      : skipSoftBodies(jolt);
     const shapeFilter = new jolt.ShapeFilter();
 
     const shapes = buildShapes(jolt, shape, options);

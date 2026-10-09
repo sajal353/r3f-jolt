@@ -210,7 +210,9 @@ export const Physics = ({
     // awake keeps it running and lets it genuinely stop once everything sleeps,
     // which is the point of demand. A no-op on the default frame loop.
     if (
-      world.physicsSystem.GetNumActiveBodies(world.Jolt.EBodyType_RigidBody) > 0
+      world.physicsSystem.GetNumActiveBodies(world.Jolt.EBodyType_RigidBody) >
+        0 ||
+      world.physicsSystem.GetNumActiveBodies(world.Jolt.EBodyType_SoftBody) > 0
     ) {
       invalidate();
     }
@@ -286,10 +288,10 @@ export const Physics = ({
       const physicsSystem = joltInterface.GetPhysicsSystem();
       const bodyInterface = physicsSystem.GetBodyInterface();
       const state = { disposed: false, destroyed: false };
-      const contacts = createContactRegistry(jolt, physicsSystem);
+      const steps = createStepRegistry();
+      const contacts = createContactRegistry(jolt, physicsSystem, steps);
       const activation = createActivationRegistry(jolt, physicsSystem);
       const constraints = createConstraintRegistry();
-      const steps = createStepRegistry();
       const temps = createTemps(jolt);
       const characters = new jolt.CharacterVsCharacterCollisionSimple();
       const water = createWaterRegistry(

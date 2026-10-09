@@ -182,20 +182,20 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 
 ### Soft bodies & cloth
 
-- [ ] `useSoftBody` from a `BufferGeometry`: vertices → `SoftBodySharedSettingsVertex`, faces → `AddFace`, then `CreateConstraints(vertexAttributes, len, bendType, angleTolerance)` and `Optimize()`
-- [ ] Expose `mNumIterations`, `mLinearDamping`, `mPressure` (inflatables), `mFriction`, `mRestitution`, `mGravityFactor` — all on `SoftBodyCreationSettings`
-- [ ] `mVertexRadius` — note it lives on `SoftBodyCreationSettings`, **not** `SoftBodySharedSettings`; it moved in jolt 0.37.0. Avoids z-fighting between cloth and the geometry it rests on
-- [ ] `mFacesDoubleSided` — renders and collides cloth faces from both sides, which is what a flag needs
-- [ ] Pinned vertices via `mInvMass = 0` for flags, banners and curtains
-- [ ] `CalculateVolumeConstraintVolumes()` for closed volumes
-- [ ] LRA / tether constraints for cloth (`mLRAType` = `EuclideanDistance` | `GeodesicDistance`, `mLRAMaxDistanceMultiplier`) — the standard fix for a cape stretching when the wearer sprints. `CreateConstraints` can auto-generate them
-- [ ] Note for the 0.2.1 imperative api: `AddForce` on a soft body applies to the **whole body** as of jolt 0.31.0, not per vertex as it did before
+- [x] `useSoftBody` from a `BufferGeometry`: vertices → `SoftBodySharedSettingsVertex`, faces → `AddFace`, then `CreateConstraints(vertexAttributes, len, bendType, angleTolerance)` and `Optimize()`
+- [x] Expose `mNumIterations`, `mLinearDamping`, `mPressure` (inflatables), `mFriction`, `mRestitution`, `mGravityFactor` — all on `SoftBodyCreationSettings`
+- [x] `mVertexRadius` — note it lives on `SoftBodyCreationSettings`, **not** `SoftBodySharedSettings`; it moved in jolt 0.37.0. Avoids z-fighting between cloth and the geometry it rests on
+- [x] `mFacesDoubleSided` — renders and collides cloth faces from both sides, which is what a flag needs
+- [x] Pinned vertices via `mInvMass = 0` for flags, banners and curtains
+- [x] `CalculateVolumeConstraintVolumes()` for closed volumes
+- [x] LRA / tether constraints for cloth (`mLRAType` = `EuclideanDistance` | `GeodesicDistance`, `mLRAMaxDistanceMultiplier`) — the standard fix for a cape stretching when the wearer sprints. `CreateConstraints` can auto-generate them
+- [x] Note for the 0.2.1 imperative api: `AddForce` on a soft body applies to the **whole body** as of jolt 0.31.0, not per vertex as it did before. **Amended:** Jolt's `AddImpulse` and `SetLinearVelocity` write the rigid velocity a soft body never reads, so `useSoftBody`'s `applyImpulse` and `setLinearVelocity` write the vertices instead
 - [ ] **Skinned cloth on a character**: `mSkinnedConstraints` + `SoftBodyMotionProperties.SkinVertices(rootTransform, jointMatrices, numJoints, hardSkinAll, tempAllocator)`, fed the _same_ joint matrices the skeleton bridge produces. This is the cape-on-a-character path, and it is nearly free once that bridge exists
 - [ ] `SetEnableSkinConstraints` / `SetSkinnedMaxDistanceMultiplier` for how far cloth may leave the skinned shape
-- [ ] Ray and shape casts against soft bodies via `SoftBodyShape`, so cloth is hittable rather than invisible to queries
-- [ ] Render sync: read `SoftBodyMotionProperties.GetVertices()` into a `BufferAttribute` each frame via a heap view + `needsUpdate` — allocation-free, and recompute normals only on request (not cheap)
-- [ ] `SoftBodyContactListenerJS` for cloth contact events, multiplexed like the rigid contact listener
-- [ ] Document the cost honestly: soft bodies are the most expensive thing in Jolt. Give vertex-count guidance
+- [x] Ray and shape casts against soft bodies via `SoftBodyShape`, so cloth is hittable rather than invisible to queries. **Amended:** Jolt already routes queries through `SoftBodyShape`; `api.faceOf(subShapeID)` maps a hit to the geometry's triangle
+- [x] Render sync: read `SoftBodyMotionProperties.GetVertices()` into a `BufferAttribute` each frame via a heap view + `needsUpdate` — allocation-free, and recompute normals only on request (not cheap). **Amended:** normals are recomputed whenever the vertices move, opt out with `normals: false` — next to the solver they cost almost nothing, and a lit cloth with stale normals looks broken
+- [x] `SoftBodyContactListenerJS` for cloth contact events, multiplexed like the rigid contact listener
+- [x] Document the cost honestly: soft bodies are the most expensive thing in Jolt. Give vertex-count guidance
 
 ### Verification
 
@@ -291,6 +291,14 @@ The bulk of the work is here, not in the simulation.
 - [ ] Instanced strand rendering, thousands of strands in a handful of draw calls
 - [ ] Allocation-free per-frame update: heap views straight into `BufferAttribute`s, matching the 0.4.0 soft-body sync discipline
 - [ ] Optional LOD: fewer simulated segments and interpolated strands with distance
+
+### Self-collision
+
+Jolt soft bodies collide only with rigid bodies: cloth folding onto itself passes through and tangles, and two soft bodies pass through each other. Strands tangle the same way.
+
+- [ ] Opt-in `selfCollision: { thickness }` on `useSoftBody`: a spatial hash before each step pushes apart non-neighbouring vertices closer than `thickness`, on the heap like the 0.4.0 wind pass
+- [ ] The same pass between soft bodies, so a tablecloth rests on a jelly instead of sinking into it
+- [ ] Measure the cost per vertex and the smallest `thickness`, relative to vertex spacing, that stops a fast fold slipping through
 
 ### Verification
 

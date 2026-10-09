@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type Jolt from "jolt-physics";
 import {
   BoxGeometry,
+  PlaneGeometry,
   SphereGeometry,
   Vector3,
   type AnimationMixer,
@@ -37,6 +38,9 @@ import { useRagdoll, type RagdollMode } from "@/Jolt/useRagdoll";
 import { useSwimming } from "@/Jolt/useSwimming";
 import type { CompoundChild } from "@/Jolt/useCompound";
 import { WaterVolume } from "@/Jolt/WaterVolume";
+import { useSoftBody } from "@/Jolt/useSoftBody";
+import { useSoftBodyContactListener } from "@/Jolt/useSoftBodyContactListener";
+import { PhysicsDebug } from "@/Jolt/PhysicsDebug";
 import {
   addBodies,
   destroyBodies,
@@ -200,6 +204,73 @@ const Water = () => {
       )}
     </>
   );
+};
+
+const clothGeometry = new PlaneGeometry(2, 2, 6, 6);
+const ballGeometry = new SphereGeometry(0.4, 8, 6);
+const jellyGeometry = new BoxGeometry(0.6, 0.6, 0.6);
+
+const SoftBodies = () => {
+  const frame = useRef(0);
+  const [shown, setShown] = useState(true);
+  const noop = () => {};
+
+  const [floor] = useBox({ size: [20, 1, 20], position: [0, -4.5, 0], motionType: "static" });
+  const [sensor] = useBox({
+    size: [3, 2, 3],
+    position: [4, -3, 0],
+    motionType: "static",
+    sensor: true,
+  });
+  void floor;
+  void sensor;
+
+  const [, cloth] = useSoftBody(clothGeometry, {
+    position: [0, 2, 0],
+    pinned: (point) => point.y > 0.99,
+    lra: "geodesic",
+    wind: [0, 0, 3],
+    debug: true,
+  });
+  const [, ball] = useSoftBody(ballGeometry, {
+    position: [-3, 1, 0],
+    pressure: 500,
+    floats: 2,
+    onEnterWater: noop,
+    onExitWater: noop,
+  });
+
+  useBodyContacts(cloth?.body, { onEnter: noop, onStay: noop, onExit: noop });
+  useBodyContacts(ball?.body, { onEnter: noop, onExit: noop });
+  useSoftBodyContactListener({
+    onSoftBodyContactValidate: () => true,
+    onSoftBodyContactAdded: noop,
+  });
+
+  useFrame(function exerciseSoftBodies() {
+    frame.current += 1;
+    if (frame.current % 15 === 0) setShown((value) => !value);
+    if (!cloth) return;
+    cloth.setWind(frame.current % 20 < 10 ? [4, 0, 0] : [0, 0, 0]);
+    cloth.pin(24, frame.current % 10 < 5);
+    cloth.faceOf(0);
+    if (frame.current % 25 === 0) cloth.setEnabled(false);
+    if (frame.current % 25 === 5) cloth.setEnabled(true);
+  });
+
+  return (
+    <>
+      <PhysicsDebug />
+      <WaterVolume position={[-3, -2.5, 0]} size={[4, 3, 4]} />
+      {shown && <Jelly />}
+    </>
+  );
+};
+
+const Jelly = () => {
+  const [, jelly] = useSoftBody(jellyGeometry, { position: [4, 0, 0], pressure: 200 });
+  useBodyContacts(jelly?.body, { onEnter: () => {} });
+  return null;
 };
 
 const Car = () => {
@@ -617,6 +688,12 @@ describe("mount/unmount leak checks", () => {
 
   it("water volumes, floats and swimming leave the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<Water />, 80);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("soft bodies, their contacts, wind, water and debug leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<SoftBodies />, 80);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });

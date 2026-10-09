@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
-import { Mesh, type BufferGeometry, type MeshBasicMaterial } from "three";
+import {
+  BufferAttribute,
+  BufferGeometry,
+  DynamicDrawUsage,
+  Mesh,
+  type MeshBasicMaterial,
+} from "three";
 import type Jolt from "jolt-physics";
 import { useJolt } from "./useJolt";
 import {
@@ -17,6 +23,14 @@ import {
   type TransformTracker,
 } from "./internal/interpolate";
 import { motionTypeName } from "./internal/motionType";
+import {
+  softBodyVertices,
+  type SoftBodyVertices,
+} from "./internal/softBodyVertices";
+import {
+  createVertexTracker,
+  type VertexTracker,
+} from "./internal/softBodyTracker";
 import type { MotionType } from "./types";
 
 export interface PhysicsDebugProps {
@@ -34,7 +48,23 @@ interface TrackedBody {
   mesh: Mesh;
   shapePointer: number;
   transform: TransformTracker;
+  /** A soft body's shape never changes identity, so it is redrawn from its vertices. */
+  soft: { layout: SoftBodyVertices; vertices: VertexTracker } | null;
 }
+
+const softBodyGeometry = (layout: SoftBodyVertices) => {
+  const geometry = new BufferGeometry();
+  const position = new BufferAttribute(new Float32Array(layout.count * 3), 3);
+  position.setUsage(DynamicDrawUsage);
+  geometry.setAttribute("position", position);
+  geometry.setIndex(new BufferAttribute(layout.faces, 1));
+  return geometry;
+};
+
+const forgetMesh = (entry: TrackedBody, release: (pointer: number) => void) => {
+  if (entry.soft) entry.mesh.geometry.dispose();
+  else release(entry.shapePointer);
+};
 
 interface CachedGeometry {
   geometry: BufferGeometry;
@@ -109,8 +139,9 @@ export const PhysicsDebug = ({
           state.joints.dispose();
         }
 
-        for (const { mesh } of state.tracked.values()) {
+        for (const { mesh, soft } of state.tracked.values()) {
           scene.remove(mesh);
+          if (soft) mesh.geometry.dispose();
         }
         state.tracked.clear();
 
@@ -166,39 +197,68 @@ export const PhysicsDebug = ({
       // through `useJolt()` — needs its wireframe rebuilt, not repositioned.
       if (entry && entry.shapePointer !== shapePointer) {
         scene.remove(entry.mesh);
-        release(entry.shapePointer);
+        forgetMesh(entry, release);
         tracked.delete(key);
         entry = undefined;
       }
 
+      const body = physicsSystem.GetBodyLockInterfaceNoLock().TryGetBody(id);
+      const valid = Boolean(body) && jolt.getPointer(body) !== 0;
+
       if (!entry) {
-        const mesh = new Mesh(acquire(shapePointer, shape));
+        const soft =
+          valid && body.IsSoftBody() ? softBodyVertices(jolt, body) : null;
+        const mesh = new Mesh(
+          soft ? softBodyGeometry(soft) : acquire(shapePointer, shape),
+        );
         mesh.frustumCulled = false;
         mesh.renderOrder = DEBUG_RENDER_ORDER;
         scene.add(mesh);
-        entry = { mesh, shapePointer, transform: createTransformTracker() };
+        entry = {
+          mesh,
+          shapePointer,
+          transform: createTransformTracker(),
+          soft: soft
+            ? { layout: soft, vertices: createVertexTracker(soft.count) }
+            : null,
+        };
         tracked.set(key, entry);
       }
 
       entry.mesh.material =
         materials[motionTypeName(jolt, bodyInterface.GetMotionType(id))];
 
+      if (!valid) continue;
+
+      if (entry.soft) {
+        const { layout, vertices } = entry.soft;
+        const changed = body.IsActive()
+          ? vertices.update(jolt, body, layout, api.timing)
+          : vertices.rest(jolt, body, layout);
+
+        if (changed) {
+          const position = entry.mesh.geometry.getAttribute(
+            "position",
+          ) as BufferAttribute;
+          (position.array as Float32Array).set(vertices.local);
+          position.needsUpdate = true;
+        }
+        entry.mesh.position.copy(vertices.origin);
+        continue;
+      }
+
       // Interpolated like the bodies themselves: a wireframe that snapped while
       // its mesh blended would drift visibly apart, which is the opposite of
       // what a debug overlay is for.
-      const body = physicsSystem.GetBodyLockInterfaceNoLock().TryGetBody(id);
-
-      if (body && jolt.getPointer(body) !== 0) {
-        entry.transform.update(body, api.timing);
-        entry.transform.applyTo(entry.mesh);
-      }
+      entry.transform.update(body, api.timing);
+      entry.transform.applyTo(entry.mesh);
     }
 
     for (const [key, entry] of tracked) {
       if (seen.has(key)) continue;
 
       scene.remove(entry.mesh);
-      release(entry.shapePointer);
+      forgetMesh(entry, release);
       tracked.delete(key);
     }
   });

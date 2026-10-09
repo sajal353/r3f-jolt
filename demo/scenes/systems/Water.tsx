@@ -15,6 +15,7 @@ import { Hud, Tag } from "../../shared/Stage";
 import { useMannequin } from "../../shared/mannequin";
 import { WaterSurface, type WaterSurfaceHandle } from "../../shared/WaterSurface";
 import { WAVE_CREST, waveHeight } from "../../shared/waves";
+import { BeachBall } from "../../shared/BeachBall";
 import { turnTowards } from "../../shared/helpers";
 
 const controls = [
@@ -526,6 +527,7 @@ export const Water = () => {
         return <Body key={drop.id} {...drop} />;
       })}
 
+      <BeachBall position={[3, 2, 2]} floats={10} />
       <Player surface={surface} />
 
       <Tag position={[CURRENT.x, 1, POOL.length / 2 + 1]}>current</Tag>

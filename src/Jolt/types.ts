@@ -67,6 +67,23 @@ export interface ContactHandlers {
   onContactRemoved?: (pair: Jolt.SubShapeIDPair) => void;
 }
 
+/**
+ * Soft bodies have a listener of their own: Jolt reports a soft body's
+ * contacts once per step and pair, with no persisted or removed calls.
+ */
+export interface SoftBodyContactHandlers {
+  /** Return `false` to let the pair pass through each other. */
+  onSoftBodyContactValidate?: (
+    softBody: Jolt.Body,
+    otherBody: Jolt.Body,
+    settings: Jolt.SoftBodyContactSettings,
+  ) => boolean | void;
+  onSoftBodyContactAdded?: (
+    softBody: Jolt.Body,
+    manifold: Jolt.SoftBodyManifold,
+  ) => void;
+}
+
 export interface ContactInfo {
   bodyID: number;
   userData: number;
@@ -205,6 +222,9 @@ export interface ContactRegistry {
     source: SurfaceVelocity,
   ) => SurfaceVelocityHandle;
   surfaceVelocityOf: (bodyID: number) => SurfaceVelocity | undefined;
+  addSoftBodyListener: (handlers: SoftBodyContactHandlers) => () => void;
+  /** Ends a removed soft body's contacts, with `onExit` on both sides. */
+  forgetSoftBody: (bodyID: number) => void;
   subscribe: (callback: () => void) => () => void;
   getSnapshot: () => number;
   flush: () => void;

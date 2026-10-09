@@ -1,11 +1,13 @@
 import { Quaternion, Vector3 } from "three";
 import type Jolt from "jolt-physics";
+import { createSoftContacts } from "./softContacts";
 import type {
   BodyContactHandlers,
   ContactHandlers,
   ContactInfo,
   ContactRegistry,
   JoltModule,
+  StepRegistry,
   SurfaceVelocity,
 } from "../types";
 
@@ -33,6 +35,7 @@ const createContactInfo = (): ContactInfo => ({
 export const createContactRegistry = (
   Jolt: JoltModule,
   physicsSystem: Jolt.PhysicsSystem,
+  steps: StepRegistry,
 ): ContactRegistry => {
   const listeners = new Set<ContactHandlers>();
   const bodyListeners = new Map<number, Set<BodyContactHandlers>>();
@@ -184,6 +187,28 @@ export const createContactRegistry = (
 
     queue.push({ kind: "exit", target: targetID, info });
   };
+
+  const soft = createSoftContacts(Jolt, physicsSystem, steps, {
+    watching: () => bodyListeners.size > 0,
+    wants: wantsBodyEvents,
+    emit: (kind, target, other, userData, shapeUserData, point, normal) => {
+      if (!wantsBodyEvents(target, kind)) return;
+
+      const info = take();
+      info.bodyID = other;
+      info.userData = userData;
+      info.shapeUserData = shapeUserData;
+      info.point.copy(point);
+      info.normal.copy(normal);
+      info.penetrationDepth = 0;
+      info.impactSpeed = 0;
+      info.impulse = 0;
+
+      remember(other, userData);
+      queue.push({ kind, target, info });
+    },
+    exit: (target, other) => queueExitEvent(target, other),
+  });
 
   const readCentre = (target: Vector3, body: Jolt.Body) => {
     const centre = body.GetCenterOfMassPosition();
@@ -425,6 +450,7 @@ export const createContactRegistry = (
   };
 
   const uninstallIfIdle = () => {
+    soft.sync();
     if (listener === null) return;
     if (listeners.size > 0 || bodyListeners.size > 0) return;
     if (surfaceVelocities.size > 0) return;
@@ -462,6 +488,7 @@ export const createContactRegistry = (
       }
 
       install();
+      soft.sync();
 
       return () => {
         if (withForce) {
@@ -501,6 +528,18 @@ export const createContactRegistry = (
 
     surfaceVelocityOf: (bodyID) => surfaceVelocities.get(bodyID),
 
+    addSoftBodyListener: (handlers) => {
+      if (destroyed) return () => {};
+      const remove = soft.add(handlers);
+      return () => {
+        if (!destroyed) remove();
+      };
+    },
+
+    forgetSoftBody: (bodyID) => {
+      if (!destroyed) soft.forget(bodyID);
+    },
+
     subscribe: (callback) => {
       storeSubscribers.add(callback);
       return () => storeSubscribers.delete(callback);
@@ -535,6 +574,7 @@ export const createContactRegistry = (
       if (destroyed) return;
 
       destroyed = true;
+      soft.destroy();
       listeners.clear();
       bodyListeners.clear();
       forceWanted.clear();

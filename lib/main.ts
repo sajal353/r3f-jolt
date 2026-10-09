@@ -59,6 +59,14 @@ export {
   type SwimmingApi,
 } from "@/Jolt/useSwimming";
 export { WaterVolume, type WaterVolumeProps } from "@/Jolt/WaterVolume";
+export {
+  useSoftBody,
+  type UseSoftBodyOptions,
+  type SoftBodyApi,
+  type BendType,
+  type LRAType,
+} from "@/Jolt/useSoftBody";
+export { useSoftBodyContactListener } from "@/Jolt/useSoftBodyContactListener";
 export type {
   CharacterContactHandlers,
   CharacterBodyContact,
@@ -310,6 +318,7 @@ export type {
   BroadPhaseLayerConfig,
   LayerConfig,
   ContactHandlers,
+  SoftBodyContactHandlers,
   ContactInfo,
   ContactRegistry,
   SurfaceVelocity,

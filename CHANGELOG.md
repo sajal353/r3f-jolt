@@ -10,7 +10,7 @@
 
 ### Characters
 
-- `useCharacter` options `shape` (compound children instead of the capsules), `innerBody` with `innerBodyLayer` and `innerBodyIDOverride`, `collideWithCharacters` (on by default), `userData`, and `options.enhancedInternalEdgeRemoval`.
+- `useCharacter` options `shape` (compound children instead of the capsules), `innerBody` with `innerBodyLayer` and `innerBodyIDOverride`, `collideWithCharacters` (on by default), `collideWithSoftBodies` (off by default: the character walks through cloth and its inner body pushes it), `userData`, and `options.enhancedInternalEdgeRemoval`.
 - All eleven `CharacterContactListener` callbacks as options: `onContactValidate`, `onCharacterContactValidate`, `onContactAdded`, `onContactPersisted`, `onContactRemoved`, `onCharacterContactAdded`, `onCharacterContactPersisted`, `onCharacterContactRemoved`, `onContactSolve`, `onCharacterContactSolve`, `onAdjustBodyVelocity`.
 - The api adds `characterID`, `innerBodyID`, `hasCollidedWith`, `hasCollidedWithCharacter` and `getActiveContacts`.
 - Characters block each other through one `CharacterVsCharacterCollisionSimple` per world, `JoltApi.characters`.
@@ -24,6 +24,14 @@
 - Body options `floats` (`false` opts out, a number scales the buoyancy), `onEnterWater` and `onExitWater`.
 - `useSwimming(character, options)`: an `overrideUpdate` that floats a `useCharacter` at `depth`, with `speed`, `verticalSpeed`, `damping` and `followFlow`; the api has `overrideUpdate`, `setVertical`, `setFloatDepth`, `swimming`, `moving` and `depth`. The swimming position is left to the caller, through `setShape`.
 - `JoltApi.water` with `sample(point)`, and `api.timing.elapsed`, the simulated time. `WaterEvent`, `WaterSample`, `WaveHeight` and `WaterRegistry` are exported.
+
+### Soft bodies
+
+- `useSoftBody(geometry, options)`: cloth and inflatables from a `BufferGeometry`, welded by position with `weld`. Options `pinned`, `mass`, `compliance`, `shearCompliance`, `bendCompliance`, `bend`, `angleTolerance`, `lra`, `lraMaxDistanceMultiplier`, `tetrahedra`, `volumeCompliance`, `iterations`, `linearDamping`, `maxLinearVelocity`, `restitution`, `friction`, `pressure`, `gravityFactor`, `vertexRadius`, `facesDoubleSided`, `allowSleeping`, `wind`, `airDrag`, `normals`, `floats`, `onEnterWater`, `onExitWater`, `settingsOverride` and the usual layer and group options; `pressure`, `iterations`, `vertexRadius`, `friction`, `restitution`, `gravityFactor`, `linearDamping`, `wind` and `airDrag` are live.
+- `api.geometry` is a copy of the geometry with interpolated positions and recomputed normals, written without allocating. The api has `getVertex`, `setVertex`, `setVertexVelocity`, `pin`, `isPinned`, `setWind`, `faceOf`, `applyForce`, `applyImpulse`, `setLinearVelocity`, `setPosition`, `setEnabled` and the sleep calls.
+- `useBodyContacts` and `useSensor` report soft-body contacts, on both sides of the pair; `useSoftBodyContactListener` is the raw listener. `SoftBodyContactHandlers` is exported.
+- Soft bodies float in `<WaterVolume>` per vertex, and `<PhysicsDebug>` draws them from their live vertices.
+- `<Physics>` keeps a demand frame loop running while a soft body is awake.
 
 ### Constraints
 
@@ -47,6 +55,7 @@
 
 ### Demo
 
+- **Systems › Cloth**: a flag in gusting wind, a curtain on a rail, a tablecloth, a beach ball and a jelly cube to throw balls at. A beach ball floats in **Systems › Water**.
 - **Constraints › Breaking joints**, and a `debug` toolbar toggle for `<Physics debug>`.
 - **Systems › Water**: a pool with waves drawn by a shader that matches the physics, ripples from splashes and from the swimmer, faint lines along a current, crates, stones, buoys and logs, and the mannequin swimming with its swim clips.
 - **Systems › Character contacts**: an inner body, characters that block each other, a belt and a turntable, and the contact callbacks.

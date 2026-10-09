@@ -61,6 +61,7 @@ import { Character } from "./systems/Character";
 import { CharacterContacts } from "./systems/CharacterContacts";
 import { Car } from "./systems/Car";
 import { Water } from "./systems/Water";
+import { Cloth } from "./systems/Cloth";
 import { RagdollScene } from "./systems/Ragdoll";
 import { RagdollFitScene } from "./systems/RagdollFit";
 import { RagdollCharacterScene } from "./systems/RagdollCharacter";
@@ -801,9 +802,25 @@ export const categories: Category[] = [
             <code>C</code> dives, swimming forward takes a horizontal swimming position, and
             the ramp wades you out. Bodies ride the same <code>waves</code> the
             shader draws. Crates float, stones have <code>floats: false</code>,
-            buoys <code>floats: 2</code>. The strip
+            buoys <code>floats: 2</code>, and the beach ball is a{" "}
+            <code>useSoftBody</code> floating per vertex. The strip
             on the left is a second, higher-priority volume with a{" "}
             <code>flow</code>. Every splash is an <code>onEnter</code>.
+          </>
+        ),
+      },
+      {
+        name: "Cloth",
+        Component: Cloth,
+        hook: "useSoftBody",
+        hint: (
+          <>
+            <b>Click</b> to throw a ball; the curtain marks each hit through{" "}
+            <code>useBodyContacts</code>. The flag flies in a gusting{" "}
+            <code>wind</code>, the curtain hangs from a rail on geodesic{" "}
+            <code>lra</code> tethers, the tablecloth drapes with a{" "}
+            <code>vertexRadius</code>, and the beach ball and jelly hold their
+            shape with <code>pressure</code>.
           </>
         ),
       },

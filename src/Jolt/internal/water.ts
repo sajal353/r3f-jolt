@@ -1,5 +1,6 @@
 import { Vector3 } from "three";
 import type Jolt from "jolt-physics";
+import { softBodyVertices, type SoftBodyVertices } from "./softBodyVertices";
 import type {
   JoltModule,
   PhysicsTiming,
@@ -16,10 +17,19 @@ import type {
 /** Step across which a wave's slope is measured, in metres. */
 const SLOPE_STEP = 0.1;
 
+/**
+ * A soft-body vertex is a point with no volume of its own, so its lift ramps up
+ * over this depth instead of switching on at the surface, which would make it
+ * chatter there.
+ */
+const SOFT_SURFACE_BAND = 0.1;
+
 interface Tracked {
   volume: WaterVolumeEntry;
   userData: number;
   canFloat: boolean;
+  /** Set for a soft body, which floats per vertex. */
+  soft: SoftBodyVertices | null;
   seenAt: number;
 }
 
@@ -161,6 +171,55 @@ export const createWaterRegistry = (
     return true;
   };
 
+  /**
+   * `ApplyBuoyancyImpulse` asserts on a soft body, which has no rigid volume.
+   * Each submerged vertex is lifted against gravity and dragged towards the
+   * flow instead, straight on the heap.
+   */
+  const floatVertices = (
+    body: Jolt.Body,
+    layout: SoftBodyVertices,
+    volume: WaterVolumeEntry,
+    strength: number,
+  ) => {
+    const heap = jolt.HEAPF32;
+    const origin = body.GetPosition();
+    const originX = origin.GetX();
+    const originY = origin.GetY();
+    const originZ = origin.GetZ();
+    const liftX = -gravity.GetX() * strength * delta;
+    const liftY = -gravity.GetY() * strength * delta;
+    const liftZ = -gravity.GetZ() * strength * delta;
+    const drag = Math.min(1, volume.linearDrag * delta);
+    const { min, max } = volume;
+
+    for (let index = 0; index < layout.count; index += 1) {
+      const offset = index * layout.stride;
+      if (heap[layout.inverseMass + offset] <= 0) continue;
+
+      const at = layout.position + offset;
+      const x = heap[at] + originX;
+      const y = heap[at + 1] + originY;
+      const z = heap[at + 2] + originZ;
+      if (x < min.x || x > max.x || z < min.z || z > max.z || y < min.y) {
+        continue;
+      }
+
+      const level =
+        volume.surfaceLevel + (volume.waves ? volume.waves(x, z, time) : 0);
+      const depth = level - y;
+      if (depth <= 0) continue;
+
+      const share = Math.min(depth / SOFT_SURFACE_BAND, 1);
+      const velocity = layout.velocity + offset;
+      heap[velocity] += liftX * share + (volume.flow.x - heap[velocity]) * drag * share;
+      heap[velocity + 1] +=
+        liftY * share + (volume.flow.y - heap[velocity + 1]) * drag * share;
+      heap[velocity + 2] +=
+        liftZ * share + (volume.flow.z - heap[velocity + 2]) * drag * share;
+    }
+  };
+
   const collector = new jolt.CollideShapeBodyCollectorJS();
   collector.Reset = () => collector.ResetEarlyOutFraction();
   collector.AddHit = function found(pointer: number) {
@@ -184,7 +243,10 @@ export const createWaterRegistry = (
       entry = {
         volume,
         userData: Number(body.GetUserData()),
-        canFloat: !noVolume.has(innermost(body.GetShape()).GetType()),
+        canFloat:
+          body.IsSoftBody() ||
+          !noVolume.has(innermost(body.GetShape()).GetType()),
+        soft: body.IsSoftBody() ? softBodyVertices(jolt, body) : null,
         seenAt: stepIndex,
       };
       tracked.set(bodyID, entry);
@@ -202,6 +264,11 @@ export const createWaterRegistry = (
     const floats = bodies.get(bodyID)?.current.floats ?? 1;
     if (floats <= 0 || !entry.canFloat) return;
     if (!body.IsDynamic() || !body.IsActive()) return;
+
+    if (entry.soft) {
+      floatVertices(body, entry.soft, volume, volume.buoyancy * floats);
+      return;
+    }
 
     body.ApplyBuoyancyImpulse(
       surface,

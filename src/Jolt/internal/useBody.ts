@@ -329,7 +329,7 @@ export const shapeFromResultAs = <
  * `BodyCreationSettings` takes the filter's refcount up by one and destroying
  * this brings it back down, leaving the settings' own copy holding a reference.
  */
-const withCollisionGroup = (
+export const withCollisionGroup = (
   jolt: JoltModule,
   options: CollisionGroupOptions,
   visit: (group: Jolt.CollisionGroup) => void,
@@ -349,9 +349,41 @@ const withCollisionGroup = (
   jolt.destroy(group);
 };
 
+export type WaterBodyOptions = Pick<
+  BodyOptions,
+  "floats" | "onEnterWater" | "onExitWater"
+>;
+
+/** Registers `body` with the water registry while it asks for any of these. */
+export const useWaterBody = (
+  body: Jolt.Body | undefined,
+  options: WaterBodyOptions,
+) => {
+  const api = useJolt();
+  const floats = options.floats;
+  const waterSettings = useHandlerRef<WaterBodySettings>({
+    floats: floats === false ? 0 : floats === true ? 1 : (floats ?? 1),
+    onEnterWater: options.onEnterWater,
+    onExitWater: options.onExitWater,
+  });
+
+  const wantsWater = Boolean(
+    floats !== undefined || options.onEnterWater || options.onExitWater,
+  );
+
+  useEffect(() => {
+    if (!body || !wantsWater) return;
+
+    return api.water.addBody(
+      body.GetID().GetIndexAndSequenceNumber(),
+      waterSettings,
+    );
+  }, [api, body, wantsWater, waterSettings]);
+};
+
 const MAX_USER_DATA = 0xffffffff;
 
-const validateUserData = (value: number, label: string) => {
+export const validateUserData = (value: number, label: string) => {
   if (!Number.isInteger(value) || value < 0 || value > MAX_USER_DATA) {
     console.warn(
       `[r3f-jolt] ${label} must be a 32-bit unsigned integer (0…${MAX_USER_DATA}). ` +
@@ -1072,25 +1104,7 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
     );
   }, [api, bodyApi, wantsActivationEvents, activationHandlers]);
 
-  const floats = options.floats;
-  const waterSettings = useHandlerRef<WaterBodySettings>({
-    floats: floats === false ? 0 : floats === true ? 1 : (floats ?? 1),
-    onEnterWater: options.onEnterWater,
-    onExitWater: options.onExitWater,
-  });
-
-  const wantsWater = Boolean(
-    floats !== undefined || options.onEnterWater || options.onExitWater,
-  );
-
-  useEffect(() => {
-    if (!bodyApi || !wantsWater) return;
-
-    return api.water.addBody(
-      bodyApi.body.GetID().GetIndexAndSequenceNumber(),
-      waterSettings,
-    );
-  }, [api, bodyApi, wantsWater, waterSettings]);
+  useWaterBody(bodyApi?.body, options);
 
   const surfaceVelocity = mount.options.surfaceVelocity;
 

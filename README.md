@@ -837,6 +837,7 @@ Top-level options, all init-once:
 - `shape: { standing, crouching? }` replaces the capsules with compound children placed from the feet (the same children `useCompound` takes).
 - `innerBody: true | { standing, crouching? }` adds a kinematic body that follows the character, so raycasts, sensors and the solver see it. Without it a `CharacterVirtual` is invisible to the rest of the world. `innerBodyLayer` and `innerBodyIDOverride` set its layer and a fixed body ID.
 - `collideWithCharacters` (on by default) adds the character to the world's character-vs-character registry, so characters block each other.
+- `collideWithSoftBodies` (off by default): the character walks through cloth, and its `innerBody` pushes the cloth aside. Jolt's character queries report contacts well short of a soft body, so a character colliding with one stops about a metre away.
 - `userData` is what the character reports itself as in other characters' contacts.
 
 The api adds `characterID`, `innerBodyID`, `hasCollidedWith(bodyID)`, `hasCollidedWithCharacter(api | characterID)` and `getActiveContacts(target?)`, which fills plain objects instead of allocating each call.
@@ -889,6 +890,48 @@ useFrame((_, delta) => {
 In water deeper than `depth` the character floats with its feet that far down, swims at `speed` of its walking speed, rises or dives at `verticalSpeed` on `setVertical`, and drifts with the flow unless `followFlow` is off. Read `swimming`, `moving` (across the water rather than treading it) and `depth` back each frame.
 
 The shape is yours. To put a swimmer in a swimming position, swap a shape in with `api.setShape` when `moving` turns true, turned with `character.SetRotation` to face the way it swims, and float the feet at the depth that shape needs with `swim.setFloatDepth(depth | null)`. **Systems › Water** does this, keeping the body's centre where it is as the shape changes.
+
+## Soft bodies
+
+`useSoftBody(geometry, options?)` simulates a `BufferGeometry` as cloth or an inflatable, and hands back a copy of it that follows the simulation:
+
+```tsx
+const flag = useMemo(() => new PlaneGeometry(3, 2, 24, 16), []);
+const [ref, api] = useSoftBody(flag, {
+  position: [0, 4, 0],
+  pinned: (point) => point.x < -1.49,
+  mass: 1.5,
+  wind: [3, 0, 1.5],
+});
+
+return <mesh ref={ref} geometry={api?.geometry} />;
+```
+
+Read at mount: `position`, `rotation`, `weld` (`1e-4`), `pinned` (geometry indices or `(position, index) => boolean`), `mass` (total; Jolt's default is 1 kg a vertex), `compliance`, `shearCompliance`, `bendCompliance`, `bend` (`"none"` · `"distance"` · `"dihedral"`), `angleTolerance`, `lra` (`"none"` · `"euclidean"` · `"geodesic"`), `lraMaxDistanceMultiplier`, `tetrahedra` with `volumeCompliance`, `maxLinearVelocity`, `facesDoubleSided`, `allowSleeping`, `userData`, `layer`, `group`, `mask`, `collisionGroup`, `enabled`, `debug`, `normals`, `settingsOverride(shared, creation)`. Live: `pressure`, `iterations`, `vertexRadius`, `friction`, `restitution`, `gravityFactor`, `linearDamping`, `wind`, `airDrag` (`1`), `floats`, `onEnterWater`, `onExitWater`.
+
+The api: `body`, `geometry`, `debugMesh`, `vertexCount`, `setEnabled`, `applyForce`, `applyImpulse`, `setLinearVelocity`, `setPosition`, `wake`, `sleep`, `isSleeping`, `getVertex`, `setVertex`, `setVertexVelocity`, `pin`, `isPinned`, `setWind`, `faceOf`.
+
+- **Vertices are welded by position**, so a `BoxGeometry`'s 24 seam vertices simulate as 8 corners while the copy keeps its UVs and seams. Every vertex index in the api is a geometry index.
+- **Positions are interpolated** between steps like every body, and normals are recomputed when they move (`normals: false` skips it). A sleeping soft body uploads nothing.
+- **`airDrag` and `wind`** push each face along its normal, against its motion through the air, before every step. Air drag is what lets cloth drift and settle rather than swing like chain.
+- **`pressure`** inflates a closed mesh. Build balls from an `IcosahedronGeometry`: a UV sphere's poles fan sliver triangles into one vertex that never stops trembling. `restitution` on a resting body trembles the same way.
+- **Hanging cloth** wants some `bendCompliance` (`0.01`–`0.1`) and, with `lra` tethers, a `lraMaxDistanceMultiplier` of about `1.02`; at exactly rest length the tethers fight the edges and the pinned rows shimmer.
+- **To drag a vertex**, call `setVertexVelocity` towards the target from `useBeforePhysicsStep`. `pin` + `setVertex` moves a point the cloth cannot pull back on, and a hard pull whips it.
+- `applyForce` acts on every vertex alike. `applyImpulse` and `setLinearVelocity` go to the free vertices; a pinned one moves only when set.
+- Rays and shape casts hit soft bodies; `faceOf(hit.subShapeID)` names the geometry triangle. `useBodyContacts` and `useSensor` work on soft bodies and on whatever touches them, and `useSoftBodyContactListener` is the raw listener. A `useCharacter` walks through soft bodies; give it an `innerBody` to push them. Soft bodies float in `<WaterVolume>` per vertex, so a light ball wants a high `floats`.
+- Collision is per vertex: thin or fast shapes can slip between vertices, and `vertexRadius` keeps cloth off what it rests on.
+
+Soft bodies are the most expensive thing in Jolt. Step time grows with vertices × `iterations` (release build, 5 iterations):
+
+| Vertices | ms per step |
+| -------- | ----------- |
+| 100      | 0.08        |
+| 576      | 0.39        |
+| 1024     | 0.70        |
+| 2025     | 1.38        |
+| 4096     | 2.78        |
+
+A few hundred vertices per cloth and a couple of thousand in a scene leave room for everything else.
 
 ## Ragdolls
 
@@ -1180,7 +1223,7 @@ useContactListener({
 });
 ```
 
-Many components can subscribe; the library multiplexes them onto Jolt's single listener. `onContactValidate` accepts by default and handlers run in registration order — the first `false` rejects the pair.
+Many components can subscribe; the library multiplexes them onto Jolt's single listener. `useSoftBodyContactListener({ onSoftBodyContactValidate, onSoftBodyContactAdded })` is the same for soft bodies, whose contacts Jolt reports once per step and pair. `onContactValidate` accepts by default and handlers run in registration order — the first `false` rejects the pair.
 
 Inside these handlers: **do not** retain a `Body` or manifold past the call, **do not** call `setState`, and **do not** create or destroy bodies. Use `useBodyContacts` when you need any of that.
 
@@ -1292,7 +1335,7 @@ pnpm install
 pnpm dev
 ```
 
-65 scenes in seven categories, one per hook or feature:
+66 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
@@ -1302,7 +1345,7 @@ pnpm dev
 | **Constraints**  | all 8 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
-| **Systems**      | character · character contacts · water · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
+| **Systems**      | character · character contacts · water · cloth · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
 
 Toolbar toggles for `<PhysicsDebug />`, `<Physics debug>`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 
