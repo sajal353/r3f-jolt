@@ -327,6 +327,8 @@ All of them take these options and return `[ref, api]`.
 | `gravityFactor`            | `1`                         | `0` makes a body float                             |
 | `allowSleeping`            | `true`                      |                                                    |
 | `onWake` / `onSleep`       | —                           | Delivered after the step, not from inside it       |
+| `floats`                   | `true`                      | `false` ignores [water](#water); a number scales its buoyancy |
+| `onEnterWater` / `onExitWater` | —                       | Dry to wet and back, delivered after the step      |
 | `allowedDOFs`              | all six                     | Raw `EAllowedDOFs` bit mask                        |
 | `lockRotations` / `lockTranslations` | `false`           | Ergonomic wrappers over `allowedDOFs`              |
 | `enabledRotations` / `enabledTranslations` | —         | `[x, y, z]` booleans                               |
@@ -822,11 +824,13 @@ useFrame((_, delta) => {
 });
 ```
 
-`update(direction, jump, crouched, deltaTime, options?)` — `direction` is a world-space `Vector3` and is **not** mutated. The trailing options are `{ ignoreHorizontalMovementLock?, addToVelocity?, overrideUpdate? }`.
+`update(direction, jump, crouched, deltaTime, options?)` — `direction` is a world-space `Vector3` and is **not** mutated. The trailing options are `{ ignoreHorizontalMovementLock?, addToVelocity?, overrideUpdate? }`. `overrideUpdate(velocity, up, deltaTime)` replaces the velocity before the move.
 
 `options` is optional and deep-merged with the defaults. Alongside the movement settings it exposes `maxSlopeAngle`, `maxStrength`, `characterPadding`, `penetrationRecoverySpeed`, `predictiveContactDistance` and `enhancedInternalEdgeRemoval` (stops catching on a triangle mesh's inner edges). A non-vertical `up` is supported at the top level.
 
-The character's position is its **feet**, so a settled character on a floor whose top face is `y = 0` reports `y ≈ 0`. The shape is swapped only when the crouch state actually changes, and debug meshes track the character every frame whether or not you call `update`.
+The character's position is its **feet**, so a settled character on a floor whose top face is `y = 0` reports `y ≈ 0`. The shape is swapped only when the crouch state changes, and a stand-up with no room overhead is retried on the next update rather than taken. `api.setShape(children | shape | null)` swaps in a shape of your own, placed from the feet, until `null` hands back the standing or crouching one; it returns `false` and changes nothing when the shape has no room. Compound children are built and freed by the hook; a Jolt shape stays yours. A shape that does not reach down to the feet leaves the character unsupported on land. Debug meshes track the character every frame whether or not you call `update`.
+
+Its weight presses on a dynamic body it stands on, under its centre, and never more than that body's own weight, so a heavy character on a light float sinks it rather than spinning it.
 
 Top-level options, all init-once:
 
@@ -838,6 +842,53 @@ Top-level options, all init-once:
 The api adds `characterID`, `innerBodyID`, `hasCollidedWith(bodyID)`, `hasCollidedWithCharacter(api | characterID)` and `getActiveContacts(target?)`, which fills plain objects instead of allocating each call.
 
 All eleven `CharacterContactListener` callbacks are options and stay live: `onContactValidate`, `onCharacterContactValidate`, `onContactAdded`, `onContactPersisted`, `onContactRemoved`, `onCharacterContactAdded`, `onCharacterContactPersisted`, `onCharacterContactRemoved`, `onContactSolve`, `onCharacterContactSolve` and `onAdjustBodyVelocity`. They run synchronously inside `update`, and the contact object passed to them is reused: copy what you keep. Normals point from the character towards what it touches. Belts from `useConveyor` carry a character.
+
+## Water
+
+`<WaterVolume>` is a box of water. Bodies in it float, are dragged towards its `flow`, and report crossing in and out.
+
+```tsx
+<WaterVolume
+  position={[0, -2, 0]}
+  size={[20, 4, 20]}
+  surfaceLevel={-0.3}
+  waves={(x, z, time) => 0.1 * Math.sin(x - time)}
+  flow={[1, 0, 0]}
+  onEnter={(event) => splash(event.position, event.velocity)}
+>
+  <mesh>{/* drawn at the box's centre */}</mesh>
+</WaterVolume>
+```
+
+Props, all live except `layer`: `position` (the box's centre), `size`, `surfaceLevel` (defaults to the top of the box), `waves`, `buoyancy` (`1.2`), `linearDrag` (`0.5`), `angularDrag` (`0.05`), `flow`, `priority`, `layer`, `onEnter`, `onExit`, `debug`.
+
+- **Buoyancy is relative to each body's own density**: `1` hovers, above floats, below sinks, whatever the body's mass. Jolt has no volume for a mesh, height field or plane, so those don't float.
+- **It runs before every physics step**, not every frame, so a float bobs the same at any frame rate.
+- **`waves(x, z, time)`** is the surface's height above `surfaceLevel` on the physics clock (`api.timing.elapsed`). Each body floats on the wave under it, tilted to its slope. Leave room in `size` for the crests.
+- **Overlapping volumes**: the one with the highest `priority` owns a body; on a tie, the one mounted first.
+- **A body asleep in the water is still in it**, and fires no exit. Changing a volume wakes what is in it.
+- Only the box picks bodies; the surface is level in world space unless `waves` moves it.
+- Jolt's drag grows with the square of speed, so it is weak near rest: a float takes a while to settle, and a fast one can leap clean out, unless `linearDrag` is raised.
+- `onEnter`/`onExit` fire for each volume a body crosses into or out of, with `{ bodyID, userData, position, velocity }`. The body options `onEnterWater`/`onExitWater` fire only between dry and wet. `api.water.sample(point)` answers how deep a point is.
+
+### `useSwimming(character, options?)`
+
+Swimming for a `useCharacter`, as its `overrideUpdate`:
+
+```tsx
+const swim = useSwimming(character, { depth: 1.2 });
+
+useFrame((_, delta) => {
+  swim.setVertical(keys.up ? 1 : keys.down ? -1 : 0);
+  character?.update(direction, jump, false, delta, {
+    overrideUpdate: swim.overrideUpdate,
+  });
+});
+```
+
+In water deeper than `depth` the character floats with its feet that far down, swims at `speed` of its walking speed, rises or dives at `verticalSpeed` on `setVertical`, and drifts with the flow unless `followFlow` is off. Read `swimming`, `moving` (across the water rather than treading it) and `depth` back each frame.
+
+The shape is yours. To put a swimmer in a swimming position, swap a shape in with `api.setShape` when `moving` turns true, turned with `character.SetRotation` to face the way it swims, and float the feet at the depth that shape needs with `swim.setFloatDepth(depth | null)`. **Systems › Water** does this, keeping the body's centre where it is as the shape changes.
 
 ## Ragdolls
 
@@ -1241,7 +1292,7 @@ pnpm install
 pnpm dev
 ```
 
-64 scenes in seven categories, one per hook or feature:
+65 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
@@ -1251,7 +1302,7 @@ pnpm dev
 | **Constraints**  | all 8 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
-| **Systems**      | character · character contacts · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
+| **Systems**      | character · character contacts · water · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
 
 Toolbar toggles for `<PhysicsDebug />`, `<Physics debug>`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 

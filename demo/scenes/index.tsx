@@ -60,6 +60,7 @@ import { ContactForce } from "./events/ContactForce";
 import { Character } from "./systems/Character";
 import { CharacterContacts } from "./systems/CharacterContacts";
 import { Car } from "./systems/Car";
+import { Water } from "./systems/Water";
 import { RagdollScene } from "./systems/Ragdoll";
 import { RagdollFitScene } from "./systems/RagdollFit";
 import { RagdollCharacterScene } from "./systems/RagdollCharacter";
@@ -786,6 +787,23 @@ export const categories: Category[] = [
             you through <code>useConveyor</code>. Balls land on your{" "}
             <code>innerBody</code>, and the readout lists what the contact
             callbacks say you touch.
+          </>
+        ),
+      },
+      {
+        name: "Water",
+        Component: Water,
+        hook: "WaterVolume",
+        hint: (
+          <>
+            <code>WASD</code> to move, <code>Shift</code> to sprint. In deep
+            water <code>useSwimming</code> takes over: <code>Space</code> rises,{" "}
+            <code>C</code> dives, swimming forward takes a horizontal swimming position, and
+            the ramp wades you out. Bodies ride the same <code>waves</code> the
+            shader draws. Crates float, stones have <code>floats: false</code>,
+            buoys <code>floats: 2</code>. The strip
+            on the left is a second, higher-priority volume with a{" "}
+            <code>flow</code>. Every splash is an <code>onEnter</code>.
           </>
         ),
       },

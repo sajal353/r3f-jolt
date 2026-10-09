@@ -171,14 +171,14 @@ The shared foundation for ragdolls _and_ skinned cloth. Its own module because b
 
 Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bodyID, surfacePosition, surfaceNormal, buoyancy, linearDrag, angularDrag, fluidVelocity, gravity, deltaTime)`.
 
-- [ ] `<WaterVolume>` region component: AABox or box shape, with `surfaceLevel`, `buoyancy`, `linearDrag`, `angularDrag`, `flow: Vector3`
-- [ ] Apply from `useBeforePhysicsStep` — **per sub-step, not per frame**; applied per frame, floating objects visibly bob differently at 30 fps than at 120
-- [ ] Find submerged bodies with a broadphase query per region (`BroadPhaseQuery.CollideAABox` / `CollectTransformedShapes`), never by iterating every body in the world
-- [ ] Pooled Jolt temporaries throughout: this runs for every floating body every sub-step and is the single worst place for a per-frame WASM leak
-- [ ] Per-body opt-out and per-body buoyancy multiplier (`floats?: boolean | number`)
-- [ ] `onEnterWater` / `onExitWater` events for splash VFX and audio, deferred to the frame boundary
-- [ ] Swimming mode for `useCharacter`: switch gravity handling and clamp vertical velocity when submerged, implemented through the existing `overrideUpdate` hook rather than forking the update loop
-- [ ] Overlapping regions resolve deterministically (highest priority, or deepest surface — pick one and document it)
+- [x] `<WaterVolume>` region component: AABox or box shape, with `surfaceLevel`, `buoyancy`, `linearDrag`, `angularDrag`, `flow: Vector3`. **Amended:** an axis-aligned box only, with `waves` added: a height function bodies float on, tilted to its slope
+- [x] Apply from `useBeforePhysicsStep` — **per sub-step, not per frame**; applied per frame, floating objects visibly bob differently at 30 fps than at 120
+- [x] Find submerged bodies with a broadphase query per region (`BroadPhaseQuery.CollideAABox` / `CollectTransformedShapes`), never by iterating every body in the world
+- [x] Pooled Jolt temporaries throughout: this runs for every floating body every sub-step and is the single worst place for a per-frame WASM leak
+- [x] Per-body opt-out and per-body buoyancy multiplier (`floats?: boolean | number`)
+- [x] `onEnterWater` / `onExitWater` events for splash VFX and audio, deferred to the frame boundary
+- [x] Swimming mode for `useCharacter`: switch gravity handling and clamp vertical velocity when submerged, implemented through the existing `overrideUpdate` hook rather than forking the update loop. **Amended:** shipped as `useSwimming`. The shape stays the caller's: `moving` says when to take a swimming position, and `useCharacter`'s `setShape` swaps the shape
+- [x] Overlapping regions resolve deterministically (highest priority, or deepest surface — pick one and document it). **Amended:** highest priority, ties to the first mounted
 
 ### Soft bodies & cloth
 

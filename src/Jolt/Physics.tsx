@@ -6,6 +6,7 @@ import { joltContext, physicsDebugContext } from "./context";
 import { createActivationRegistry } from "./internal/activation";
 import { createConstraintRegistry } from "./internal/constraints";
 import { createContactRegistry } from "./internal/contacts";
+import { createWaterRegistry } from "./internal/water";
 import { createStepRegistry } from "./internal/steps";
 import { createTemps } from "./internal/temps";
 import { useHandlerRef } from "./internal/useHandlerRef";
@@ -135,6 +136,7 @@ export const Physics = ({
   const timingRef = useRef<PhysicsTiming>({
     stepDelta: typeof timeStep === "number" ? timeStep : 1 / 60,
     stepCount: 0,
+    elapsed: 0,
     alpha: 0,
     interpolate: false,
   });
@@ -176,6 +178,7 @@ export const Physics = ({
       world.steps.run("before", stepDelta, index);
       world.joltInterface.Step(stepDelta, collisionSteps);
       timing.stepCount = index + 1;
+      timing.elapsed += stepDelta;
       world.steps.run("after", stepDelta, index);
     };
 
@@ -200,6 +203,7 @@ export const Physics = ({
 
     world.contacts.flush();
     world.activation.flush();
+    world.water.flush();
 
     // On `frameloop="demand"` nothing asks for the next frame, so a world with
     // anything still moving in it would freeze mid-fall. Asking while bodies are
@@ -225,6 +229,7 @@ export const Physics = ({
       steps: ReturnType<typeof createStepRegistry>;
       temps: Temps;
       characters: Jolt.CharacterVsCharacterCollisionSimple;
+      water: ReturnType<typeof createWaterRegistry>;
       state: { disposed: boolean; destroyed: boolean };
     } | null = null;
 
@@ -287,6 +292,12 @@ export const Physics = ({
       const steps = createStepRegistry();
       const temps = createTemps(jolt);
       const characters = new jolt.CharacterVsCharacterCollisionSimple();
+      const water = createWaterRegistry(
+        jolt,
+        joltInterface,
+        steps,
+        timingRef.current,
+      );
 
       const objectLayer = (group: number, mask: number) =>
         jolt.ObjectLayerPairFilterMask.prototype.sGetObjectLayer(group, mask);
@@ -300,6 +311,7 @@ export const Physics = ({
         steps,
         temps,
         characters,
+        water,
         state,
       };
 
@@ -311,6 +323,7 @@ export const Physics = ({
         constraints.destroy();
         steps.destroy();
         temps.destroy();
+        water.destroy();
         jolt.destroy(characters);
         jolt.destroy(joltInterface);
         created = null;
@@ -337,6 +350,7 @@ export const Physics = ({
         steps,
         temps,
         characters,
+        water,
         timing: timingRef.current,
         step: (delta?: number) => advanceRef.current(delta),
         get debug() {
@@ -364,6 +378,7 @@ export const Physics = ({
           world.constraints.destroy();
           world.steps.destroy();
           world.temps.destroy();
+          world.water.destroy();
           world.jolt.destroy(world.characters);
           world.jolt.destroy(world.joltInterface);
         });

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { describe, expect, it } from "vitest";
 import type Jolt from "jolt-physics";
 import {
@@ -34,6 +34,9 @@ import { useInstancedBodies } from "@/Jolt/useInstancedBodies";
 import { useAutoCollider } from "@/Jolt/useAutoCollider";
 import { useCharacterModel } from "@/Jolt/useCharacterModel";
 import { useRagdoll, type RagdollMode } from "@/Jolt/useRagdoll";
+import { useSwimming } from "@/Jolt/useSwimming";
+import type { CompoundChild } from "@/Jolt/useCompound";
+import { WaterVolume } from "@/Jolt/WaterVolume";
 import {
   addBodies,
   destroyBodies,
@@ -136,6 +139,67 @@ const UpgradedCharacters = () => {
   });
 
   return null;
+};
+
+const SWIM_POSITION: CompoundChild[] = [
+  {
+    type: "capsule",
+    position: [0, 0.8, 0],
+    rotation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2],
+    height: 2,
+    radius: 0.8,
+  },
+];
+
+/** Two overlapping volumes, one coming and going, floats of every kind and a swimmer. */
+const Water = () => {
+  const [river, setRiver] = useState(true);
+  const frame = useRef(0);
+  const noop = () => {};
+
+  useBox({ size: [20, 1, 20], position: [0, -5.5, 0], motionType: "static" });
+  useBox({
+    size: [1, 1, 1],
+    position: [0, 1, 0],
+    motionType: "dynamic",
+    onEnterWater: noop,
+    onExitWater: noop,
+  });
+  useBox({ size: [1, 1, 1], position: [2, 1, 0], motionType: "dynamic", floats: false });
+  useBox({ size: [1, 1, 1], position: [-2, 1, 0], motionType: "dynamic", floats: 0.5 });
+  useBox({ size: [1, 1, 1], position: [0, -2, 2], motionType: "dynamic", sensor: true });
+
+  const [swimmer] = useCharacter({ position: [3, 0, 3], innerBody: true, debug: true });
+  const swim = useSwimming(swimmer);
+
+  useFrame((_, delta) => {
+    frame.current += 1;
+    if (frame.current % 20 === 0) setRiver((shown) => !shown);
+    swim.setVertical(frame.current % 30 < 15 ? -1 : 0);
+    // Built from children (the hook's to free) and back, every ten frames.
+    if (frame.current % 10 === 0) {
+      swimmer?.setShape(frame.current % 20 === 0 ? null : SWIM_POSITION);
+      swim.setFloatDepth(frame.current % 20 === 0 ? null : 0.6);
+    }
+    swimmer?.update(direction, false, false, delta, {
+      overrideUpdate: swim.overrideUpdate,
+    });
+  });
+
+  return (
+    <>
+      <WaterVolume position={[0, -2.5, 0]} size={[20, 5, 20]} onEnter={noop} onExit={noop} debug />
+      {river && (
+        <WaterVolume
+          position={[0, -2, 0]}
+          size={[6, 4, 6]}
+          flow={[2, 0, 0]}
+          priority={1}
+          surfaceLevel={-0.5}
+        />
+      )}
+    </>
+  );
 };
 
 const Car = () => {
@@ -547,6 +611,12 @@ describe("mount/unmount leak checks", () => {
 
   it("useCharacter upgrades leave the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<UpgradedCharacters />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("water volumes, floats and swimming leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<Water />, 80);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });

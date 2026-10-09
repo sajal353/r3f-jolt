@@ -34,6 +34,8 @@ import type {
   QuatTuple,
   Vec3Input,
   Vec3Tuple,
+  WaterBodySettings,
+  WaterEventHandler,
 } from "../types";
 
 /**
@@ -149,6 +151,15 @@ export interface BodyOptions {
    */
   onWake?: () => void;
   onSleep?: () => void;
+  /**
+   * How a `<WaterVolume>` treats this body. `false` ignores buoyancy and drag;
+   * a number multiplies the volume's `buoyancy`. Read fresh on every render.
+   */
+  floats?: boolean | number;
+  /** Delivered after the step, when the body first touches any water. */
+  onEnterWater?: WaterEventHandler;
+  /** Delivered after the step, when the body is out of every volume. */
+  onExitWater?: WaterEventHandler;
   bodySettingsOverride?: (settings: Jolt.BodyCreationSettings) => void;
 }
 
@@ -1060,6 +1071,26 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
       },
     );
   }, [api, bodyApi, wantsActivationEvents, activationHandlers]);
+
+  const floats = options.floats;
+  const waterSettings = useHandlerRef<WaterBodySettings>({
+    floats: floats === false ? 0 : floats === true ? 1 : (floats ?? 1),
+    onEnterWater: options.onEnterWater,
+    onExitWater: options.onExitWater,
+  });
+
+  const wantsWater = Boolean(
+    floats !== undefined || options.onEnterWater || options.onExitWater,
+  );
+
+  useEffect(() => {
+    if (!bodyApi || !wantsWater) return;
+
+    return api.water.addBody(
+      bodyApi.body.GetID().GetIndexAndSequenceNumber(),
+      waterSettings,
+    );
+  }, [api, bodyApi, wantsWater, waterSettings]);
 
   const surfaceVelocity = mount.options.surfaceVelocity;
 

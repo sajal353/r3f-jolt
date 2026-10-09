@@ -53,6 +53,12 @@ export {
   type CharacterShapes,
   type CharacterActiveContact,
 } from "@/Jolt/useCharacter";
+export {
+  useSwimming,
+  type UseSwimmingOptions,
+  type SwimmingApi,
+} from "@/Jolt/useSwimming";
+export { WaterVolume, type WaterVolumeProps } from "@/Jolt/WaterVolume";
 export type {
   CharacterContactHandlers,
   CharacterBodyContact,
@@ -315,4 +321,9 @@ export type {
   StepCallback,
   StepPhase,
   StepRegistry,
+  WaterEvent,
+  WaterEventHandler,
+  WaterSample,
+  WaterRegistry,
+  WaveHeight,
 } from "@/Jolt/types";

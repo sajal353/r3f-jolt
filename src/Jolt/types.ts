@@ -150,6 +150,8 @@ export interface PhysicsTiming {
    */
   stepDelta: number;
   stepCount: number;
+  /** Simulated seconds: every step's delta added up. */
+  elapsed: number;
   /**
    * How far the renderer is between the previous step and the current one, 0…1
    * — the accumulator remainder over `timeStep`. Always 0 when interpolation is
@@ -209,6 +211,66 @@ export interface ContactRegistry {
   destroy: () => void;
 }
 
+export interface WaterEvent {
+  bodyID: number;
+  userData: number;
+  /** Where the body was when it crossed, in world space. */
+  position: Vector3;
+  /** Its linear velocity at that moment: how big a splash to make. */
+  velocity: Vector3;
+}
+
+export type WaterEventHandler = (event: WaterEvent) => void;
+
+/** Height of the surface above `surfaceLevel` at `x, z`, at simulated `time`. */
+export type WaveHeight = (x: number, z: number, time: number) => number;
+
+/** What a point is under. Reused between calls unless you pass your own. */
+export interface WaterSample {
+  /** Metres below the surface. */
+  depth: number;
+  /** Including the wave at that point. */
+  surfaceLevel: number;
+  flow: Vector3;
+}
+
+/** One region, mutated in place by `<WaterVolume>` and read every step. */
+export interface WaterVolumeEntry {
+  min: Vector3;
+  max: Vector3;
+  surfaceLevel: number;
+  buoyancy: number;
+  linearDrag: number;
+  angularDrag: number;
+  flow: Vector3;
+  priority: number;
+  layer: number;
+  waves?: WaveHeight;
+  onEnter?: WaterEventHandler;
+  onExit?: WaterEventHandler;
+  /** Set when the region moved, rose or changed flow, so sleepers in it wake. */
+  changed: boolean;
+}
+
+export interface WaterBodySettings {
+  /** 0 opts out of buoyancy; anything else multiplies the volume's. */
+  floats: number;
+  onEnterWater?: WaterEventHandler;
+  onExitWater?: WaterEventHandler;
+}
+
+export interface WaterRegistry {
+  addVolume: (volume: WaterVolumeEntry) => () => void;
+  addBody: (
+    bodyID: number,
+    settings: { readonly current: WaterBodySettings },
+  ) => () => void;
+  /** The highest-priority water `point` is under, or null when it is dry. */
+  sample: (point: Vec3Input, target?: WaterSample) => WaterSample | null;
+  flush: () => void;
+  destroy: () => void;
+}
+
 /** One joint, as `<PhysicsDebug />` needs it: the constraint and both ends. */
 export interface ConstraintEntry {
   constraint: Jolt.TwoBodyConstraint;
@@ -252,6 +314,8 @@ export interface JoltApi {
    * characters in one world block each other.
    */
   characters: Jolt.CharacterVsCharacterCollisionSimple;
+  /** Every `<WaterVolume>` in the world, and what each body is floating in. */
+  water: WaterRegistry;
   timing: PhysicsTiming;
   /**
    * Advances the world by hand: the same accumulator, step callbacks and event

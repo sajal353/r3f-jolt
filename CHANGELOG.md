@@ -15,6 +15,15 @@
 - The api adds `characterID`, `innerBodyID`, `hasCollidedWith`, `hasCollidedWithCharacter` and `getActiveContacts`.
 - Characters block each other through one `CharacterVsCharacterCollisionSimple` per world, `JoltApi.characters`.
 - `useConveyor` belts carry characters.
+- `api.setShape(children | shape | null)` swaps in a shape of your own until `null`, and returns `false` when it has no room. A stand-up with no room overhead is retried rather than recorded as done.
+- `overrideUpdate` also gets `deltaTime`.
+
+### Water
+
+- `<WaterVolume>`: a box of water with `surfaceLevel`, `waves`, `buoyancy`, `linearDrag`, `angularDrag`, `flow`, `priority`, `layer`, `onEnter`, `onExit` and `debug`, all live except `layer`. Buoyancy and drag run before every physics step; bodies are found by one broadphase query per volume. Overlapping volumes give a body to the highest priority, ties to the first mounted.
+- Body options `floats` (`false` opts out, a number scales the buoyancy), `onEnterWater` and `onExitWater`.
+- `useSwimming(character, options)`: an `overrideUpdate` that floats a `useCharacter` at `depth`, with `speed`, `verticalSpeed`, `damping` and `followFlow`; the api has `overrideUpdate`, `setVertical`, `setFloatDepth`, `swimming`, `moving` and `depth`. The swimming position is left to the caller, through `setShape`.
+- `JoltApi.water` with `sample(point)`, and `api.timing.elapsed`, the simulated time. `WaterEvent`, `WaterSample`, `WaveHeight` and `WaterRegistry` are exported.
 
 ### Constraints
 
@@ -34,11 +43,12 @@
 
 - `useSwingTwistConstraint`: the `normalHalfConeAngle` and `planeHalfConeAngle` docs had the two swapped. `normalHalfConeAngle` limits rotation about the plane axis.
 - A compound child's `rotation` is normalized before Jolt sees it.
-- `useCharacter` puts its weight on what it stands on. It passed its up vector where Jolt takes gravity, so a body under it felt nothing.
+- `useCharacter` puts its weight on what it stands on. It passed its up vector where Jolt takes gravity, so a body under it felt nothing. The weight now presses under the character's centre and never exceeds the supporting body's own weight: Jolt's push, at one contact point, spun a light float under a standing character at up to 47 rad/s.
 
 ### Demo
 
 - **Constraints › Breaking joints**, and a `debug` toolbar toggle for `<Physics debug>`.
+- **Systems › Water**: a pool with waves drawn by a shader that matches the physics, ripples from splashes and from the swimmer, faint lines along a current, crates, stones, buoys and logs, and the mannequin swimming with its swim clips.
 - **Systems › Character contacts**: an inner body, characters that block each other, a belt and a turntable, and the contact callbacks.
 - **Systems › Ragdoll**, **Systems › Ragdoll character** (a `useCharacter` runner with jump and fall animations that goes limp on `R` or a fast fall, and gets up with a face-up or face-down get-up clip) and **Systems › Ragdoll fit**, on a Quaternius mannequin (CC0) with two Mixamo get-up clips.
 
