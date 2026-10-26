@@ -1,8 +1,13 @@
+import { useRef } from "react";
 import { describe, expect, it } from "vitest";
 import { useBox } from "@/Jolt/useBox";
 import { useSphere } from "@/Jolt/useSphere";
 import { usePlane } from "@/Jolt/usePlane";
 import { useBodyContacts } from "@/Jolt/useBodyContacts";
+import { useBeforePhysicsStep } from "@/Jolt/useBeforePhysicsStep";
+import { useAfterPhysicsStep } from "@/Jolt/useAfterPhysicsStep";
+import type Jolt from "jolt-physics";
+import type { BodyApi } from "@/Jolt/internal/useBody";
 import type { ContactInfo } from "@/Jolt/types";
 import { expectNoAsserts, renderPhysics, step, unmount } from "./harness";
 
@@ -13,6 +18,7 @@ import { expectNoAsserts, renderPhysics, step, unmount } from "./harness";
 interface Landing {
   impactSpeed: number;
   impulse: number;
+  frictionImpulse: number;
   bodyID: number;
 }
 
@@ -22,6 +28,7 @@ const record = (name: string, contact: ContactInfo) => {
   (landings[name] ??= []).push({
     impactSpeed: contact.impactSpeed,
     impulse: contact.impulse,
+    frictionImpulse: contact.frictionImpulse,
     bodyID: contact.bodyID,
   });
 };
@@ -167,6 +174,7 @@ describe("contact force", () => {
     const silent = firstLanding("silent");
     expect(silent.impactSpeed).toBe(0);
     expect(silent.impulse).toBe(0);
+    expect(silent.frictionImpulse).toBe(0);
     // The rest of the payload still arrives.
     expect(silent.bodyID).toBeGreaterThan(0);
 
@@ -195,6 +203,7 @@ describe("contact force", () => {
     for (const exit of exits) {
       expect(exit.impactSpeed).toBe(0);
       expect(exit.impulse).toBe(0);
+      expect(exit.frictionImpulse).toBe(0);
     }
 
     await unmount(renderer);
@@ -226,6 +235,167 @@ describe("contact force", () => {
     expectNoAsserts();
   });
 });
+
+describe("contact force against the solver", () => {
+  /**
+   * Ground truth is the momentum each body actually gained across the step it
+   * landed in, with gravity's share taken out. The old derivation read the
+   * bounce at two thirds and the tilted rod at nearly three times this.
+   */
+  it("matches the impulse the solver applied", async () => {
+    const renderer = await renderPhysics(
+      <>
+        <Ground />
+        <MeasuredSphere name="drop" x={0} />
+        <MeasuredSphere name="bounce" x={5} restitution={0.5} />
+        <MeasuredRod name="tilted" x={10} tilt={30} />
+      </>,
+    );
+
+    await step(renderer, 90);
+
+    for (const name of ["drop", "bounce", "tilted"]) {
+      const reported = firstLanding(name);
+      const measured = firstHit(name);
+
+      expect(reported.impulse).toBeGreaterThan(1);
+      expect(reported.impulse / measured.normal).toBeGreaterThan(0.98);
+      expect(reported.impulse / measured.normal).toBeLessThan(1.02);
+      expect(reported.frictionImpulse).toBeCloseTo(measured.tangent, 1);
+    }
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("tells a scrape from a drop", async () => {
+    const renderer = await renderPhysics(
+      <>
+        <Ground />
+        <MeasuredRod name="straight" x={0} />
+        <MeasuredRod name="scrape" x={10} slide={6} />
+      </>,
+    );
+
+    await step(renderer, 90);
+
+    const straight = firstLanding("straight");
+    const scrape = firstLanding("scrape");
+
+    expect(straight.frictionImpulse).toBeLessThan(0.01);
+    expect(scrape.frictionImpulse).toBeGreaterThan(0.25 * scrape.impulse);
+    expect(scrape.frictionImpulse).toBeCloseTo(firstHit("scrape").tangent, 1);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+});
+
+const GRAVITY = 9.81;
+
+interface Hit {
+  normal: number;
+  tangent: number;
+}
+
+const hits: Record<string, Hit[]> = {};
+
+/** The first step in which the floor pushed back harder than gravity pulled. */
+const firstHit = (name: string) => {
+  const found = hits[name]?.find((hit) => hit.normal > 0.5);
+  if (!found) throw new Error(`${name} never landed`);
+  return found;
+};
+
+/**
+ * Mass 1 and no damping, so the change in velocity across a step, less
+ * gravity's share, is the impulse the solver applied.
+ */
+const useMomentumChange = (
+  name: string,
+  api: BodyApi<Jolt.Shape> | undefined,
+  slide: number,
+) => {
+  const before = useRef<[number, number]>([0, 0]);
+  const pushed = useRef(false);
+
+  useBeforePhysicsStep(() => {
+    if (!api) return;
+    if (slide !== 0 && !pushed.current) {
+      api.setLinearVelocity([slide, 0, 0]);
+      pushed.current = true;
+    }
+    const velocity = api.body.GetLinearVelocity();
+    before.current = [velocity.GetX(), velocity.GetY()];
+  });
+
+  useAfterPhysicsStep((delta) => {
+    if (!api) return;
+    const velocity = api.body.GetLinearVelocity();
+    (hits[name] ??= []).push({
+      normal: velocity.GetY() - before.current[1] + GRAVITY * delta,
+      tangent: Math.abs(velocity.GetX() - before.current[0]),
+    });
+  });
+};
+
+interface MeasuredProps {
+  name: string;
+  x: number;
+  restitution?: number;
+  slide?: number;
+}
+
+const measuredBody = (restitution: number) =>
+  ({
+    motionType: "dynamic",
+    mass: 1,
+    linearDamping: 0,
+    material: { restitution, friction: 0.5 },
+  }) as const;
+
+const useMeasured = (name: string, api: BodyApi<Jolt.Shape> | undefined, slide: number) => {
+  useMomentumChange(name, api, slide);
+  useBodyContacts(
+    api?.body,
+    { onEnter: (contact) => record(name, contact) },
+    { contactForce: true },
+  );
+};
+
+const MeasuredSphere = ({
+  name,
+  x,
+  restitution = 0,
+  slide = 0,
+}: MeasuredProps) => {
+  const [, api] = useSphere({
+    ...measuredBody(restitution),
+    position: [x, 2.5, 0],
+    radius: 0.5,
+  });
+  useMeasured(name, api, slide);
+  return null;
+};
+
+/** A 3 m rod, tilted about z so that one end lands first. */
+const MeasuredRod = ({
+  name,
+  x,
+  restitution = 0,
+  slide = 0,
+  tilt = 0,
+}: MeasuredProps & { tilt?: number }) => {
+  const half = (tilt * Math.PI) / 360;
+  const [, api] = useBox({
+    ...measuredBody(restitution),
+    position: [x, 2.5, 0],
+    rotation: [0, 0, Math.sin(half), Math.cos(half)],
+    size: [3, 0.2, 0.2],
+  });
+  useMeasured(name, api, slide);
+  return null;
+};
 
 const Slab = () => {
   const [, api] = useBox({

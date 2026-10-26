@@ -57,7 +57,7 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 - [x] `SpecifiedBroadPhaseLayerFilter` alongside the default filters, for querying one specific broadphase layer. Plus `ignoreBodies` on every query including the raycasters, settable at runtime
 - [x] `OrientedBox.OverlapsAABox` / `OverlapsOrientedBox` exposed as cheap CPU-side overlap helpers — plain functions, not hooks
 - [x] Sensor/intersection events (`onIntersectionEnter`/`Exit`) building on 0.2.1's `sensor` — shipped as `useSensor`, which also keeps the set of bodies currently inside. **Worth recording: Jolt keeps a sensor contact only while the other body is awake**, so a body that settles inside a trigger fires an exit one step after it falls asleep without having moved, and one destroyed while asleep inside fires no exit at all. The hook holds that exit back and delivers it when the body really goes
-- [x] Contact force payload, so a consumer can tell a scrape from an impact. **Amended: `totalForceMagnitude` and `maxForceDirection` are not on the manifold** — `ContactManifold` binds a normal, a penetration depth, two sub-shape ids and the contact points, and no applied impulse is bound anywhere in the library, verified three times. So `impactSpeed` and `impulse` are **derived**: the closing speed along the normal, times the pair's effective mass, computed only for a subscriber that opted in. Labelled an estimate everywhere it appears
+- [x] Contact force payload, so a consumer can tell a scrape from an impact. **Amended: `totalForceMagnitude` and `maxForceDirection` are not on the manifold** — `ContactManifold` binds a normal, a penetration depth, two sub-shape ids and the contact points, and no applied impulse is bound anywhere in the library, verified three times. So `impactSpeed` and `impulse` are **derived**: the closing speed along the normal, times the pair's effective mass, computed only for a subscriber that opted in. Labelled an estimate everywhere it appears. **Amended again in 0.4.0:** jolt-physics 1.1.1 binds `EstimateCollisionResponse`, so `impulse` and the new `frictionImpulse` now come from Jolt's own solver estimate
 - [x] `useConveyor` → `ContactSettings.mRelativeLinearSurfaceVelocity` / `mRelativeAngularSurfaceVelocity` — belts, moving walkways and turntables, with `setLinear` / `setAngular` for runtime control
 - [x] `surfaceVelocity` on the body hooks — the same belt declared at mount, for one that never changes speed
 
@@ -203,12 +203,12 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 - [x] Test `AreJointsCorrectlyOrdered()` passes for a bone hierarchy deliberately supplied out of order
 - [x] Test a ragdoll mount/unmount cycle returns `GetNumBodies()` **and** constraint count to baseline, `sGetFreeMemory` flat over N cycles
 - [x] Test ragdoll self-collision: adjacent bones do not push each other apart at rest
-- [ ] Test buoyancy runs per sub-step (a body bobs identically at a 30 Hz and a 120 Hz fixed step)
-- [ ] Test water enter/exit events fire once per crossing, not per frame
-- [ ] Test soft-body vertex readback allocates nothing across N frames
+- [x] Test buoyancy runs per sub-step (a body bobs identically at a 30 Hz and a 120 Hz fixed step)
+- [x] Test water enter/exit events fire once per crossing, not per frame
+- [x] Test soft-body vertex readback allocates nothing across N frames
 - [x] Demo: ragdoll scene with a real glTF character — passive flop, hit reaction via motors, get-up blend
 - [x] Demo: auto-fit collider debug overlay on that character
-- [ ] Demo: pool with a current, floating crates, swimming character
+- [x] Demo: pool with a current, floating crates, swimming character
 - [x] Demo: cape skinned to the character (shares the skeleton bridge's joint matrices). **Amended:** on the Ragdoll character, skinned from three.js's bone matrices
 
 ---

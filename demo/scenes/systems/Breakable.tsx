@@ -31,10 +31,10 @@ const DEBRIS_CAP = 200;
 
 /**
  * How much velocity the estimated impulse would give this piece, in m/s.
- * Mass-relative on purpose: `impulse` is closing momentum, so one collision
- * reads 3000 against a 246 kg brick and 119 against a 40 kg chunk off it, and
- * no absolute number breaks both. Measured — settling peaks at 0.26, a
- * cannonball gives what it hits about 11, a brick landing off the top 9.6.
+ * Mass-relative on purpose: `impulse` is momentum, so one collision reads 3000
+ * against a 246 kg brick and 119 against a 40 kg chunk off it, and no absolute
+ * number breaks both. Measured — settling peaks at 0.23, a cannonball gives
+ * what it hits 4 to 25.
  */
 const BREAK_DELTA_V = 0.8;
 
@@ -277,8 +277,8 @@ const PieceBody = ({
     );
   };
 
-  // Gravel neither subscribes nor casts a shadow: `contactForce` is about ten
-  // calls into WASM per contact per step, and a shadow pass over every chip
+  // Gravel neither subscribes nor casts a shadow: `contactForce` runs a solver
+  // pass per contact per step, and a shadow pass over every chip
   // costs more than the chips are worth. `onStay` as well as `onEnter`,
   // because in a collapse most of the violence is between bodies already
   // touching, and those persist rather than re-enter; a resting contact reads a

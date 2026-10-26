@@ -1,6 +1,6 @@
 {
   "name": "r3f-jolt",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "Jolt Physics Hooks for React-Three-Fiber",
   "keywords": [
@@ -49,7 +49,7 @@
   },
   "peerDependencies": {
     "@react-three/fiber": "^9.0.0",
-    "jolt-physics": "^1.1.0",
+    "jolt-physics": "^1.1.1",
     "react": ">=19 <19.3",
     "react-dom": ">=19 <19.3",
     "three": ">=0.156"
@@ -69,7 +69,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.3",
     "globals": "^17.8.0",
-    "jolt-physics": "^1.1.0",
+    "jolt-physics": "^1.1.1",
     "jsdom": "^30.0.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

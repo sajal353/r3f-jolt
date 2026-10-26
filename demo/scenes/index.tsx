@@ -752,8 +752,8 @@ export const categories: Category[] = [
         hint: (
           <>
             How hard, not just whether. Four weights land on sprung platforms at
-            the same speed, and the sink follows the impulse. An{" "}
-            <b>estimate</b>: Jolt reports no applied impulse.
+            the same speed, and the sink follows the impulse, Jolt's own
+            estimate of the blow.
           </>
         ),
       },

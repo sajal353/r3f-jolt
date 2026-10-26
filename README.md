@@ -12,7 +12,7 @@ Jolt Physics hooks for React Three Fiber.
 | `react` / `react-dom` | `>=19 <19.3`   |
 | `@react-three/fiber`  | `^9`           |
 | `three`               | `>=0.156`      |
-| `jolt-physics`        | `^1.1.0`       |
+| `jolt-physics`        | `^1.1.1`       |
 
 React 19 and R3F 9 are required — R3F 8 cannot run on React 19.
 
@@ -174,7 +174,7 @@ Everything above the `physicsSettings` row except `gravity`, `paused`, `debug` a
 <Physics physicsSettings={{ numVelocitySteps: 10, numPositionSteps: 2 }}>…</Physics>
 ```
 
-The names map one-to-one onto Jolt's `PhysicsSettings` fields with the `m` prefix dropped: `numVelocitySteps`, `numPositionSteps`, `baumgarte`, `speculativeContactDistance`, `penetrationSlop`, `linearCastThreshold`, `linearCastMaxPenetration`, `manifoldTolerance`, `maxPenetrationDistance`, `minVelocityForRestitution`, `timeBeforeSleep`, `pointVelocitySleepThreshold`, `deterministicSimulation`, `constraintWarmStart`, `useBodyPairContactCache`, `useManifoldReduction`, `useLargeIslandSplitter`, `allowSleeping`, `checkActiveEdges`, `maxInFlightBodyPairs`, `stepListenersBatchSize`, `stepListenerBatchesPerJob`.
+The names map one-to-one onto Jolt's `PhysicsSettings` fields with the `m` prefix dropped: `numVelocitySteps`, `numPositionSteps`, `baumgarte`, `speculativeContactDistance`, `penetrationSlop`, `linearCastThreshold`, `linearCastMaxPenetration`, `manifoldTolerance`, `maxPenetrationDistance`, `minVelocityForRestitution`, `timeBeforeSleep`, `pointVelocitySleepThreshold`, `constraintWarmStart`, `useBodyPairContactCache`, `useManifoldReduction`, `useLargeIslandSplitter`, `allowSleeping`, `checkActiveEdges`, `maxInFlightBodyPairs`, `stepListenersBatchSize`, `stepListenerBatchesPerJob`.
 
 Removing the prop does not put the previous values back — there is nothing to put back to, since the settings are the world's own. Name the values you want.
 
@@ -1186,25 +1186,25 @@ useBodyContacts(api?.body, {
 });
 ```
 
-A `ContactInfo` is `{ bodyID, userData, shapeUserData, point, normal, penetrationDepth, impactSpeed, impulse }` describing **the other** body. It is pooled — copy anything you keep past the handler. On `onExit` only `bodyID` and `userData` are meaningful, because the manifold is already gone.
+A `ContactInfo` is `{ bodyID, userData, shapeUserData, point, normal, penetrationDepth, impactSpeed, impulse, frictionImpulse }` describing **the other** body. It is pooled — copy anything you keep past the handler. On `onExit` only `bodyID` and `userData` are meaningful, because the manifold is already gone.
 
 `normal` points **from your body towards the other one**, so negating it is the direction your body was pushed. Both sides of a contact therefore read a normal that means the same thing to each of them, which Jolt's own does not: its manifold normal runs from body 1 to body 2 in an ordering the subscriber cannot see. `useContactListener` gets that raw manifold unchanged.
 
 #### How hard it hit
 
-`impactSpeed` and `impulse` are `0` unless you ask for them, because the estimate costs about ten calls into WASM per contact per step:
+`impactSpeed`, `impulse` and `frictionImpulse` are `0` unless you ask for them, because the estimate runs a solver pass per contact per step:
 
 ```tsx
 useBodyContacts(api?.body, { onEnter: (c) => bang(c.impulse) }, { contactForce: true });
 ```
 
-`impactSpeed` is the closing speed along the contact normal in m/s, read before the solver ran. `impulse` is that speed times the pair's effective mass, in kg·m/s.
+`impactSpeed` is the closing speed along the contact normal in m/s, read before the solver ran. `impulse` is the normal impulse in kg·m/s and `frictionImpulse` the tangential one, so a scrape reads a large `frictionImpulse` and a straight drop reads none.
 
-**`impulse` is an estimate.** Jolt binds no applied contact impulse, so it is derived and leaves the angular terms out of the effective mass — within about 10% of the true impulse head-on, about 70% high for a glancing hit. Rank a scrape against a crash with it; do not treat it as the solver's own number.
+Both come from Jolt's `EstimateCollisionResponse`, which runs the contact solver on this one contact, including restitution, friction, rotation and surface velocity. They match what the solver applies within a couple of percent. They are still estimates, because the real solver also sees every other contact on both bodies.
 
-It is closing *momentum*, so it scales with the mass of what was hit. To threshold across bodies of different sizes, divide that back out: `impulse * body.GetMotionProperties().GetInverseMass()` is the velocity change the blow would have caused, and compares a boulder against a pebble where the raw number does not.
+`impulse` is *momentum*, so it scales with the mass of what was hit. To threshold across bodies of different sizes, divide that back out: `impulse * body.GetMotionProperties().GetInverseMass()` is the velocity change the blow would have caused, and compares a boulder against a pebble where the raw number does not.
 
-A body that is not dynamic — static *or* kinematic — counts as immovable, which is what Jolt's solver does. A kinematic body reports a real inverse mass through the bindings, so reading that number instead would make the same drop onto a moving platform read softer than onto the ground.
+A body that is not dynamic — static *or* kinematic — counts as immovable, which is what Jolt's solver does.
 
 ### `useSensor` — what is inside a volume
 

@@ -109,18 +109,21 @@ export interface ContactInfo {
    */
   impactSpeed: number;
   /**
-   * Estimated normal impulse, in kg·m/s — `impactSpeed` times the pair's
-   * effective mass.
-   *
-   * Jolt binds no applied impulse anywhere, so this is **derived, not
-   * reported**: it answers "how much momentum had to be cancelled" and ignores
-   * the angular terms in the effective mass, which reads high for a glancing
-   * blow on a long lever. Good for ranking a scrape against a crash. Not a
-   * substitute for the solver's own numbers.
+   * Normal impulse in kg·m/s, summed over the contact points: Jolt's
+   * `EstimateCollisionResponse`, which runs the contact solver on this one
+   * manifold with restitution, friction and surface velocity. An estimate
+   * because the real solver also sees every other contact on both bodies.
    *
    * Only filled when the subscriber asked for it; see `BodyContactOptions`.
    */
   impulse: number;
+  /**
+   * Tangential impulse in kg·m/s from the same estimate: large for a scrape,
+   * near zero for a straight drop.
+   *
+   * Only filled when the subscriber asked for it; see `BodyContactOptions`.
+   */
+  frictionImpulse: number;
 }
 
 export interface BodyContactHandlers {
@@ -130,8 +133,9 @@ export interface BodyContactHandlers {
 }
 
 /**
- * `contactForce` costs about ten calls into WASM per contact per step, so it is
- * off unless asked for and `impactSpeed` / `impulse` stay 0 without it.
+ * `contactForce` runs Jolt's collision estimate per contact per step, so it is
+ * off unless asked for and `impactSpeed`, `impulse` and `frictionImpulse` stay
+ * 0 without it.
  */
 export interface BodyContactOptions {
   contactForce?: boolean;

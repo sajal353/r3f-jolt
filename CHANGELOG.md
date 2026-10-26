@@ -2,6 +2,17 @@
 
 ## 0.4.0
 
+### Breaking changes
+
+- `jolt-physics` `^1.1.1` is required.
+- The `deterministicSimulation` solver setting is gone. Jolt removed it in 1.1.1 because the simulation is now always deterministic.
+- `ContactInfo.impulse` now comes from Jolt's `EstimateCollisionResponse`, with restitution, friction and rotation included, so it reads differently from 0.3.0: higher for a bouncy hit, lower for a glancing one.
+
+### Contacts
+
+- `ContactInfo.frictionImpulse`: the tangential impulse from the same estimate, under `contactForce`. A scrape reads a large one, a straight drop none.
+- `impulse` and `frictionImpulse` match what the solver applies within a couple of percent. The 0.3.0 derivation read a glancing hit about 70% high and ignored restitution.
+
 ### Ragdolls
 
 - `useCharacterModel(object, options)` fits a ragdoll to a skinned character from its skin in the bind pose: bones picked by name, capsules on limbs and head, boxes on the torso, anthropometric masses, swing-twist limits by bone kind with one-way knees and elbows. Options `mass`, `bones`, `exclude`, `overrides`, `minWeight`, `radiusPercentile`, `config`, `debug` (the fit drawn on the bones). Returns `{ mesh, meshes, config, excluded, toJSON }`.
@@ -17,6 +28,7 @@
 - `useConveyor` belts carry characters.
 - `api.setShape(children | shape | null)` swaps in a shape of your own until `null`, and returns `false` when it has no room. A stand-up with no room overhead is retried rather than recorded as done.
 - `overrideUpdate` also gets `deltaTime`.
+- `CharacterShapes`, `CharacterActiveContact`, `CharacterContactHandlers`, `CharacterBodyContact`, `CharacterToCharacterContact` and `CharacterContactVelocities` are exported.
 
 ### Water
 
