@@ -7,6 +7,8 @@ import { useCharacter } from "@/Jolt/useCharacter";
 import { useJolt } from "@/Jolt/useJolt";
 import type { JoltModule } from "@/Jolt/types";
 import { Floor, Hud, Ramp, Wall } from "../../shared/Stage";
+import { Figure } from "../../shared/Figure";
+import { turnTowards } from "../../shared/helpers";
 
 const controls = [
   { name: "forward", keys: ["ArrowUp", "KeyW"] },
@@ -136,44 +138,12 @@ const Platform = () => {
   );
 };
 
-const Figure = ({
-  height,
-  radius,
-  color,
-}: {
-  height: number;
-  radius: number;
-  color: string;
-}) => (
-  <group position={[0, height / 2 + radius, 0]}>
-    <mesh castShadow>
-      <capsuleGeometry args={[radius, height, 8, 20]} />
-      <meshStandardMaterial color={color} roughness={0.45} />
-    </mesh>
-    {/* A capsule is rotationally symmetric, so which way it faces has to be
-        drawn on. */}
-    <mesh position={[0, height / 2 + radius * 0.3, radius * 0.9]} castShadow>
-      <boxGeometry args={[radius * 1.1, radius * 0.34, radius * 0.5]} />
-      <meshStandardMaterial color="#101010" roughness={0.3} />
-    </mesh>
-  </group>
-);
-
 const groundLabel = (jolt: JoltModule, state: number) => {
   if (state === jolt.EGroundState_OnGround) return "on ground";
   if (state === jolt.EGroundState_OnSteepGround) return "too steep — sliding";
   if (state === jolt.EGroundState_NotSupported) return "not supported";
 
   return "in air";
-};
-
-/** Turn the short way round, so reversing spins rather than snapping. */
-const turnTowards = (current: number, target: number, delta: number) => {
-  const difference =
-    ((((target - current) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2)) -
-    Math.PI;
-
-  return current + difference * Math.min(1, delta * 12);
 };
 
 const Player = () => {

@@ -26,7 +26,6 @@ const PHYSICS_SETTING_FIELDS = {
   minVelocityForRestitution: "mMinVelocityForRestitution",
   timeBeforeSleep: "mTimeBeforeSleep",
   pointVelocitySleepThreshold: "mPointVelocitySleepThreshold",
-  deterministicSimulation: "mDeterministicSimulation",
   constraintWarmStart: "mConstraintWarmStart",
   useBodyPairContactCache: "mUseBodyPairContactCache",
   useManifoldReduction: "mUseManifoldReduction",

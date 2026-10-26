@@ -1,11 +1,19 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { describe, expect, it } from "vitest";
 import type Jolt from "jolt-physics";
 import {
+  Bone,
   BoxGeometry,
+  BufferGeometry,
+  Group,
+  MeshBasicMaterial,
+  PlaneGeometry,
+  Skeleton,
+  SkinnedMesh,
   SphereGeometry,
   Vector3,
-  type BufferGeometry,
+  type AnimationMixer,
+  type Object3D,
 } from "three";
 import { useFrame } from "@react-three/fiber";
 import { useCar } from "@/Jolt/useCar";
@@ -30,6 +38,14 @@ import { useGroupFilterTable } from "@/Jolt/useGroupFilterTable";
 import { useBodyContacts } from "@/Jolt/useBodyContacts";
 import { useInstancedBodies } from "@/Jolt/useInstancedBodies";
 import { useAutoCollider } from "@/Jolt/useAutoCollider";
+import { useCharacterModel } from "@/Jolt/useCharacterModel";
+import { useRagdoll, type RagdollMode } from "@/Jolt/useRagdoll";
+import { useSwimming } from "@/Jolt/useSwimming";
+import type { CompoundChild } from "@/Jolt/useCompound";
+import { WaterVolume } from "@/Jolt/WaterVolume";
+import { useSoftBody } from "@/Jolt/useSoftBody";
+import { useSoftBodyContactListener } from "@/Jolt/useSoftBodyContactListener";
+import { PhysicsDebug } from "@/Jolt/PhysicsDebug";
 import {
   addBodies,
   destroyBodies,
@@ -46,6 +62,7 @@ import {
   step,
   unmount,
 } from "./harness";
+import { loadMannequin, playAt } from "./mannequin";
 
 const Ground = () => {
   useBox({ size: [50, 1, 50], position: [0, -0.5, 0], motionType: "static" });
@@ -77,6 +94,224 @@ const CrouchingCharacter = () => {
     api?.update(direction, n % 30 === 0, n % 20 < 10, delta);
   });
 
+  return null;
+};
+
+/** Inner bodies, a compound, both crouch shapes, the registry and every handler, on a belt. */
+const UpgradedCharacters = () => {
+  const [, belt] = useBox({
+    size: [10, 0.2, 10],
+    position: [0, 0.1, 0],
+    motionType: "static",
+  });
+  useConveyor(belt, { linear: [1, 0, 0] });
+
+  const noop = () => {};
+  const [first] = useCharacter({
+    position: [0, 1, 0],
+    innerBody: true,
+    onContactAdded: noop,
+    onContactPersisted: noop,
+    onContactRemoved: noop,
+    onCharacterContactAdded: noop,
+    onCharacterContactPersisted: noop,
+    onCharacterContactRemoved: noop,
+    onContactSolve: noop,
+    onCharacterContactSolve: noop,
+    onAdjustBodyVelocity: noop,
+    onContactValidate: () => true,
+    onCharacterContactValidate: () => true,
+  });
+  const [second] = useCharacter({
+    position: [1.5, 1, 0],
+    innerBody: {
+      standing: [{ type: "sphere", position: [0, 0.5, 0], radius: 0.4 }],
+    },
+    shape: {
+      standing: [
+        { type: "box", position: [0, 0.4, 0], size: [0.8, 0.8, 0.8] },
+        { type: "sphere", position: [0, 1.1, 0], radius: 0.3 },
+      ],
+      crouching: [{ type: "box", position: [0, 0.3, 0], size: [0.8, 0.6, 0.8] }],
+    },
+    options: { enhancedInternalEdgeRemoval: true },
+  });
+  const frame = useRef(0);
+  const contacts = useRef([]);
+
+  useFrame((_, delta) => {
+    frame.current += 1;
+    const crouched = frame.current % 20 < 10;
+    first?.update(direction, false, crouched, delta);
+    second?.update(direction.clone().negate(), false, crouched, delta);
+    first?.getActiveContacts(contacts.current);
+  });
+
+  return null;
+};
+
+const SWIM_POSITION: CompoundChild[] = [
+  {
+    type: "capsule",
+    position: [0, 0.8, 0],
+    rotation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2],
+    height: 2,
+    radius: 0.8,
+  },
+];
+
+/** Two overlapping volumes, one coming and going, floats of every kind and a swimmer. */
+const Water = () => {
+  const [river, setRiver] = useState(true);
+  const frame = useRef(0);
+  const noop = () => {};
+
+  useBox({ size: [20, 1, 20], position: [0, -5.5, 0], motionType: "static" });
+  useBox({
+    size: [1, 1, 1],
+    position: [0, 1, 0],
+    motionType: "dynamic",
+    onEnterWater: noop,
+    onExitWater: noop,
+  });
+  useBox({ size: [1, 1, 1], position: [2, 1, 0], motionType: "dynamic", floats: false });
+  useBox({ size: [1, 1, 1], position: [-2, 1, 0], motionType: "dynamic", floats: 0.5 });
+  useBox({ size: [1, 1, 1], position: [0, -2, 2], motionType: "dynamic", sensor: true });
+
+  const [swimmer] = useCharacter({ position: [3, 0, 3], innerBody: true, debug: true });
+  const swim = useSwimming(swimmer);
+
+  useFrame((_, delta) => {
+    frame.current += 1;
+    if (frame.current % 20 === 0) setRiver((shown) => !shown);
+    swim.setVertical(frame.current % 30 < 15 ? -1 : 0);
+    // Built from children (the hook's to free) and back, every ten frames.
+    if (frame.current % 10 === 0) {
+      swimmer?.setShape(frame.current % 20 === 0 ? null : SWIM_POSITION);
+      swim.setFloatDepth(frame.current % 20 === 0 ? null : 0.6);
+    }
+    swimmer?.update(direction, false, false, delta, {
+      overrideUpdate: swim.overrideUpdate,
+    });
+  });
+
+  return (
+    <>
+      <WaterVolume position={[0, -2.5, 0]} size={[20, 5, 20]} onEnter={noop} onExit={noop} debug />
+      {river && (
+        <WaterVolume
+          position={[0, -2, 0]}
+          size={[6, 4, 6]}
+          flow={[2, 0, 0]}
+          priority={1}
+          surfaceLevel={-0.5}
+        />
+      )}
+    </>
+  );
+};
+
+const clothGeometry = new PlaneGeometry(2, 2, 6, 6);
+const ballGeometry = new SphereGeometry(0.4, 8, 6);
+const jellyGeometry = new BoxGeometry(0.6, 0.6, 0.6);
+
+const SoftBodies = () => {
+  const frame = useRef(0);
+  const [shown, setShown] = useState(true);
+  const noop = () => {};
+
+  const [floor] = useBox({ size: [20, 1, 20], position: [0, -4.5, 0], motionType: "static" });
+  const [sensor] = useBox({
+    size: [3, 2, 3],
+    position: [4, -3, 0],
+    motionType: "static",
+    sensor: true,
+  });
+  void floor;
+  void sensor;
+
+  const [, cloth] = useSoftBody(clothGeometry, {
+    position: [0, 2, 0],
+    pinned: (point) => point.y > 0.99,
+    lra: "geodesic",
+    wind: [0, 0, 3],
+    debug: true,
+  });
+  const [, ball] = useSoftBody(ballGeometry, {
+    position: [-3, 1, 0],
+    pressure: 500,
+    floats: 2,
+    onEnterWater: noop,
+    onExitWater: noop,
+  });
+
+  useBodyContacts(cloth?.body, { onEnter: noop, onStay: noop, onExit: noop });
+  useBodyContacts(ball?.body, { onEnter: noop, onExit: noop });
+  useSoftBodyContactListener({
+    onSoftBodyContactValidate: () => true,
+    onSoftBodyContactAdded: noop,
+  });
+
+  useFrame(function exerciseSoftBodies() {
+    frame.current += 1;
+    if (frame.current % 15 === 0) setShown((value) => !value);
+    if (!cloth) return;
+    cloth.setWind(frame.current % 20 < 10 ? [4, 0, 0] : [0, 0, 0]);
+    cloth.pin(24, frame.current % 10 < 5);
+    cloth.faceOf(0);
+    if (frame.current % 25 === 0) cloth.setEnabled(false);
+    if (frame.current % 25 === 5) cloth.setEnabled(true);
+  });
+
+  return (
+    <>
+      <PhysicsDebug />
+      <WaterVolume position={[-3, -2.5, 0]} size={[4, 3, 4]} />
+      {shown && <Jelly />}
+      {shown && <SkinnedCloth />}
+    </>
+  );
+};
+
+const skinnedRig = () => {
+  const armature = new Group();
+  const chest = new Bone();
+  chest.name = "chest";
+  chest.position.set(0, 3, 0);
+  armature.add(chest);
+  const mesh = new SkinnedMesh(new BufferGeometry(), new MeshBasicMaterial());
+  armature.add(mesh);
+  armature.updateMatrixWorld(true);
+  mesh.bind(new Skeleton([chest]));
+  const sway = (x: number) => {
+    chest.position.x = x;
+  };
+  return { sway, mesh };
+};
+
+const capeGeometry = new PlaneGeometry(1, 1, 4, 4).translate(0, 2.5, 0.2);
+
+const SkinnedCloth = () => {
+  const [{ sway, mesh }] = useState(skinnedRig);
+  const frame = useRef(0);
+  const [, cape] = useSoftBody(capeGeometry, {
+    skin: { mesh, bone: "chest", maxDistance: 0.3, backStopDistance: 0.05, backStopRadius: 0.2 },
+    pinned: (point) => point.y > 2.99,
+    skinnedMaxDistanceMultiplier: 0.8,
+  });
+
+  useFrame(function moveBones() {
+    frame.current += 1;
+    sway(Math.sin(frame.current / 5));
+    if (frame.current % 20 === 0) cape?.snapToSkin();
+  });
+
+  return null;
+};
+
+const Jelly = () => {
+  const [, jelly] = useSoftBody(jellyGeometry, { position: [4, 0, 0], pressure: 200 });
+  useBodyContacts(jelly?.body, { onEnter: () => {} });
   return null;
 };
 
@@ -214,6 +449,43 @@ const DebuggedJoint = () => {
     normalAxis: [1, 0, 0],
     debug: true,
   });
+
+  return null;
+};
+
+/**
+ * Every joint type that can break, half of them overloaded so they do. The
+ * load is read through `GetTotalLambda*` every step, and a returned `Vec3` or
+ * `Vector2` that was a fresh heap object rather than a shared temporary would
+ * show here.
+ */
+const BreakingJoints = () => {
+  const { anchor, hanging } = useJointedPair();
+
+  usePointConstraint(anchor, hanging, { point: [0, 5, 0], breakForce: 1 });
+  useHingeConstraint(anchor, hanging, {
+    point: [0, 5, 0],
+    hingeAxis: [0, 0, 1],
+    normalAxis: [1, 0, 0],
+    breakTorque: 1e6,
+  });
+  useSliderConstraint(anchor, hanging, {
+    point: [0, 5, 0],
+    sliderAxis: [1, 0, 0],
+    normalAxis: [0, 1, 0],
+    breakForce: 1e6,
+  });
+  useDistanceConstraint(anchor, hanging, {
+    point1: [0, 6, 0],
+    point2: [0, 5, 0],
+    breakForce: 1,
+  });
+  useConeConstraint(anchor, hanging, { point: [0, 5, 0], breakTorque: 1e6 });
+  useSwingTwistConstraint(anchor, hanging, {
+    position: [0, 5, 0],
+    breakTorque: 1,
+  });
+  useSixDOFConstraint(anchor, hanging, { breakForce: 1e6, breakTorque: 1e6 });
 
   return null;
 };
@@ -383,6 +655,35 @@ const AutoCollider = ({
   );
 };
 
+const RAGDOLL_MODES: RagdollMode[] = [
+  "hardKeying",
+  "softKeying",
+  "motors",
+  "passive",
+];
+
+/**
+ * Every mode in turn, a get-up blend and the fit overlay: each allocates its
+ * own scratch on the Jolt side, so a mode that forgot to free one would show
+ * here.
+ */
+const Ragdoll = ({ scene, mixer }: { scene: Object3D; mixer: AnimationMixer }) => {
+  const model = useCharacterModel(scene, { debug: true });
+  const [ragdoll] = useRagdoll(model, { mixer, kinematicBones: ["pelvis"] });
+  const frame = useRef(0);
+
+  useFrame(function cycleModes() {
+    if (!ragdoll) return;
+    frame.current += 1;
+    if (frame.current % 10 !== 0) return;
+    const turn = frame.current / 10;
+    if (turn === RAGDOLL_MODES.length + 1) ragdoll.blendToAnimation(0.1);
+    else ragdoll.setMode(RAGDOLL_MODES[turn % RAGDOLL_MODES.length]);
+  });
+
+  return null;
+};
+
 const cycles = async (element: React.ReactElement, frames: number) => {
   const module = await loadDebugModule();
 
@@ -421,6 +722,24 @@ describe("mount/unmount leak checks", () => {
     expectNoAsserts();
   });
 
+  it("useCharacter upgrades leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<UpgradedCharacters />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("water volumes, floats and swimming leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<Water />, 80);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("soft bodies, their contacts, wind, water and debug leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<SoftBodies />, 80);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
   it("useCar leaves the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<Car />, 30);
     expect(after).toBe(baseline);
@@ -435,6 +754,12 @@ describe("mount/unmount leak checks", () => {
 
   it("all eight constraint hooks leave the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<Joints />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("joints watched for breaking leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<BreakingJoints />, 60);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });
@@ -454,6 +779,17 @@ describe("mount/unmount leak checks", () => {
    * The step registry is deliberately absent from this file — it creates no
    * Jolt objects at all, so there is nothing here for it to leak.
    */
+  it("useRagdoll and useCharacterModel leave the heap flat across cycles", async () => {
+    const { scene, animations } = await loadMannequin();
+    const mixer = playAt(scene, animations, "Walk_Loop", 0);
+    const { baseline, after } = await cycles(
+      <Ragdoll scene={scene} mixer={mixer} />,
+      80,
+    );
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
   it("useGroupFilterTable leaves the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<GroupFilter />, 60);
     expect(after).toBe(baseline);

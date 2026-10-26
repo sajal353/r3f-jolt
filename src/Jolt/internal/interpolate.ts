@@ -22,6 +22,7 @@ export const createTransformTracker = () => {
 
   let lastStepCount = -1;
   let primed = false;
+  let resting = false;
 
   const readBody = (body: Jolt.Body) => {
     const bodyPosition = body.GetPosition();
@@ -46,7 +47,13 @@ export const createTransformTracker = () => {
   };
 
   return {
+    /** The pose to draw, as of the last `update` or `rest`. */
+    position: position as Readonly<Vector3>,
+    rotation: rotation as Readonly<Quaternion>,
+
     update: (body: Jolt.Body, timing: PhysicsTiming) => {
+      resting = false;
+
       if (!timing.interpolate) {
         readBody(body);
         position.copy(currentPosition);
@@ -75,6 +82,22 @@ export const createTransformTracker = () => {
       );
     },
 
+    /**
+     * For a body Jolt has put to sleep. Reads it once and lands exactly on that
+     * pose — stopping at a blend between the last two steps would leave it a
+     * fraction of a step short — then holds it until `update` or `reset`.
+     */
+    rest: (body: Jolt.Body) => {
+      if (resting) return;
+
+      readBody(body);
+      snap();
+      position.copy(currentPosition);
+      rotation.copy(currentRotation);
+      primed = true;
+      resting = true;
+    },
+
     applyTo: (object: Object3D) => {
       object.position.copy(position);
       object.quaternion.copy(rotation);
@@ -86,6 +109,7 @@ export const createTransformTracker = () => {
      */
     reset: () => {
       primed = false;
+      resting = false;
     },
   };
 };

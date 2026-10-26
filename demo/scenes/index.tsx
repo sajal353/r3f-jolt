@@ -43,6 +43,7 @@ import { ConeAndSwingTwistScene } from "./constraints/ConeAndSwingTwist";
 import { SixDOFConstraintScene } from "./constraints/SixDOF";
 import { MotorsScene } from "./constraints/Motors";
 import { SpringsScene } from "./constraints/Springs";
+import { BreakingJointsScene } from "./constraints/Breaking";
 
 import { ClosestHit } from "./queries/ClosestHit";
 import { AnyHit } from "./queries/AnyHit";
@@ -57,7 +58,13 @@ import { SensorVolumes } from "./events/SensorVolumes";
 import { ContactForce } from "./events/ContactForce";
 
 import { Character } from "./systems/Character";
+import { CharacterContacts } from "./systems/CharacterContacts";
 import { Car } from "./systems/Car";
+import { Water } from "./systems/Water";
+import { Cloth } from "./systems/Cloth";
+import { RagdollScene } from "./systems/Ragdoll";
+import { RagdollFitScene } from "./systems/RagdollFit";
+import { RagdollCharacterScene } from "./systems/RagdollCharacter";
 import { Interpolation } from "./systems/Interpolation";
 import { StepCallbacks } from "./systems/StepCallbacks";
 import { DebugRendering } from "./systems/DebugRendering";
@@ -603,6 +610,22 @@ export const categories: Category[] = [
           </>
         ),
       },
+      {
+        name: "Breaking joints",
+        Component: BreakingJointsScene,
+        hook: "breakForce",
+        hint: (
+          <>
+            Each plank hangs from two point joints. At rest they carry under
+            500 N, but a crate landing on the plank loads them far harder, and
+            more the further it falls: about 3 kN from 1 m and 7 kN from 3 m.
+            At 5 kN the 1 m drop holds and the 3 m drop snaps a joint, leaving
+            the plank swinging from the other; <code>onBreak</code> reports the
+            load that did it. The load is averaged over 1/30 s, so this holds at
+            any frame rate. Re-hung every six seconds.
+          </>
+        ),
+      },
     ],
   },
   {
@@ -729,8 +752,8 @@ export const categories: Category[] = [
         hint: (
           <>
             How hard, not just whether. Four weights land on sprung platforms at
-            the same speed, and the sink follows the impulse. An{" "}
-            <b>estimate</b>: Jolt reports no applied impulse.
+            the same speed, and the sink follows the impulse, Jolt's own
+            estimate of the blow.
           </>
         ),
       },
@@ -754,6 +777,54 @@ export const categories: Category[] = [
         ),
       },
       {
+        name: "Character contacts",
+        Component: CharacterContacts,
+        hook: "useCharacter",
+        hint: (
+          <>
+            <code>WASD</code> to move, <code>Space</code> to jump. The grey
+            characters block you and turn orange while you touch them (
+            <code>onCharacterContactAdded</code>). The belt and turntable carry
+            you through <code>useConveyor</code>. Balls land on your{" "}
+            <code>innerBody</code>, and the readout lists what the contact
+            callbacks say you touch.
+          </>
+        ),
+      },
+      {
+        name: "Water",
+        Component: Water,
+        hook: "WaterVolume",
+        hint: (
+          <>
+            <code>WASD</code> to move, <code>Shift</code> to sprint. In deep
+            water <code>useSwimming</code> takes over: <code>Space</code> rises,{" "}
+            <code>C</code> dives, swimming forward takes a horizontal swimming position, and
+            the ramp wades you out. Bodies ride the same <code>waves</code> the
+            shader draws. Crates float, stones have <code>floats: false</code>,
+            buoys <code>floats: 2</code>, and the beach ball is a{" "}
+            <code>useSoftBody</code> floating per vertex. The strip
+            on the left is a second, higher-priority volume with a{" "}
+            <code>flow</code>. Every splash is an <code>onEnter</code>.
+          </>
+        ),
+      },
+      {
+        name: "Cloth",
+        Component: Cloth,
+        hook: "useSoftBody",
+        hint: (
+          <>
+            <b>Click</b> to throw a ball; the curtain marks each hit through{" "}
+            <code>useBodyContacts</code>. The flag flies in a gusting{" "}
+            <code>wind</code>, the curtain hangs from a rail on geodesic{" "}
+            <code>lra</code> tethers, the tablecloth drapes with a{" "}
+            <code>vertexRadius</code>, and the beach ball and jelly hold their
+            shape with <code>pressure</code>.
+          </>
+        ),
+      },
+      {
         name: "Car",
         Component: Car,
         hook: "useCar",
@@ -764,6 +835,59 @@ export const categories: Category[] = [
             real <code>WheeledVehicleController</code>: engine, transmission,
             differentials, anti-roll bars. Handbrake is rear-only; the service
             brake splits 80/20 front/rear.
+          </>
+        ),
+      },
+      {
+        name: "Ragdoll",
+        Component: RagdollScene,
+        hook: "useRagdoll",
+        hint: (
+          <>
+            <b>Click to throw.</b> Left: <code>passive</code>, dropped on the
+            steps. Middle: <code>motors</code> drive the joints toward the idle
+            animation, legs held by <code>kinematicBones</code> — hits knock it
+            about and it recovers. Right: <code>hardKeying</code> walks it;{" "}
+            <b>knock down</b> switches to <code>passive</code> on the same
+            bodies, and <code>blendToAnimation</code> blends it into a get-up
+            clip for how it landed — back or front.
+          </>
+        ),
+      },
+      {
+        name: "Ragdoll character",
+        Component: RagdollCharacterScene,
+        hook: "useCharacter, useRagdoll, useSoftBody",
+        hint: (
+          <>
+            <code>WASD</code> to walk, <code>Shift</code> to sprint,{" "}
+            <code>Space</code> to jump — no steering in the air —,{" "}
+            <code>R</code> to go limp and <code>R</code> again to get up. A{" "}
+            <code>useCharacter</code> controller moves it and a{" "}
+            <code>hardKeying</code> ragdoll follows the animation, shoving
+            crates. Falling fast — off the ledge, say — it goes{" "}
+            <code>passive</code> in the air, and once it settles gets up with a
+            get-up clip picked for whether it lies on its back or its front,
+            blended in by <code>blendToAnimation</code>.
+            The ragdoll has a collision group the controller&apos;s mask leaves
+            out, so the two never fight. The cape is cloth skinned to the
+            upper spine through <code>skin</code>: its top edge is held to the
+            shoulders and the rest may stray further the lower it hangs.
+          </>
+        ),
+      },
+      {
+        name: "Ragdoll fit",
+        Component: RagdollFitScene,
+        hook: "useCharacterModel",
+        hint: (
+          <>
+            <code>useCharacterModel</code> fits a body per bone from the skin in
+            its bind pose — capsules on the limbs, boxes on the torso — with
+            masses from anthropometric shares and joint limits by bone kind.
+            The overlay rides the bones, so the fit can be judged against any
+            animation. <b>log JSON</b> prints the config to tune and pass back
+            as <code>config</code>.
           </>
         ),
       },

@@ -5,7 +5,14 @@ import { useFrame } from "@react-three/fiber";
 import { useBox } from "@/Jolt/useBox";
 import { useCharacter } from "@/Jolt/useCharacter";
 import type { CharacterApi } from "@/Jolt/useCharacter";
-import { expectNoAsserts, renderPhysics, step, unmount } from "./harness";
+import type { CompoundChild } from "@/Jolt/useCompound";
+import {
+  expectNoAsserts,
+  getApi,
+  renderPhysics,
+  step,
+  unmount,
+} from "./harness";
 
 const held: { api?: CharacterApi; crouched: boolean } = { crouched: false };
 
@@ -175,6 +182,126 @@ describe("useCharacter", () => {
     expect(stuck).toBeLessThan(10);
     expect(loose).toBeGreaterThan(80);
 
+    expectNoAsserts();
+  });
+});
+
+const shaped: { api?: CharacterApi; crouched: boolean } = { crouched: false };
+
+const setShaped = (api: CharacterApi | undefined) => {
+  shaped.api = api;
+};
+
+/** Standing 1.8 m tall, crouching 0.8 m. */
+const Shaped = ({ position }: { position: [number, number, number] }) => {
+  const [api] = useCharacter({
+    position,
+    options: {
+      height: { standing: 1.2, crouching: 0.2 },
+      radius: { standing: 0.3, crouching: 0.3 },
+    },
+  });
+
+  useEffect(() => {
+    setShaped(api);
+  }, [api]);
+
+  useFrame((_, delta) => {
+    api?.update(still, false, shaped.crouched, Math.min(delta, 1 / 30));
+  });
+
+  return null;
+};
+
+/** Its underside 1.2 m up, over x < 0. */
+const Ceiling = () => {
+  useBox({ size: [10, 0.4, 10], position: [-5, 1.4, 0], motionType: "static" });
+  return null;
+};
+
+const shapeNow = () =>
+  getApi().Jolt.getPointer(shaped.api!.character.GetShape());
+
+/** A horizontal capsule along +z, resting on the feet. */
+const HORIZONTAL: CompoundChild[] = [
+  {
+    type: "capsule",
+    position: [0, 0.3, 0],
+    rotation: [Math.SQRT1_2, 0, 0, Math.SQRT1_2],
+    height: 1.2,
+    radius: 0.3,
+  },
+];
+
+const TALL: CompoundChild[] = [
+  { type: "capsule", position: [0, 1.1, 0], height: 1.6, radius: 0.3 },
+];
+
+const moveTo = (x: number) => {
+  const at = shaped.api!.character.GetPosition();
+  shaped.api!.character.SetPosition(
+    getApi().temps.rvec3([x, at.GetY(), at.GetZ()]),
+  );
+};
+
+describe("useCharacter setShape", () => {
+  it("swaps in a shape of your own and back, and refuses one with no room", async () => {
+    shaped.crouched = false;
+    const renderer = await renderPhysics(
+      <>
+        <Ground />
+        <Ceiling />
+        <Shaped position={[3, 0.1, 0]} />
+      </>,
+    );
+    await step(renderer, 30);
+    const standing = shapeNow();
+
+    expect(shaped.api!.setShape(HORIZONTAL)).toBe(true);
+    expect(shapeNow()).not.toBe(standing);
+    await step(renderer, 30);
+    // Resting on the feet, so the floor still holds it up.
+    expect(shaped.api!.character.IsSupported()).toBe(true);
+
+    expect(shaped.api!.setShape(null)).toBe(true);
+    expect(shapeNow()).toBe(standing);
+
+    // Crouched under the ceiling, a 2.2 m shape has no room.
+    shaped.crouched = true;
+    await step(renderer, 2);
+    moveTo(-3);
+    await step(renderer, 2);
+    const crouching = shapeNow();
+    expect(shaped.api!.setShape(TALL)).toBe(false);
+    expect(shapeNow()).toBe(crouching);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("stays crouched under a ceiling until there is room to stand", async () => {
+    shaped.crouched = true;
+    const renderer = await renderPhysics(
+      <>
+        <Ground />
+        <Ceiling />
+        <Shaped position={[3, 0.1, 0]} />
+      </>,
+    );
+    await step(renderer, 30);
+    const crouching = shapeNow();
+
+    moveTo(-3);
+    shaped.crouched = false;
+    await step(renderer, 10);
+    // Regression: a refused stand-up was recorded as standing.
+    expect(shapeNow()).toBe(crouching);
+
+    moveTo(3);
+    await step(renderer, 2);
+    expect(shapeNow()).not.toBe(crouching);
+
+    await unmount(renderer);
     expectNoAsserts();
   });
 });

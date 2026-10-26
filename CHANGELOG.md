@@ -1,5 +1,80 @@
 # Changelog
 
+## 0.4.0
+
+### Breaking changes
+
+- `jolt-physics` `^1.1.1` is required.
+- The `deterministicSimulation` solver setting is gone. Jolt removed it in 1.1.1 because the simulation is now always deterministic.
+- `ContactInfo.impulse` now comes from Jolt's `EstimateCollisionResponse`, with restitution, friction and rotation included, so it reads differently from 0.3.0: higher for a bouncy hit, lower for a glancing one.
+
+### Contacts
+
+- `ContactInfo.frictionImpulse`: the tangential impulse from the same estimate, under `contactForce`. A scrape reads a large one, a straight drop none.
+- `impulse` and `frictionImpulse` match what the solver applies within a couple of percent. The 0.3.0 derivation read a glancing hit about 70% high and ignored restitution.
+
+### Ragdolls
+
+- `useCharacterModel(object, options)` fits a ragdoll to a skinned character from its skin in the bind pose: bones picked by name, capsules on limbs and head, boxes on the torso, anthropometric masses, swing-twist limits by bone kind with one-way knees and elbows. Options `mass`, `bones`, `exclude`, `overrides`, `minWeight`, `radiusPercentile`, `config`, `debug` (the fit drawn on the bones). Returns `{ mesh, meshes, config, excluded, toJSON }`.
+- `useRagdoll(model, options)`: modes `passive`, `hardKeying`, `softKeying` and `motors`, switched at runtime with `setMode` on the same bodies; `kinematicBones` for a partial ragdoll; `mixer` for the animation to follow; `keyingFrequency`, `keyingDamping`, `motorStrength`, `motorTorque`, plus layer, group, mask and material options. The api has `bodyOf`, `boneOf`, `applyImpulse`, the velocity setters, `getRootTransform`, `bounds`, `setPose`, `blendToAnimation`, `setKinematicBones`, `activate`, `isActive`, `resetWarmStart`.
+- `selectRagdollBones`, `classifyBone`, `NON_PHYSICAL_BONES` and the config types are exported.
+
+### Characters
+
+- `useCharacter` options `shape` (compound children instead of the capsules), `innerBody` with `innerBodyLayer` and `innerBodyIDOverride`, `collideWithCharacters` (on by default), `collideWithSoftBodies` (off by default: the character walks through cloth and its inner body pushes it), `userData`, and `options.enhancedInternalEdgeRemoval`.
+- All eleven `CharacterContactListener` callbacks as options: `onContactValidate`, `onCharacterContactValidate`, `onContactAdded`, `onContactPersisted`, `onContactRemoved`, `onCharacterContactAdded`, `onCharacterContactPersisted`, `onCharacterContactRemoved`, `onContactSolve`, `onCharacterContactSolve`, `onAdjustBodyVelocity`.
+- The api adds `characterID`, `innerBodyID`, `hasCollidedWith`, `hasCollidedWithCharacter` and `getActiveContacts`.
+- Characters block each other through one `CharacterVsCharacterCollisionSimple` per world, `JoltApi.characters`.
+- `useConveyor` belts carry characters.
+- `api.setShape(children | shape | null)` swaps in a shape of your own until `null`, and returns `false` when it has no room. A stand-up with no room overhead is retried rather than recorded as done.
+- `overrideUpdate` also gets `deltaTime`.
+- `CharacterShapes`, `CharacterActiveContact`, `CharacterContactHandlers`, `CharacterBodyContact`, `CharacterToCharacterContact` and `CharacterContactVelocities` are exported.
+
+### Water
+
+- `<WaterVolume>`: a box of water with `surfaceLevel`, `waves`, `buoyancy`, `linearDrag`, `angularDrag`, `flow`, `priority`, `layer`, `onEnter`, `onExit` and `debug`, all live except `layer`. Buoyancy and drag run before every physics step; bodies are found by one broadphase query per volume. Overlapping volumes give a body to the highest priority, ties to the first mounted.
+- Body options `floats` (`false` opts out, a number scales the buoyancy), `onEnterWater` and `onExitWater`.
+- `useSwimming(character, options)`: an `overrideUpdate` that floats a `useCharacter` at `depth`, with `speed`, `verticalSpeed`, `damping` and `followFlow`; the api has `overrideUpdate`, `setVertical`, `setFloatDepth`, `swimming`, `moving` and `depth`. The swimming position is left to the caller, through `setShape`.
+- `JoltApi.water` with `sample(point)`, and `api.timing.elapsed`, the simulated time. `WaterEvent`, `WaterSample`, `WaveHeight` and `WaterRegistry` are exported.
+
+### Soft bodies
+
+- `useSoftBody(geometry, options)`: cloth and inflatables from a `BufferGeometry`, welded by position with `weld`. Options `pinned`, `mass`, `compliance`, `shearCompliance`, `bendCompliance`, `bend`, `angleTolerance`, `lra`, `lraMaxDistanceMultiplier`, `tetrahedra`, `volumeCompliance`, `iterations`, `linearDamping`, `maxLinearVelocity`, `restitution`, `friction`, `pressure`, `gravityFactor`, `vertexRadius`, `facesDoubleSided`, `allowSleeping`, `wind`, `airDrag`, `normals`, `floats`, `onEnterWater`, `onExitWater`, `settingsOverride` and the usual layer and group options; `pressure`, `iterations`, `vertexRadius`, `friction`, `restitution`, `gravityFactor`, `linearDamping`, `wind` and `airDrag` are live.
+- `api.geometry` is a copy of the geometry with interpolated positions and recomputed normals, written without allocating. The api has `getVertex`, `setVertex`, `setVertexVelocity`, `pin`, `isPinned`, `setWind`, `faceOf`, `applyForce`, `applyImpulse`, `setLinearVelocity`, `setPosition`, `setEnabled` and the sleep calls.
+- `useBodyContacts` and `useSensor` report soft-body contacts, on both sides of the pair; `useSoftBodyContactListener` is the raw listener. `SoftBodyContactHandlers` is exported.
+- Soft bodies float in `<WaterVolume>` per vertex, and `<PhysicsDebug>` draws them from their live vertices.
+- `<Physics>` keeps a demand frame loop running while a soft body is awake.
+- Skinned cloth: `skin: { mesh, bone, maxDistance, backStopDistance, backStopRadius }` binds a soft body to a `SkinnedMesh`'s bones, weighted by the geometry's `skinIndex`/`skinWeight` or to one bone. Live `skinConstraints` and `skinnedMaxDistanceMultiplier`; `api.snapToSkin()`. The cloth is drawn against the bones as they stand when it renders, so it does not trail a moving character. `SoftBodySkinOptions` is exported.
+
+### Constraints
+
+- `breakForce` (N) and `breakTorque` (N·m) on every constraint hook except `useFixedConstraint`, which Jolt gives no load readout for. The load is averaged over the last 1/30 s, so an impact breaks the same joint at any step rate. The joint switches itself off on the first step past the limit; `onBreak({ force, torque })` reports the load, and `setEnabled(true)` mends it. `ConstraintLoad` is exported.
+
+### Debug rendering
+
+- `<Physics debug>` is live. Toggling it adds and removes the per-hook overlays without touching a body; it used to rebuild every body in the world, and a joint in the same component as one of its bodies was then rebuilt against the destroyed body.
+- `api.debugMesh`, `debugGroup`, `debugMeshStanding` and `debugMeshCrouching` follow the toggle, and `JoltApi.debug` reads the current value.
+- A creation-time `scale` that is refused as invalid no longer scales the debug mesh.
+
+### Performance
+
+- A sleeping body is drawn at its exact resting pose and not read out of Jolt again until it wakes.
+
+### Fixes
+
+- `useSwingTwistConstraint`: the `normalHalfConeAngle` and `planeHalfConeAngle` docs had the two swapped. `normalHalfConeAngle` limits rotation about the plane axis.
+- A compound child's `rotation` is normalized before Jolt sees it.
+- `useCharacter` puts its weight on what it stands on. It passed its up vector where Jolt takes gravity, so a body under it felt nothing. The weight now presses under the character's centre and never exceeds the supporting body's own weight: Jolt's push, at one contact point, spun a light float under a standing character at up to 47 rad/s.
+
+### Demo
+
+- **Systems › Cloth**: a flag in gusting wind, a curtain on a rail, a tablecloth, a beach ball and a jelly cube to throw balls at. A beach ball floats in **Systems › Water**.
+- **Systems › Ragdoll character** wears a cape skinned to the upper spine.
+- **Constraints › Breaking joints**, and a `debug` toolbar toggle for `<Physics debug>`.
+- **Systems › Water**: a pool with waves drawn by a shader that matches the physics, ripples from splashes and from the swimmer, faint lines along a current, crates, stones, buoys and logs, and the mannequin swimming with its swim clips.
+- **Systems › Character contacts**: an inner body, characters that block each other, a belt and a turntable, and the contact callbacks.
+- **Systems › Ragdoll**, **Systems › Ragdoll character** (a `useCharacter` runner with jump and fall animations that goes limp on `R` or a fast fall, and gets up with a face-up or face-down get-up clip) and **Systems › Ragdoll fit**, on a Quaternius mannequin (CC0) with two Mixamo get-up clips.
+
 ## 0.3.0
 
 ### Breaking changes

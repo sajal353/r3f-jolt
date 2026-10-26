@@ -1,14 +1,37 @@
 import { useEffect, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
-import { CapsuleGeometry, Mesh, Quaternion, Vector3 } from "three";
+import {
+  CapsuleGeometry,
+  Mesh,
+  Quaternion,
+  Vector3,
+  BufferGeometry,
+} from "three";
 import type Jolt from "jolt-physics";
 import { useJolt } from "./useJolt";
+import {
+  createCharacterListener,
+  type CharacterContactHandlers,
+} from "./internal/characterContacts";
+import {
+  createChildShape,
+  createColliderShape,
+  type CompoundChild,
+} from "./internal/colliderShape";
 import {
   createDebugMaterial,
   disposeDebugMaterial,
 } from "./internal/debugMaterial";
+import {
+  createDebugView,
+  useDebugFlag,
+  useDebugView,
+  type DebugView,
+} from "./internal/debugView";
+import { shapeToGeometry } from "./internal/shapeToGeometry";
 import { shapeFromResult } from "./internal/useBody";
-import type { QuatTuple, Vec3Tuple } from "./types";
+import { useHandlerRef } from "./internal/useHandlerRef";
+import type { JoltModule, QuatTuple, Vec3Tuple } from "./types";
 
 const degreesToRadians = (degrees: number) => degrees * (Math.PI / 180);
 
@@ -27,6 +50,8 @@ export interface CharacterShapeOptions {
   characterPadding: number;
   penetrationRecoverySpeed: number;
   predictiveContactDistance: number;
+  /** Stops the character catching on the inner edges of a triangle mesh. Costs more per contact. */
+  enhancedInternalEdgeRemoval: boolean;
 }
 
 export const defaultCharacterOptions: CharacterShapeOptions = {
@@ -44,26 +69,99 @@ export const defaultCharacterOptions: CharacterShapeOptions = {
   characterPadding: 0.02,
   penetrationRecoverySpeed: 1,
   predictiveContactDistance: 0.1,
+  enhancedInternalEdgeRemoval: false,
 };
 
 export interface CharacterUpdateOptions {
   ignoreHorizontalMovementLock?: boolean;
   addToVelocity?: Vector3;
-  overrideUpdate?: (velocity: Vector3, up: Vector3) => Vector3;
+  overrideUpdate?: (
+    velocity: Vector3,
+    up: Vector3,
+    deltaTime: number,
+  ) => Vector3;
 }
 
-export interface UseCharacterOptions {
+/**
+ * Shapes placed from the feet, for a character that is not a capsule. One child
+ * is used as it is; several make a compound. Without `crouching`, crouching
+ * keeps the standing shape.
+ */
+export interface CharacterShapes {
+  standing: CompoundChild[];
+  crouching?: CompoundChild[];
+}
+
+export interface UseCharacterOptions extends CharacterContactHandlers {
   position: Vec3Tuple;
   rotation?: QuatTuple;
   up?: Vec3Tuple;
   debug?: boolean;
   mass?: number;
   layer?: number;
+  /** Read back from `character.GetUserData()`, and from contacts other characters report. */
+  userData?: number;
+  /** Replaces the capsules that `options.height` and `options.radius` describe. */
+  shape?: CharacterShapes;
+  /**
+   * A kinematic body that follows the character, so bodies and raycasts hit
+   * it. `true` uses the character's own shape. Off by default: without it,
+   * dynamic bodies pass through the character.
+   */
+  innerBody?: boolean | CharacterShapes;
+  /** Defaults to `layer`. */
+  innerBodyLayer?: number;
+  /** A fixed `GetIndexAndSequenceNumber()` for the inner body, so a client and a server agree on it. */
+  innerBodyIDOverride?: number;
+  /** Blocks and is blocked by every other character that has it on. On by default. */
+  collideWithCharacters?: boolean;
+  /**
+   * Off by default: the character walks through cloth, and its `innerBody`, if
+   * it has one, is what pushes the cloth aside. Jolt's character queries
+   * against a soft body report contacts well short of it, so a character
+   * colliding with one stops a metre away.
+   */
+  collideWithSoftBodies?: boolean;
   options?: Partial<CharacterShapeOptions>;
+}
+
+/** One of `getActiveContacts()`: a copy, safe to keep until the next call. */
+export interface CharacterActiveContact {
+  /** Null when the contact is with another character. */
+  bodyID: number | null;
+  /** Null when the contact is with a body. */
+  characterID: number | null;
+  userData: number;
+  subShapeID: number;
+  point: Vector3;
+  /** From the character towards what it touches, as in the contact callbacks. */
+  normal: Vector3;
+  /** The touched surface's own normal, facing out of it. */
+  surfaceNormal: Vector3;
+  /** Of the touched surface, at the contact. */
+  linearVelocity: Vector3;
+  distance: number;
+  fraction: number;
+  isSensor: boolean;
+  hadCollision: boolean;
+  wasDiscarded: boolean;
+  canPushCharacter: boolean;
 }
 
 export interface CharacterApi {
   character: Jolt.CharacterVirtual;
+  /** `GetID().GetValue()`: what other characters' contacts report it as. */
+  characterID: number;
+  /** Null without `innerBody`. */
+  innerBodyID: Jolt.BodyID | null;
+  /** Touched this body during the last `update`. */
+  hasCollidedWith: (body: Jolt.BodyID) => boolean;
+  /** Touched this character, by api or `characterID`, during the last `update`. */
+  hasCollidedWithCharacter: (other: CharacterApi | number) => boolean;
+  /** Everything the character is touching, written into `target` and returned. */
+  getActiveContacts: (
+    target?: CharacterActiveContact[],
+  ) => CharacterActiveContact[];
   update: (
     direction: Vector3,
     jump: boolean,
@@ -71,9 +169,166 @@ export interface CharacterApi {
     deltaTime: number,
     updateOptions?: CharacterUpdateOptions,
   ) => void;
+  /**
+   * Swaps in a shape of your own, placed from the feet, until called with
+   * `null`, which goes back to the standing or crouching shape. Compound
+   * children are built and freed by the hook; a Jolt shape stays yours, and the
+   * character keeps its own reference while it uses it. False, and nothing
+   * changes, when the shape has no room where the character stands.
+   *
+   * Only contacts near the feet hold a character up, so a shape that does not
+   * reach down to them leaves it unsupported on land. `innerShape` replaces the
+   * inner body's; with `innerBody: true` the inner body takes `shape` itself.
+   */
+  setShape: (
+    shape: CompoundChild[] | Jolt.Shape | null,
+    innerShape?: Jolt.Shape,
+  ) => boolean;
   debugMeshStanding: Mesh | null;
   debugMeshCrouching: Mesh | null;
+  /** The shape last given to `setShape`. */
+  debugMeshCustom: Mesh | null;
 }
+
+type Posture = "standing" | "crouching";
+
+type CharacterDebugMeshes = Record<Posture | "custom", Mesh>;
+
+interface BuiltShape {
+  shape: Jolt.Shape;
+  geometry: BufferGeometry;
+}
+
+type ShapeSet = Record<Posture, BuiltShape>;
+
+const POSTURES: Posture[] = ["standing", "crouching"];
+
+/**
+ * A Jolt capsule is centred on its own origin, and a CharacterVirtual's
+ * position is its feet, so each shape has to be lifted by its *own* half height
+ * plus radius. Sharing one offset sinks the shorter shape into the floor by the
+ * difference.
+ */
+const buildCapsule = (
+  jolt: JoltModule,
+  height: number,
+  radius: number,
+): BuiltShape => {
+  const halfHeight = 0.5 * height;
+  const lift = halfHeight + radius;
+  const offset = new jolt.Vec3(0, lift, 0);
+  const rotation = new jolt.Quat(0, 0, 0, 1);
+  const settings = new jolt.RotatedTranslatedShapeSettings(
+    offset,
+    rotation,
+    new jolt.CapsuleShapeSettings(halfHeight, radius),
+  );
+  const result = settings.Create();
+  jolt.destroy(settings);
+  jolt.destroy(rotation);
+  jolt.destroy(offset);
+
+  return {
+    shape: shapeFromResult<Jolt.Shape>(result, "useCharacter"),
+    geometry: new CapsuleGeometry(radius, height, 4, 8).translate(0, lift, 0),
+  };
+};
+
+/** A compound needs two children at least, so a single one is placed on its own. */
+const buildChildren = (
+  jolt: JoltModule,
+  children: CompoundChild[],
+): BuiltShape => {
+  if (children.length !== 1) {
+    return createColliderShape(jolt, { type: "compound", shapes: children });
+  }
+
+  const shape = createChildShape(jolt, children[0], "useCharacter");
+  return { shape, geometry: shapeToGeometry(jolt, shape) };
+};
+
+const buildShapes = (
+  jolt: JoltModule,
+  shapes: CharacterShapes | undefined,
+  options: CharacterShapeOptions,
+): ShapeSet => {
+  if (!shapes) {
+    const { height, radius } = options;
+    return {
+      standing: buildCapsule(jolt, height.standing, radius.standing),
+      crouching: buildCapsule(jolt, height.crouching, radius.crouching),
+    };
+  }
+
+  const standing = buildChildren(jolt, shapes.standing);
+  return {
+    standing,
+    crouching: shapes.crouching
+      ? buildChildren(jolt, shapes.crouching)
+      : standing,
+  };
+};
+
+/** Without `crouching` both postures share one shape, which is freed once. */
+const releaseShapes = (set: ShapeSet) => {
+  for (const built of new Set(Object.values(set))) built.shape.Release();
+};
+
+const disposeGeometries = (set: ShapeSet) => {
+  for (const built of new Set(Object.values(set))) built.geometry.dispose();
+};
+
+const INVALID_ID = 0xffffffff;
+
+const activeContact = (): CharacterActiveContact => ({
+  bodyID: null,
+  characterID: null,
+  userData: 0,
+  subShapeID: 0,
+  point: new Vector3(),
+  normal: new Vector3(),
+  surfaceNormal: new Vector3(),
+  linearVelocity: new Vector3(),
+  distance: 0,
+  fraction: 0,
+  isSensor: false,
+  hadCollision: false,
+  wasDiscarded: false,
+  canPushCharacter: false,
+});
+
+const readContact = (
+  target: CharacterActiveContact,
+  contact: Jolt.CharacterVirtualContact,
+) => {
+  const bodyID = contact.mBodyB.GetIndexAndSequenceNumber();
+  const characterID = contact.mCharacterIDB;
+  target.bodyID = bodyID >>> 0 === INVALID_ID ? null : bodyID;
+  target.characterID = characterID.IsInvalid() ? null : characterID.GetValue();
+  target.userData = contact.mUserData;
+  target.subShapeID = contact.mSubShapeIDB.GetValue();
+
+  const point = contact.mPosition;
+  target.point.set(point.GetX(), point.GetY(), point.GetZ());
+  const normal = contact.mContactNormal;
+  target.normal.set(-normal.GetX(), -normal.GetY(), -normal.GetZ());
+  const surfaceNormal = contact.mSurfaceNormal;
+  target.surfaceNormal.set(
+    surfaceNormal.GetX(),
+    surfaceNormal.GetY(),
+    surfaceNormal.GetZ(),
+  );
+  const velocity = contact.mLinearVelocity;
+  target.linearVelocity.set(velocity.GetX(), velocity.GetY(), velocity.GetZ());
+
+  target.distance = contact.mDistance;
+  target.fraction = contact.mFraction;
+  target.isSensor = contact.mIsSensorB;
+  target.hadCollision = contact.mHadCollision;
+  target.wasDiscarded = contact.mWasDiscarded;
+  target.canPushCharacter = contact.mCanPushCharacter;
+  return target;
+};
 
 const mergeOptions = (
   overrides: Partial<CharacterShapeOptions> | undefined,
@@ -84,6 +339,17 @@ const mergeOptions = (
   radius: { ...defaultCharacterOptions.radius, ...overrides?.radius },
 });
 
+const skipSoftBodies = (jolt: JoltModule) => {
+  const filter = new jolt.BodyFilterJS();
+  filter.ShouldCollide = function anyBody() {
+    return true;
+  };
+  filter.ShouldCollideLocked = function notSoft(inBody: number) {
+    return !jolt.wrapPointer(inBody, jolt.Body).IsSoftBody();
+  };
+  return filter;
+};
+
 export const useCharacter = (hookOptions: UseCharacterOptions) => {
   const api = useJolt();
   const scene = useThree((state) => state.scene);
@@ -91,13 +357,17 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
   const stateRef = useRef({
     shouldSlide: true,
     desiredVelocity: new Vector3(),
-    crouched: false,
+    posture: "standing" as Posture,
+    custom: false,
   });
 
+  const debugViewRef = useRef<DebugView<CharacterDebugMeshes> | null>(null);
   const [characterApi, setCharacterApi] = useState<CharacterApi>();
 
   // Init-once, like the body hooks: snapshot at mount, rebuild with `key`.
+  // The contact handlers are the exception, and stay live.
   const [mount] = useState(() => hookOptions);
+  const handlersRef = useHandlerRef<CharacterContactHandlers>(hookOptions);
 
   useEffect(() => {
     const {
@@ -105,20 +375,29 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       joltInterface,
       physicsSystem,
       layers,
+      contacts,
+      characters,
       state,
-      debug: debugDefault,
     } = api;
 
     const {
       position,
       rotation = [0, 0, 0, 1],
       up = [0, 1, 0],
-      debug = debugDefault,
       mass = 1000,
       layer = layers.LAYER_MOVING,
+      userData,
+      shape,
+      innerBody = false,
+      innerBodyLayer = layer,
+      innerBodyIDOverride,
+      collideWithCharacters = true,
+      collideWithSoftBodies = false,
     } = mount;
 
     const options = mergeOptions(mount.options);
+    stateRef.current.posture = "standing";
+    stateRef.current.custom = false;
 
     const broadPhaseFilter = new jolt.DefaultBroadPhaseLayerFilter(
       joltInterface.GetObjectVsBroadPhaseLayerFilter(),
@@ -128,64 +407,39 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       joltInterface.GetObjectLayerPairFilter(),
       layer,
     );
-    const bodyFilter = new jolt.BodyFilter();
+    const bodyFilter = collideWithSoftBodies
+      ? new jolt.BodyFilter()
+      : skipSoftBodies(jolt);
     const shapeFilter = new jolt.ShapeFilter();
 
-    const shapeRotation = new jolt.Quat(0, 0, 0, 1);
-
-    // A Jolt capsule is centred on its own origin, and a CharacterVirtual's
-    // position is its feet, so each shape has to be lifted by its *own* half
-    // height plus radius. Sharing one offset sinks the shorter shape into the
-    // floor by the difference.
-    const buildShape = (halfHeight: number, radius: number) => {
-      const offset = new jolt.Vec3(0, halfHeight + radius, 0);
-      const settings = new jolt.RotatedTranslatedShapeSettings(
-        offset,
-        shapeRotation,
-        new jolt.CapsuleShapeSettings(halfHeight, radius),
-      );
-      const result = settings.Create();
-      jolt.destroy(settings);
-      jolt.destroy(offset);
-      return shapeFromResult<Jolt.Shape>(result, "useCharacter");
-    };
-
-    const standingShape = buildShape(
-      0.5 * options.height.standing,
-      options.radius.standing,
-    );
-    const crouchingShape = buildShape(
-      0.5 * options.height.crouching,
-      options.radius.crouching,
-    );
-
-    const standingGeometry = new CapsuleGeometry(
-      options.radius.standing,
-      options.height.standing,
-      4,
-      8,
-    ).translate(0, 0.5 * options.height.standing + options.radius.standing, 0);
-
-    const crouchingGeometry = new CapsuleGeometry(
-      options.radius.crouching,
-      options.height.crouching,
-      4,
-      8,
-    ).translate(
-      0,
-      0.5 * options.height.crouching + options.radius.crouching,
-      0,
-    );
+    const shapes = buildShapes(jolt, shape, options);
+    const innerShapes =
+      innerBody === true
+        ? shapes
+        : innerBody
+          ? buildShapes(jolt, innerBody, options)
+          : null;
 
     const settings = new jolt.CharacterVirtualSettings();
     settings.mMass = mass;
     settings.mMaxSlopeAngle = options.maxSlopeAngle;
     settings.mMaxStrength = options.maxStrength;
-    settings.mShape = standingShape;
+    settings.mShape = shapes.standing.shape;
+    settings.mEnhancedInternalEdgeRemoval = options.enhancedInternalEdgeRemoval;
     settings.mBackFaceMode = jolt.EBackFaceMode_CollideWithBackFaces;
     settings.mCharacterPadding = options.characterPadding;
     settings.mPenetrationRecoverySpeed = options.penetrationRecoverySpeed;
     settings.mPredictiveContactDistance = options.predictiveContactDistance;
+
+    if (innerShapes) {
+      settings.mInnerBodyShape = innerShapes.standing.shape;
+      settings.mInnerBodyLayer = innerBodyLayer;
+      if (innerBodyIDOverride !== undefined) {
+        const override = new jolt.BodyID(innerBodyIDOverride);
+        settings.mInnerBodyIDOverride = override;
+        jolt.destroy(override);
+      }
+    }
 
     const supportingPlaneNormal = new jolt.Vec3(up[0], up[1], up[2]);
     const supportingVolume = new jolt.Plane(
@@ -213,58 +467,24 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
 
     const upVector = new jolt.Vec3(up[0], up[1], up[2]);
     character.SetUp(upVector);
+    if (userData !== undefined) character.SetUserData(userData);
 
-    // The Emscripten binding rejects a partially implemented JSImplementation,
-    // so every callback must be present even when it does nothing.
-    const contactListener = new jolt.CharacterContactListenerJS();
-    contactListener.OnAdjustBodyVelocity = () => {};
-    contactListener.OnContactValidate = () => true;
-    contactListener.OnCharacterContactValidate = () => true;
-    contactListener.OnContactAdded = () => {};
-    contactListener.OnContactPersisted = () => {};
-    contactListener.OnContactRemoved = () => {};
-    contactListener.OnCharacterContactAdded = () => {};
-    contactListener.OnCharacterContactPersisted = () => {};
-    contactListener.OnCharacterContactRemoved = () => {};
-    contactListener.OnCharacterContactSolve = () => {};
-    contactListener.OnContactSolve = (
-      inCharacter,
-      _bodyID2,
-      _subShapeID2,
-      _contactPosition,
-      inContactNormal,
-      inContactVelocity,
-      _contactMaterial,
-      _characterVelocity,
-      inNewCharacterVelocity,
-    ) => {
-      const self = jolt.wrapPointer(
-        inCharacter as unknown as number,
-        jolt.CharacterVirtual,
-      );
-      const contactVelocity = jolt.wrapPointer(
-        inContactVelocity as unknown as number,
-        jolt.Vec3,
-      );
-      const contactNormal = jolt.wrapPointer(
-        inContactNormal as unknown as number,
-        jolt.Vec3,
-      );
-      const newCharacterVelocity = jolt.wrapPointer(
-        inNewCharacterVelocity as unknown as number,
-        jolt.Vec3,
-      );
+    if (collideWithCharacters) {
+      characters.Add(character);
+      character.SetCharacterVsCharacterCollision(characters);
+    }
 
-      if (
-        !stateRef.current.shouldSlide &&
-        contactVelocity.IsNearZero() &&
-        !self.IsSlopeTooSteep(contactNormal)
-      ) {
-        newCharacterVelocity.SetX(0);
-        newCharacterVelocity.SetY(0);
-        newCharacterVelocity.SetZ(0);
-      }
-    };
+    const characterID = character.GetID().GetValue();
+    const innerBodyID = innerShapes
+      ? new jolt.BodyID(character.GetInnerBodyID().GetIndexAndSequenceNumber())
+      : null;
+
+    const contactListener = createCharacterListener(jolt, {
+      handlers: () => handlersRef.current,
+      contacts,
+      bodyInterface: physicsSystem.GetBodyInterfaceNoLock(),
+      shouldSlide: () => stateRef.current.shouldSlide,
+    });
 
     character.SetListener(contactListener);
 
@@ -301,23 +521,143 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     }
 
     const tempVec3 = new jolt.Vec3();
+    const noGravity = new jolt.Vec3(0, 0, 0);
+    const weightAt = new jolt.RVec3();
+    const weight = new Vector3();
+    const bodyInterface = physicsSystem.GetBodyInterfaceNoLock();
+    const lockInterface = physicsSystem.GetBodyLockInterfaceNoLock();
 
-    let debugMeshStanding: Mesh | null = null;
-    let debugMeshCrouching: Mesh | null = null;
+    /**
+     * Jolt presses the weight in at its single ground contact. On a small light
+     * body, a floating crate say, that point tips the body, slides out to the
+     * edge and spins it up without end. Pressing under the character's centre
+     * keeps the torque to where it actually stands.
+     */
+    const pressOnGround = (deltaTime: number) => {
+      if (character.GetGroundState() !== jolt.EGroundState_OnGround) return;
 
-    if (debug) {
-      debugMeshStanding = new Mesh(
-        standingGeometry,
-        createDebugMaterial("character"),
+      const groundID = character.GetGroundBodyID();
+      if (groundID.GetIndexAndSequenceNumber() >>> 0 === INVALID_ID) return;
+      if (bodyInterface.GetMotionType(groundID) !== jolt.EMotionType_Dynamic) {
+        return;
+      }
+
+      const at = character.GetPosition();
+      const contact = character.GetGroundPosition();
+      const drop =
+        (contact.GetX() - at.GetX()) * characterUp.x +
+        (contact.GetY() - at.GetY()) * characterUp.y +
+        (contact.GetZ() - at.GetZ()) * characterUp.z;
+      weightAt.Set(
+        at.GetX() + characterUp.x * drop,
+        at.GetY() + characterUp.y * drop,
+        at.GetZ() + characterUp.z * drop,
       );
-      debugMeshCrouching = new Mesh(
-        crouchingGeometry,
-        createDebugMaterial("character"),
+
+      const ground = lockInterface.TryGetBody(groundID);
+      const groundMass = 1 / ground.GetMotionProperties().GetInverseMass();
+      const impulse = Math.min(character.GetMass(), groundMass) * deltaTime;
+      tempVec3.Set(weight.x * impulse, weight.y * impulse, weight.z * impulse);
+      bodyInterface.AddImpulse(groundID, tempVec3, weightAt);
+    };
+
+    let customGeometry = new BufferGeometry();
+
+    const showShape = (meshes: CharacterDebugMeshes | null) => {
+      if (!meshes) return;
+      const { posture, custom } = stateRef.current;
+      meshes.custom.geometry = customGeometry;
+      meshes.custom.visible = custom;
+      for (const each of POSTURES) {
+        meshes[each].visible = !custom && each === posture;
+      }
+    };
+
+    const buildDebugMeshes = () => {
+      const meshes = {
+        standing: new Mesh(shapes.standing.geometry),
+        crouching: new Mesh(shapes.crouching.geometry),
+        custom: new Mesh(customGeometry),
+      };
+      for (const mesh of Object.values(meshes)) {
+        mesh.material = createDebugMaterial("character");
+        scene.add(mesh);
+      }
+      showShape(meshes);
+      return meshes;
+    };
+
+    const releaseDebugMeshes = (meshes: CharacterDebugMeshes) => {
+      for (const mesh of Object.values(meshes)) {
+        scene.remove(mesh);
+        disposeDebugMaterial(mesh);
+      }
+    };
+
+    const applyShape = (next: Jolt.Shape) =>
+      character.SetShape(
+        next,
+        1.5 * physicsSystem.GetPhysicsSettings().mPenetrationSlop,
+        broadPhaseFilter,
+        layerFilter,
+        bodyFilter,
+        shapeFilter,
+        joltInterface.GetTempAllocator(),
       );
-      debugMeshCrouching.visible = false;
-      scene.add(debugMeshStanding);
-      scene.add(debugMeshCrouching);
-    }
+
+    /** Left as it was when the new shape has no room, and tried again next update. */
+    const takePosture = (posture: Posture) => {
+      if (!applyShape(shapes[posture].shape)) return;
+
+      stateRef.current.posture = posture;
+      if (innerShapes) character.SetInnerBodyShape(innerShapes[posture].shape);
+      showShape(debugView.current);
+    };
+
+    /** The last `setShape` built from compound children, which the hook frees. */
+    let ownedCustom: Jolt.Shape | null = null;
+
+    const setShape = (
+      next: CompoundChild[] | Jolt.Shape | null,
+      innerShape?: Jolt.Shape,
+    ) => {
+      if (state.destroyed) return false;
+
+      const built = Array.isArray(next) ? buildChildren(jolt, next) : null;
+      const custom = built ? built.shape : (next as Jolt.Shape | null);
+      const { posture } = stateRef.current;
+
+      if (!applyShape(custom ?? shapes[posture].shape)) {
+        if (built) {
+          built.shape.Release();
+          built.geometry.dispose();
+        }
+        return false;
+      }
+
+      stateRef.current.custom = custom !== null;
+      if (innerShapes) {
+        const inner = custom
+          ? (innerShape ?? (innerShapes === shapes ? custom : null))
+          : innerShapes[posture].shape;
+        if (inner) character.SetInnerBodyShape(inner);
+      }
+
+      ownedCustom?.Release();
+      ownedCustom = built ? built.shape : null;
+
+      customGeometry.dispose();
+      customGeometry = built
+        ? built.geometry
+        : custom
+          ? shapeToGeometry(jolt, custom)
+          : new BufferGeometry();
+      showShape(debugView.current);
+      return true;
+    };
+
+    const debugView = createDebugView(buildDebugMeshes, releaseDebugMeshes);
+    debugViewRef.current = debugView;
 
     const linearVelocity = new Vector3();
     const verticalVelocity = new Vector3();
@@ -341,23 +681,15 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         overrideUpdate,
       } = updateOptions;
 
-      if (crouched !== stateRef.current.crouched) {
-        stateRef.current.crouched = crouched;
-        character.SetShape(
-          crouched ? crouchingShape : standingShape,
-          1.5 * physicsSystem.GetPhysicsSettings().mPenetrationSlop,
-          broadPhaseFilter,
-          layerFilter,
-          bodyFilter,
-          shapeFilter,
-          joltInterface.GetTempAllocator(),
-        );
-
-        if (debugMeshStanding) debugMeshStanding.visible = !crouched;
-        if (debugMeshCrouching) debugMeshCrouching.visible = crouched;
+      // A shape of the caller's own stays until they hand it back.
+      const wanted: Posture = crouched ? "crouching" : "standing";
+      if (!stateRef.current.custom && wanted !== stateRef.current.posture) {
+        takePosture(wanted);
       }
+      const isCrouched =
+        !stateRef.current.custom && stateRef.current.posture === "crouching";
 
-      const moveSpeed = crouched
+      const moveSpeed = isCrouched
         ? options.moveSpeed * options.crouchMoveSpeedRatio
         : options.moveSpeed;
 
@@ -407,7 +739,7 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       if (onGround) {
         newVelocity.copy(groundVelocity);
 
-        if (jump && movingTowardsGround && !crouched) {
+        if (jump && movingTowardsGround && !isCrouched) {
           scratch.copy(characterUp).multiplyScalar(options.jumpSpeed);
           newVelocity.add(scratch);
         }
@@ -415,11 +747,9 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         newVelocity.copy(verticalVelocity);
       }
 
-      scratch
-        .copy(gravity)
-        .multiplyScalar(deltaTime)
-        .applyQuaternion(upRotation);
-      newVelocity.add(scratch);
+      scratch.copy(gravity).applyQuaternion(upRotation);
+      weight.copy(scratch);
+      newVelocity.addScaledVector(scratch, deltaTime);
 
       scratch
         .copy(stateRef.current.desiredVelocity)
@@ -431,15 +761,17 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       }
 
       const finalVelocity = overrideUpdate
-        ? overrideUpdate(newVelocity, characterUp)
+        ? overrideUpdate(newVelocity, characterUp, deltaTime)
         : newVelocity;
 
       tempVec3.Set(finalVelocity.x, finalVelocity.y, finalVelocity.z);
       character.SetLinearVelocity(tempVec3);
 
+      // Jolt's gravity argument is only the weight the character puts on what
+      // it stands on, which `pressOnGround` applies instead.
       character.ExtendedUpdate(
         deltaTime,
-        character.GetUp(),
+        noGravity,
         updateSettings,
         broadPhaseFilter,
         layerFilter,
@@ -447,58 +779,118 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         shapeFilter,
         joltInterface.GetTempAllocator(),
       );
+
+      pressOnGround(deltaTime);
+    };
+
+    // Getters, because the overlay comes and goes with `<Physics debug>`
+    // while the api object itself must stay the same.
+    const hasCollidedWithCharacter = (other: CharacterApi | number) => {
+      if (typeof other !== "number") {
+        return character.HasCollidedWithCharacter(other.character);
+      }
+
+      const active = character.GetActiveContacts();
+      for (let index = 0; index < active.size(); index += 1) {
+        const contact = active.at(index);
+        if (
+          contact.mHadCollision &&
+          !contact.mCharacterIDB.IsInvalid() &&
+          contact.mCharacterIDB.GetValue() === other
+        ) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const getActiveContacts = (target: CharacterActiveContact[] = []) => {
+      const active = character.GetActiveContacts();
+      const count = active.size();
+      for (let index = 0; index < count; index += 1) {
+        target[index] ??= activeContact();
+        readContact(target[index], active.at(index));
+      }
+      target.length = count;
+      return target;
     };
 
     setCharacterApi({
       character,
+      characterID,
+      innerBodyID,
+      hasCollidedWith: (body) => character.HasCollidedWith(body),
+      hasCollidedWithCharacter,
+      getActiveContacts,
       update,
-      debugMeshStanding,
-      debugMeshCrouching,
+      get debugMeshStanding() {
+        return debugView.current?.standing ?? null;
+      },
+      get debugMeshCrouching() {
+        return debugView.current?.crouching ?? null;
+      },
+      get debugMeshCustom() {
+        return debugView.current?.custom ?? null;
+      },
+      setShape,
     });
 
     return () => {
       setCharacterApi(undefined);
+      debugView.hide();
+      debugViewRef.current = null;
 
-      for (const mesh of [debugMeshStanding, debugMeshCrouching]) {
-        if (!mesh) continue;
-        scene.remove(mesh);
-        disposeDebugMaterial(mesh);
-      }
-
-      standingGeometry.dispose();
-      crouchingGeometry.dispose();
+      disposeGeometries(shapes);
+      if (innerShapes && innerShapes !== shapes) disposeGeometries(innerShapes);
+      customGeometry.dispose();
 
       if (state.destroyed) return;
 
+      if (collideWithCharacters) characters.Remove(character);
       character.SetListener(null as unknown as Jolt.CharacterContactListener);
       jolt.destroy(contactListener);
       jolt.destroy(character);
       jolt.destroy(settings);
 
-      standingShape.Release();
-      crouchingShape.Release();
+      releaseShapes(shapes);
+      ownedCustom?.Release();
+      if (innerShapes && innerShapes !== shapes) releaseShapes(innerShapes);
+      if (innerBodyID) jolt.destroy(innerBodyID);
 
       jolt.destroy(updateSettings);
       jolt.destroy(tempVec3);
+      jolt.destroy(noGravity);
+      jolt.destroy(weightAt);
       jolt.destroy(upVector);
       jolt.destroy(startPosition);
       jolt.destroy(startRotation);
-      jolt.destroy(shapeRotation);
       jolt.destroy(shapeFilter);
       jolt.destroy(bodyFilter);
       jolt.destroy(layerFilter);
       jolt.destroy(broadPhaseFilter);
     };
-  }, [api, mount, scene]);
+  }, [api, mount, scene, handlersRef]);
+
+  const debug = useDebugFlag(mount.debug);
+  useDebugView(characterApi, debugViewRef, debug);
 
   useFrame(() => {
     if (!characterApi) return;
 
-    const { character, debugMeshStanding, debugMeshCrouching } = characterApi;
+    const {
+      character,
+      debugMeshStanding,
+      debugMeshCrouching,
+      debugMeshCustom,
+    } = characterApi;
     const position = character.GetPosition();
     const rotation = character.GetRotation();
 
-    for (const mesh of [debugMeshStanding, debugMeshCrouching]) {
+    for (const mesh of [
+      debugMeshStanding,
+      debugMeshCrouching,
+      debugMeshCustom,
+    ]) {
       if (!mesh || !mesh.visible) continue;
       mesh.position.set(position.GetX(), position.GetY(), position.GetZ());
       mesh.quaternion.set(

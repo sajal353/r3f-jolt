@@ -6,6 +6,7 @@ import {
   type ConstraintBody,
   type ConstraintOptions,
 } from "./internal/useConstraint";
+import { readSixDOFLoad } from "./internal/constraintLoad";
 import {
   createSpring,
   resolveMotorState,
@@ -273,6 +274,7 @@ export const useSixDOFConstraint = (
     {
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castSixDOF,
+      load: readSixDOFLoad,
       api: (context) => createSixDOFApi(context, options),
     },
   );

@@ -1,5 +1,5 @@
 import { useEffect, type RefObject } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Mesh } from "three";
 import type Jolt from "jolt-physics";
 import { useBox } from "@/Jolt/useBox";
@@ -43,6 +43,11 @@ const Falling = ({ motionType = "dynamic" }: { motionType?: MotionType }) => {
   }, [ref, api]);
 
   return <mesh ref={ref} />;
+};
+
+const Floor = () => {
+  useBox({ size: [20, 1, 20], position: [0, -0.5, 0], motionType: "static" });
+  return null;
 };
 
 const meshY = () => {
@@ -179,6 +184,74 @@ describe("interpolation", () => {
     expect(getApi().timing.interpolate).toBe(false);
     expect(getApi().timing.alpha).toBe(0);
     expect(meshY()).toBeCloseTo(held.api!.body.GetPosition().GetY(), 6);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+  /**
+   * A settled body is read once and then left alone. Stopping at the last
+   * interpolated frame instead would leave the mesh a fraction of a step short
+   * of where the body actually came to rest.
+   */
+  it("lands a body that falls asleep exactly on its resting pose", async () => {
+    const renderer = await renderPhysics(
+      <>
+        <Floor />
+        <Falling />
+      </>,
+    );
+
+    for (let frame = 0; frame < 600 && held.api!.body.IsActive(); frame += 1) {
+      await step(renderer, 1, FRAME);
+    }
+    expect(held.api!.body.IsActive()).toBe(false);
+
+    await step(renderer, 1, FRAME);
+    expect(meshY()).toBe(held.api!.body.GetPosition().GetY());
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("stops reading a sleeping body's transform out of Jolt", async () => {
+    const renderer = await renderPhysics(
+      <>
+        <Floor />
+        <Falling />
+      </>,
+    );
+
+    for (let frame = 0; frame < 600 && held.api!.body.IsActive(); frame += 1) {
+      await step(renderer, 1, FRAME);
+    }
+    await step(renderer, 1, FRAME);
+
+    const reads = vi.spyOn(held.api!.body, "GetPosition");
+    await step(renderer, 20, FRAME);
+    expect(reads).not.toHaveBeenCalled();
+    reads.mockRestore();
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("redraws a sleeping body teleported without waking it", async () => {
+    const renderer = await renderPhysics(
+      <>
+        <Floor />
+        <Falling />
+      </>,
+    );
+
+    for (let frame = 0; frame < 600 && held.api!.body.IsActive(); frame += 1) {
+      await step(renderer, 1, FRAME);
+    }
+
+    held.api!.setPositionAndRotation([0, 7, 0], [0, 0, 0, 1], false);
+    await step(renderer, 2, FRAME);
+
+    expect(held.api!.body.IsActive()).toBe(false);
+    expect(meshY()).toBeCloseTo(7, 5);
 
     await unmount(renderer);
     expectNoAsserts();

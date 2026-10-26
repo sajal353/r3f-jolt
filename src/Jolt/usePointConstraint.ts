@@ -5,6 +5,7 @@ import {
   type ConstraintBody,
   type ConstraintOptions,
 } from "./internal/useConstraint";
+import { readPointLoad } from "./internal/constraintLoad";
 import { resolvePair, resolveSpace } from "./internal/constraintSettings";
 import type { ConstraintSpace } from "./internal/constraintSettings";
 import type { JoltModule, Temps, Vec3Tuple } from "./types";
@@ -53,4 +54,5 @@ export const usePointConstraint = (
   useConstraint<Jolt.PointConstraint>(body1, body2, options, {
     settings: (jolt, temps) => buildSettings(jolt, temps, options),
     cast: castPoint,
+    load: readPointLoad,
   });

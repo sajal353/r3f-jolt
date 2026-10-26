@@ -6,6 +6,7 @@ import {
   type ConstraintBody,
   type ConstraintOptions,
 } from "./internal/useConstraint";
+import { readSliderLoad } from "./internal/constraintLoad";
 import {
   applyLimits,
   applyMotor,
@@ -181,6 +182,7 @@ export const useSliderConstraint = (
     {
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castSlider,
+      load: readSliderLoad,
       api: (context) => createSliderApi(context, options.motor),
     },
   );

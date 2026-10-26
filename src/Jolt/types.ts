@@ -67,6 +67,23 @@ export interface ContactHandlers {
   onContactRemoved?: (pair: Jolt.SubShapeIDPair) => void;
 }
 
+/**
+ * Soft bodies have a listener of their own: Jolt reports a soft body's
+ * contacts once per step and pair, with no persisted or removed calls.
+ */
+export interface SoftBodyContactHandlers {
+  /** Return `false` to let the pair pass through each other. */
+  onSoftBodyContactValidate?: (
+    softBody: Jolt.Body,
+    otherBody: Jolt.Body,
+    settings: Jolt.SoftBodyContactSettings,
+  ) => boolean | void;
+  onSoftBodyContactAdded?: (
+    softBody: Jolt.Body,
+    manifold: Jolt.SoftBodyManifold,
+  ) => void;
+}
+
 export interface ContactInfo {
   bodyID: number;
   userData: number;
@@ -92,18 +109,21 @@ export interface ContactInfo {
    */
   impactSpeed: number;
   /**
-   * Estimated normal impulse, in kg·m/s — `impactSpeed` times the pair's
-   * effective mass.
-   *
-   * Jolt binds no applied impulse anywhere, so this is **derived, not
-   * reported**: it answers "how much momentum had to be cancelled" and ignores
-   * the angular terms in the effective mass, which reads high for a glancing
-   * blow on a long lever. Good for ranking a scrape against a crash. Not a
-   * substitute for the solver's own numbers.
+   * Normal impulse in kg·m/s, summed over the contact points: Jolt's
+   * `EstimateCollisionResponse`, which runs the contact solver on this one
+   * manifold with restitution, friction and surface velocity. An estimate
+   * because the real solver also sees every other contact on both bodies.
    *
    * Only filled when the subscriber asked for it; see `BodyContactOptions`.
    */
   impulse: number;
+  /**
+   * Tangential impulse in kg·m/s from the same estimate: large for a scrape,
+   * near zero for a straight drop.
+   *
+   * Only filled when the subscriber asked for it; see `BodyContactOptions`.
+   */
+  frictionImpulse: number;
 }
 
 export interface BodyContactHandlers {
@@ -113,8 +133,9 @@ export interface BodyContactHandlers {
 }
 
 /**
- * `contactForce` costs about ten calls into WASM per contact per step, so it is
- * off unless asked for and `impactSpeed` / `impulse` stay 0 without it.
+ * `contactForce` runs Jolt's collision estimate per contact per step, so it is
+ * off unless asked for and `impactSpeed`, `impulse` and `frictionImpulse` stay
+ * 0 without it.
  */
 export interface BodyContactOptions {
   contactForce?: boolean;
@@ -150,6 +171,8 @@ export interface PhysicsTiming {
    */
   stepDelta: number;
   stepCount: number;
+  /** Simulated seconds: every step's delta added up. */
+  elapsed: number;
   /**
    * How far the renderer is between the previous step and the current one, 0…1
    * — the accumulator remainder over `timeStep`. Always 0 when interpolation is
@@ -202,8 +225,72 @@ export interface ContactRegistry {
     bodyID: number,
     source: SurfaceVelocity,
   ) => SurfaceVelocityHandle;
+  surfaceVelocityOf: (bodyID: number) => SurfaceVelocity | undefined;
+  addSoftBodyListener: (handlers: SoftBodyContactHandlers) => () => void;
+  /** Ends a removed soft body's contacts, with `onExit` on both sides. */
+  forgetSoftBody: (bodyID: number) => void;
   subscribe: (callback: () => void) => () => void;
   getSnapshot: () => number;
+  flush: () => void;
+  destroy: () => void;
+}
+
+export interface WaterEvent {
+  bodyID: number;
+  userData: number;
+  /** Where the body was when it crossed, in world space. */
+  position: Vector3;
+  /** Its linear velocity at that moment: how big a splash to make. */
+  velocity: Vector3;
+}
+
+export type WaterEventHandler = (event: WaterEvent) => void;
+
+/** Height of the surface above `surfaceLevel` at `x, z`, at simulated `time`. */
+export type WaveHeight = (x: number, z: number, time: number) => number;
+
+/** What a point is under. Reused between calls unless you pass your own. */
+export interface WaterSample {
+  /** Metres below the surface. */
+  depth: number;
+  /** Including the wave at that point. */
+  surfaceLevel: number;
+  flow: Vector3;
+}
+
+/** One region, mutated in place by `<WaterVolume>` and read every step. */
+export interface WaterVolumeEntry {
+  min: Vector3;
+  max: Vector3;
+  surfaceLevel: number;
+  buoyancy: number;
+  linearDrag: number;
+  angularDrag: number;
+  flow: Vector3;
+  priority: number;
+  layer: number;
+  waves?: WaveHeight;
+  onEnter?: WaterEventHandler;
+  onExit?: WaterEventHandler;
+  /** Set when the region moved, rose or changed flow, so sleepers in it wake. */
+  changed: boolean;
+}
+
+export interface WaterBodySettings {
+  /** 0 opts out of buoyancy; anything else multiplies the volume's. */
+  floats: number;
+  onEnterWater?: WaterEventHandler;
+  onExitWater?: WaterEventHandler;
+}
+
+export interface WaterRegistry {
+  addVolume: (volume: WaterVolumeEntry) => () => void;
+  addBody: (
+    bodyID: number,
+    settings: { readonly current: WaterBodySettings },
+  ) => () => void;
+  /** The highest-priority water `point` is under, or null when it is dry. */
+  sample: (point: Vec3Input, target?: WaterSample) => WaterSample | null;
   flush: () => void;
   destroy: () => void;
 }
@@ -246,6 +333,13 @@ export interface JoltApi {
   constraints: ConstraintRegistry;
   steps: StepRegistry;
   temps: Temps;
+  /**
+   * Every `useCharacter` with `collideWithCharacters` adds itself here, so the
+   * characters in one world block each other.
+   */
+  characters: Jolt.CharacterVsCharacterCollisionSimple;
+  /** Every `<WaterVolume>` in the world, and what each body is floating in. */
+  water: WaterRegistry;
   timing: PhysicsTiming;
   /**
    * Advances the world by hand: the same accumulator, step callbacks and event
@@ -256,7 +350,11 @@ export interface JoltApi {
    * Does nothing while the world is paused or disposed.
    */
   step: (delta?: number) => void;
-  debug: boolean;
+  /**
+   * The current `<Physics debug>`. Reading it does not subscribe to it; the
+   * hooks pick up a change on their own.
+   */
+  readonly debug: boolean;
   /**
    * React unmounts a parent's effects before its children's, so `<Physics>`
    * tears down first and every child hook cleans up afterwards. Destroying the

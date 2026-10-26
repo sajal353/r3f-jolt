@@ -1,11 +1,13 @@
 import { Quaternion, Vector3 } from "three";
 import type Jolt from "jolt-physics";
+import { createSoftContacts } from "./softContacts";
 import type {
   BodyContactHandlers,
   ContactHandlers,
   ContactInfo,
   ContactRegistry,
   JoltModule,
+  StepRegistry,
   SurfaceVelocity,
 } from "../types";
 
@@ -28,11 +30,13 @@ const createContactInfo = (): ContactInfo => ({
   penetrationDepth: 0,
   impactSpeed: 0,
   impulse: 0,
+  frictionImpulse: 0,
 });
 
 export const createContactRegistry = (
   Jolt: JoltModule,
   physicsSystem: Jolt.PhysicsSystem,
+  steps: StepRegistry,
 ): ContactRegistry => {
   const listeners = new Set<ContactHandlers>();
   const bodyListeners = new Map<number, Set<BodyContactHandlers>>();
@@ -50,6 +54,7 @@ export const createContactRegistry = (
    */
   const outLinear = new Jolt.Vec3();
   const outAngular = new Jolt.Vec3();
+  const estimate = new Jolt.CollisionEstimationResult();
 
   /**
    * How many of a body's listeners asked for the force estimate. The estimate
@@ -73,7 +78,7 @@ export const createContactRegistry = (
   const bodySpin = new Vector3();
   const bodyCentre = new Vector3();
 
-  const force = { impactSpeed: 0, impulse: 0 };
+  const force = { impactSpeed: 0, impulse: 0, frictionImpulse: 0 };
 
   const relLinear = new Vector3();
   const relAngular = new Vector3();
@@ -164,6 +169,7 @@ export const createContactRegistry = (
     const withForce = wantsForce(targetID);
     info.impactSpeed = withForce ? force.impactSpeed : 0;
     info.impulse = withForce ? force.impulse : 0;
+    info.frictionImpulse = withForce ? force.frictionImpulse : 0;
 
     remember(otherID, info.userData);
     queue.push({ kind, target: targetID, info });
@@ -181,9 +187,33 @@ export const createContactRegistry = (
     info.penetrationDepth = 0;
     info.impactSpeed = 0;
     info.impulse = 0;
+    info.frictionImpulse = 0;
 
     queue.push({ kind: "exit", target: targetID, info });
   };
+
+  const soft = createSoftContacts(Jolt, physicsSystem, steps, {
+    watching: () => bodyListeners.size > 0,
+    wants: wantsBodyEvents,
+    emit: (kind, target, other, userData, shapeUserData, point, normal) => {
+      if (!wantsBodyEvents(target, kind)) return;
+
+      const info = take();
+      info.bodyID = other;
+      info.userData = userData;
+      info.shapeUserData = shapeUserData;
+      info.point.copy(point);
+      info.normal.copy(normal);
+      info.penetrationDepth = 0;
+      info.impactSpeed = 0;
+      info.impulse = 0;
+      info.frictionImpulse = 0;
+
+      remember(other, userData);
+      queue.push({ kind, target, info });
+    },
+    exit: (target, other) => queueExitEvent(target, other),
+  });
 
   const readCentre = (target: Vector3, body: Jolt.Body) => {
     const centre = body.GetCenterOfMassPosition();
@@ -212,15 +242,6 @@ export const createContactRegistry = (
   };
 
   /**
-   * A **kinematic** body reports a real inverse mass — measured at 0.000125 for
-   * an 8000 kg slab — while the solver treats it as immovable, so the test is
-   * `IsDynamic()` and not the number. `GetMotionProperties()` on a static body
-   * also trips two asserts in a debug build, which the same guard avoids.
-   */
-  const inverseMassOf = (body: Jolt.Body) =>
-    body.IsDynamic() ? body.GetMotionProperties().GetInverseMass() : 0;
-
-  /**
    * Symmetric, so one pass serves both directions of the pair. Jolt's normal
    * points from body 1 towards body 2 — measured with a falling ball as body 2
    * over a static floor, giving +Y — so the pair is closing when the relative
@@ -230,6 +251,7 @@ export const createContactRegistry = (
     body1: Jolt.Body,
     body2: Jolt.Body,
     manifold: Jolt.ContactManifold,
+    settings: Jolt.ContactSettings,
   ) => {
     const normal = manifold.mWorldSpaceNormal;
     contactNormal.set(normal.GetX(), normal.GetY(), normal.GetZ());
@@ -241,10 +263,24 @@ export const createContactRegistry = (
     pointVelocityOf(pointVelocity2, body2);
 
     const closing = pointVelocity1.sub(pointVelocity2).dot(contactNormal);
-    const inverseMass = inverseMassOf(body1) + inverseMassOf(body2);
-
     force.impactSpeed = closing > 0 ? closing : 0;
-    force.impulse = inverseMass > 0 ? force.impactSpeed / inverseMass : 0;
+
+    Jolt.JoltInterface.prototype.sEstimateCollisionResponse(
+      body1,
+      body2,
+      manifold,
+      estimate,
+      settings,
+    );
+
+    const impulses = estimate.mContactImpulse;
+    let impulse = 0;
+    for (let index = 0; index < impulses.size(); index += 1) {
+      impulse += impulses.at(index);
+    }
+
+    force.impulse = impulse;
+    force.frictionImpulse = estimate.mFrictionImpulse.Length();
   };
 
   /**
@@ -382,17 +418,18 @@ export const createContactRegistry = (
         // Symmetric, so it runs once for the pair rather than once per side —
         // and only for a side that both asked for the force and has a handler
         // for this kind of event, since `queueBodyEvent` drops it otherwise. A
-        // wall of resting bodies persists its contacts every step, and the
-        // estimate is about ten calls into WASM each time.
+        // wall of resting bodies persists its contacts every step, and each
+        // one would run a solver pass over its manifold.
         const needsForce =
           (wantsForce(id1) && wantsBodyEvents(id1, kind)) ||
           (wantsForce(id2) && wantsBodyEvents(id2, kind));
 
         if (needsForce) {
-          estimateForce(body1, body2, manifold);
+          estimateForce(body1, body2, manifold, settings);
         } else {
           force.impactSpeed = 0;
           force.impulse = 0;
+          force.frictionImpulse = 0;
         }
 
         queueBodyEvent(kind, body1, body2, manifold, false);
@@ -425,6 +462,7 @@ export const createContactRegistry = (
   };
 
   const uninstallIfIdle = () => {
+    soft.sync();
     if (listener === null) return;
     if (listeners.size > 0 || bodyListeners.size > 0) return;
     if (surfaceVelocities.size > 0) return;
@@ -462,6 +500,7 @@ export const createContactRegistry = (
       }
 
       install();
+      soft.sync();
 
       return () => {
         if (withForce) {
@@ -499,6 +538,20 @@ export const createContactRegistry = (
       };
     },
 
+    surfaceVelocityOf: (bodyID) => surfaceVelocities.get(bodyID),
+
+    addSoftBodyListener: (handlers) => {
+      if (destroyed) return () => {};
+      const remove = soft.add(handlers);
+      return () => {
+        if (!destroyed) remove();
+      };
+    },
+
+    forgetSoftBody: (bodyID) => {
+      if (!destroyed) soft.forget(bodyID);
+    },
+
     subscribe: (callback) => {
       storeSubscribers.add(callback);
       return () => storeSubscribers.delete(callback);
@@ -533,6 +586,7 @@ export const createContactRegistry = (
       if (destroyed) return;
 
       destroyed = true;
+      soft.destroy();
       listeners.clear();
       bodyListeners.clear();
       forceWanted.clear();
@@ -543,6 +597,7 @@ export const createContactRegistry = (
 
       Jolt.destroy(outLinear);
       Jolt.destroy(outAngular);
+      Jolt.destroy(estimate);
 
       if (listener !== null) {
         physicsSystem.SetContactListener(

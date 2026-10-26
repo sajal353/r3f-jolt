@@ -5,6 +5,12 @@ import type Jolt from "jolt-physics";
 import { useJolt } from "../useJolt";
 import { syncObject } from "./syncObject";
 import { createTransformTracker } from "./interpolate";
+import {
+  createDebugView,
+  useDebugFlag,
+  useDebugView,
+  type DebugView,
+} from "./debugView";
 import { motionTypeName, resolveMotionType } from "./motionType";
 import { useHandlerRef } from "./useHandlerRef";
 import {
@@ -28,6 +34,8 @@ import type {
   QuatTuple,
   Vec3Input,
   Vec3Tuple,
+  WaterBodySettings,
+  WaterEventHandler,
 } from "../types";
 
 /**
@@ -143,6 +151,15 @@ export interface BodyOptions {
    */
   onWake?: () => void;
   onSleep?: () => void;
+  /**
+   * How a `<WaterVolume>` treats this body. `false` ignores buoyancy and drag;
+   * a number multiplies the volume's `buoyancy`. Read fresh on every render.
+   */
+  floats?: boolean | number;
+  /** Delivered after the step, when the body first touches any water. */
+  onEnterWater?: WaterEventHandler;
+  /** Delivered after the step, when the body is out of every volume. */
+  onExitWater?: WaterEventHandler;
   bodySettingsOverride?: (settings: Jolt.BodyCreationSettings) => void;
 }
 
@@ -312,7 +329,7 @@ export const shapeFromResultAs = <
  * `BodyCreationSettings` takes the filter's refcount up by one and destroying
  * this brings it back down, leaving the settings' own copy holding a reference.
  */
-const withCollisionGroup = (
+export const withCollisionGroup = (
   jolt: JoltModule,
   options: CollisionGroupOptions,
   visit: (group: Jolt.CollisionGroup) => void,
@@ -332,9 +349,41 @@ const withCollisionGroup = (
   jolt.destroy(group);
 };
 
+export type WaterBodyOptions = Pick<
+  BodyOptions,
+  "floats" | "onEnterWater" | "onExitWater"
+>;
+
+/** Registers `body` with the water registry while it asks for any of these. */
+export const useWaterBody = (
+  body: Jolt.Body | undefined,
+  options: WaterBodyOptions,
+) => {
+  const api = useJolt();
+  const floats = options.floats;
+  const waterSettings = useHandlerRef<WaterBodySettings>({
+    floats: floats === false ? 0 : floats === true ? 1 : (floats ?? 1),
+    onEnterWater: options.onEnterWater,
+    onExitWater: options.onExitWater,
+  });
+
+  const wantsWater = Boolean(
+    floats !== undefined || options.onEnterWater || options.onExitWater,
+  );
+
+  useEffect(() => {
+    if (!body || !wantsWater) return;
+
+    return api.water.addBody(
+      body.GetID().GetIndexAndSequenceNumber(),
+      waterSettings,
+    );
+  }, [api, body, wantsWater, waterSettings]);
+};
+
 const MAX_USER_DATA = 0xffffffff;
 
-const validateUserData = (value: number, label: string) => {
+export const validateUserData = (value: number, label: string) => {
   if (!Number.isInteger(value) || value < 0 || value > MAX_USER_DATA) {
     console.warn(
       `[r3f-jolt] ${label} must be a 32-bit unsigned integer (0…${MAX_USER_DATA}). ` +
@@ -395,6 +444,7 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
   const scene = useThree((state) => state.scene);
 
   const aliveRef = useRef(false);
+  const debugViewRef = useRef<DebugView<Mesh> | null>(null);
   const [bodyApi, setBodyApi] = useState<BodyApi<S> & E>();
   const [tracker] = useState(createTransformTracker);
 
@@ -414,7 +464,6 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
       temps,
       timing,
       state,
-      debug: debugDefault,
     } = api;
 
     const { options, createShape, debugKind, extras } = mount;
@@ -430,7 +479,6 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
       material,
       initialVelocity,
       initialAngularVelocity,
-      debug = debugDefault,
       enabled = true,
       userData,
       shapeUserData,
@@ -715,19 +763,30 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
       revive();
     }
 
-    let debugMesh: Mesh | null = null;
-    let colliderGeometry: BufferGeometry | null = null;
+    // The debug mesh holds the *unscaled* geometry, so scaling the Object3D
+    // matches the ScaledShape exactly — no regeneration, no allocation.
+    const debugScale = new Vector3(1, 1, 1);
+    if (scale && scaledShape) debugScale.set(scale[0], scale[1], scale[2]);
 
-    if (debug) {
-      colliderGeometry = debugGeometry?.() ?? null;
-      debugMesh = new Mesh(
-        colliderGeometry ?? geometry,
+    const buildDebugMesh = () => {
+      const mesh = new Mesh(
+        debugGeometry?.() ?? geometry,
         createDebugMaterial(debugKind),
       );
-      debugMesh.renderOrder = DEBUG_RENDER_ORDER;
-      if (scale) debugMesh.scale.set(scale[0], scale[1], scale[2]);
-      scene.add(debugMesh);
-    }
+      mesh.renderOrder = DEBUG_RENDER_ORDER;
+      mesh.scale.copy(debugScale);
+      scene.add(mesh);
+      return mesh;
+    };
+
+    const releaseDebugMesh = (mesh: Mesh) => {
+      scene.remove(mesh);
+      if (mesh.geometry !== geometry) mesh.geometry.dispose();
+      disposeDebugMaterial(mesh);
+    };
+
+    const debugView = createDebugView(buildDebugMesh, releaseDebugMesh);
+    debugViewRef.current = debugView;
 
     // Verified safe to hold: GetID() hands back a reference to the body's own
     // member, not one of the shared static temporaries rule 1 warns about.
@@ -763,11 +822,10 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
 
     let grabbedFrom: MotionType | null = null;
 
-    const bodyApiBase: BodyApi<S> = {
+    const bodyApiBase: Omit<BodyApi<S>, "debugMesh"> = {
       body,
       shape,
       geometry,
-      debugMesh,
       kill,
       revive,
 
@@ -980,13 +1038,12 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
 
         if (updateMassProperties) restoreMassProperties?.();
 
-        // The debug mesh holds the *unscaled* geometry, so scaling the Object3D
-        // matches the ScaledShape exactly — no regeneration, no allocation.
-        debugMesh?.scale.set(target.GetX(), target.GetY(), target.GetZ());
+        debugScale.set(target.GetX(), target.GetY(), target.GetZ());
+        debugView.current?.scale.copy(debugScale);
       },
     };
 
-    setBodyApi({
+    const published = {
       ...bodyApiBase,
       ...extras?.({
         api,
@@ -997,18 +1054,23 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
         usable,
         activate: () => bodyInterface.ActivateBody(id),
       }),
-    } as BodyApi<S> & E);
+    };
+
+    // A getter, because the overlay comes and goes with `<Physics debug>`
+    // while this object — which constraints and listeners key on — must not.
+    Object.defineProperty(published, "debugMesh", {
+      get: () => debugView.current,
+      enumerable: true,
+    });
+
+    setBodyApi(published as BodyApi<S> & E);
 
     return () => {
       aliveRef.current = false;
       setBodyApi(undefined);
 
-      if (debugMesh) {
-        scene.remove(debugMesh);
-        disposeDebugMaterial(debugMesh);
-      }
-
-      colliderGeometry?.dispose();
+      debugView.hide();
+      debugViewRef.current = null;
       geometry.dispose();
 
       if (state.destroyed) return;
@@ -1042,6 +1104,8 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
     );
   }, [api, bodyApi, wantsActivationEvents, activationHandlers]);
 
+  useWaterBody(bodyApi?.body, options);
+
   const surfaceVelocity = mount.options.surfaceVelocity;
 
   useEffect(() => {
@@ -1059,22 +1123,34 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
     return handle.release;
   }, [api, bodyApi, surfaceVelocity]);
 
+  const debug = useDebugFlag(mount.options.debug);
+  useDebugView(bodyApi, debugViewRef, debug);
+
   useFrame(() => {
     if (!bodyApi || !aliveRef.current) return;
-    if (!ref.current && !bodyApi.debugMesh) return;
+
+    const debugMesh = bodyApi.debugMesh;
+    if (!ref.current && !debugMesh) return;
 
     // A static body never moves, so there is nothing to interpolate and the
     // straight read is both correct and cheaper.
     if (options.motionType === "static") {
       if (ref.current) syncObject(ref.current, bodyApi.body);
-      if (bodyApi.debugMesh) syncObject(bodyApi.debugMesh, bodyApi.body);
+      if (debugMesh) syncObject(debugMesh, bodyApi.body);
       return;
     }
 
-    tracker.update(bodyApi.body, api.timing);
+    // A sleeping body does not move, so its pose is read once and then reused
+    // until it wakes — reading a transform out of WASM is half a dozen
+    // boundary crossings, every frame, for every settled body in the scene.
+    if (bodyApi.body.IsActive()) {
+      tracker.update(bodyApi.body, api.timing);
+    } else {
+      tracker.rest(bodyApi.body);
+    }
 
     if (ref.current) tracker.applyTo(ref.current);
-    if (bodyApi.debugMesh) tracker.applyTo(bodyApi.debugMesh);
+    if (debugMesh) tracker.applyTo(debugMesh);
   });
 
   return [ref, bodyApi] as [

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useThree } from "@react-three/fiber";
 import {
   type BufferGeometry,
@@ -11,10 +11,17 @@ import {
 import type Jolt from "jolt-physics";
 import { useJolt } from "./useJolt";
 import { shapeToGeometry } from "./internal/shapeToGeometry";
+import { syncObject } from "./internal/syncObject";
 import {
   createDebugMaterial,
   disposeDebugMaterial,
 } from "./internal/debugMaterial";
+import {
+  createDebugView,
+  useDebugFlag,
+  useDebugView,
+  type DebugView,
+} from "./internal/debugView";
 import { shapeFromResult } from "./internal/useBody";
 import type { QuatTuple, Vec3Tuple } from "./types";
 
@@ -89,6 +96,12 @@ export interface CarApi {
   geometry: BufferGeometry;
 }
 
+interface CarDebugView {
+  group: Group;
+  chassis: Mesh;
+  wheels: Mesh[];
+}
+
 const FL_WHEEL = 0;
 const FR_WHEEL = 1;
 const BL_WHEEL = 2;
@@ -98,6 +111,7 @@ export const useCar = (options: UseCarOptions) => {
   const api = useJolt();
   const scene = useThree((state) => state.scene);
 
+  const debugViewRef = useRef<DebugView<CarDebugView> | null>(null);
   const [carApi, setCarApi] = useState<CarApi>();
 
   // Init-once, like the body hooks: snapshot at mount, rebuild with `key`.
@@ -110,7 +124,6 @@ export const useCar = (options: UseCarOptions) => {
       physicsSystem,
       layers,
       state,
-      debug: debugDefault,
     } = api;
 
     const {
@@ -132,7 +145,6 @@ export const useCar = (options: UseCarOptions) => {
       mass = 1500,
       maxTorque = 500,
       clutchStrength = 10,
-      debug = debugDefault,
       layer = layers.LAYER_MOVING,
     } = mount;
 
@@ -325,14 +337,12 @@ export const useCar = (options: UseCarOptions) => {
     const wheelRight = new jolt.Vec3(0, 1, 0);
     const wheelUp = new jolt.Vec3(1, 0, 0);
 
-    let debugGroup: Group | null = null;
-    const debugWheels: Mesh[] = [];
+    const buildDebugView = (): CarDebugView => {
+      const group = new Group();
+      const chassis = new Mesh(geometry, createDebugMaterial("wheel"));
+      group.add(chassis);
 
-    if (debug) {
-      debugGroup = new Group();
-      debugGroup.add(new Mesh(geometry, createDebugMaterial("wheel")));
-
-      for (let index = 0; index < wheels.length; index += 1) {
+      const debugWheels = wheels.map((_, index) => {
         const settings = constraint.GetWheel(index).GetSettings();
         const debugWheel = new Mesh(
           new CylinderGeometry(
@@ -344,13 +354,26 @@ export const useCar = (options: UseCarOptions) => {
           ),
           createDebugMaterial("vehicle"),
         );
+        group.add(debugWheel);
+        return debugWheel;
+      });
 
-        debugGroup.add(debugWheel);
-        debugWheels.push(debugWheel);
+      syncObject(group, carBody);
+      scene.add(group);
+      return { group, chassis, wheels: debugWheels };
+    };
+
+    const releaseDebugView = ({ group, chassis, wheels }: CarDebugView) => {
+      scene.remove(group);
+      disposeDebugMaterial(chassis);
+      for (const debugWheel of wheels) {
+        debugWheel.geometry.dispose();
+        disposeDebugMaterial(debugWheel);
       }
+    };
 
-      scene.add(debugGroup);
-    }
+    const debugView = createDebugView(buildDebugView, releaseDebugView);
+    debugViewRef.current = debugView;
 
     const carState: CarState = {
       position: new Vector3(),
@@ -462,13 +485,14 @@ export const useCar = (options: UseCarOptions) => {
           wheelRotation.GetW(),
         );
 
-        const debugWheel = debugWheels[index];
+        const debugWheel = debugView.current?.wheels[index];
         if (debugWheel) {
           debugWheel.position.copy(wheel.position);
           debugWheel.quaternion.copy(wheel.rotation);
         }
       }
 
+      const debugGroup = debugView.current?.group;
       if (debugGroup) {
         debugGroup.position.copy(carState.position);
         debugGroup.quaternion.copy(carState.rotation);
@@ -483,24 +507,20 @@ export const useCar = (options: UseCarOptions) => {
     // sibling hooks are silent — they happen to publish ref-closing callbacks.
     // This one owns no ref, so the exemption does not apply.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCarApi({ carBody, constraint, update, debugGroup, geometry });
+    setCarApi({
+      carBody,
+      constraint,
+      update,
+      get debugGroup() {
+        return debugView.current?.group ?? null;
+      },
+      geometry,
+    });
 
     return () => {
       setCarApi(undefined);
-
-      if (debugGroup) {
-        scene.remove(debugGroup);
-        for (const debugWheel of debugWheels) {
-          debugWheel.geometry.dispose();
-          disposeDebugMaterial(debugWheel);
-        }
-        for (const child of debugGroup.children) {
-          if (child instanceof Mesh && child.geometry === geometry) {
-            disposeDebugMaterial(child);
-          }
-        }
-      }
-
+      debugView.hide();
+      debugViewRef.current = null;
       geometry.dispose();
 
       if (state.destroyed) return;
@@ -520,6 +540,9 @@ export const useCar = (options: UseCarOptions) => {
       bodyInterface.DestroyBody(carBody.GetID());
     };
   }, [api, mount, scene]);
+
+  const debug = useDebugFlag(mount.debug);
+  useDebugView(carApi, debugViewRef, debug);
 
   return [carApi] as [CarApi | undefined];
 };

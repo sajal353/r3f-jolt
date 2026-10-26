@@ -6,6 +6,7 @@ import {
   type ConstraintBody,
   type ConstraintOptions,
 } from "./internal/useConstraint";
+import { readHingeLoad } from "./internal/constraintLoad";
 import {
   applyLimits,
   applyMotor,
@@ -176,6 +177,7 @@ export const useHingeConstraint = (
     {
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castHinge,
+      load: readHingeLoad,
       api: (context) => createHingeApi(context, options.motor),
     },
   );

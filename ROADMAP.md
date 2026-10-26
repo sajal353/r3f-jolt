@@ -57,7 +57,7 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 - [x] `SpecifiedBroadPhaseLayerFilter` alongside the default filters, for querying one specific broadphase layer. Plus `ignoreBodies` on every query including the raycasters, settable at runtime
 - [x] `OrientedBox.OverlapsAABox` / `OverlapsOrientedBox` exposed as cheap CPU-side overlap helpers — plain functions, not hooks
 - [x] Sensor/intersection events (`onIntersectionEnter`/`Exit`) building on 0.2.1's `sensor` — shipped as `useSensor`, which also keeps the set of bodies currently inside. **Worth recording: Jolt keeps a sensor contact only while the other body is awake**, so a body that settles inside a trigger fires an exit one step after it falls asleep without having moved, and one destroyed while asleep inside fires no exit at all. The hook holds that exit back and delivers it when the body really goes
-- [x] Contact force payload, so a consumer can tell a scrape from an impact. **Amended: `totalForceMagnitude` and `maxForceDirection` are not on the manifold** — `ContactManifold` binds a normal, a penetration depth, two sub-shape ids and the contact points, and no applied impulse is bound anywhere in the library, verified three times. So `impactSpeed` and `impulse` are **derived**: the closing speed along the normal, times the pair's effective mass, computed only for a subscriber that opted in. Labelled an estimate everywhere it appears
+- [x] Contact force payload, so a consumer can tell a scrape from an impact. **Amended: `totalForceMagnitude` and `maxForceDirection` are not on the manifold** — `ContactManifold` binds a normal, a penetration depth, two sub-shape ids and the contact points, and no applied impulse is bound anywhere in the library, verified three times. So `impactSpeed` and `impulse` are **derived**: the closing speed along the normal, times the pair's effective mass, computed only for a subscriber that opted in. Labelled an estimate everywhere it appears. **Amended again in 0.4.0:** jolt-physics 1.1.1 binds `EstimateCollisionResponse`, so `impulse` and the new `frictionImpulse` now come from Jolt's own solver estimate
 - [x] `useConveyor` → `ContactSettings.mRelativeLinearSurfaceVelocity` / `mRelativeAngularSurfaceVelocity` — belts, moving walkways and turntables, with `setLinear` / `setAngular` for runtime control
 - [x] `surfaceVelocity` on the body hooks — the same belt declared at mount, for one that never changes speed
 
@@ -96,114 +96,120 @@ Jolt supports Fixed, Point, Hinge, Slider, Distance, Cone, SwingTwist, SixDOF, P
 
 **Agreed scope:** active + passive ragdolls · auto-fit skeleton binding with per-bone overrides · water volumes with flow · soft bodies & cloth.
 
+### Carried over from 0.3.0
+
+- [x] `breakForce` / `breakTorque` + `onBreak` on the constraint hooks, read from Jolt's `GetTotalLambda*`. Ragdoll joints and destructible structures need it. **Amended:** not on `useFixedConstraint` — Jolt binds `FixedConstraintSettings` but no `FixedConstraint` class, so there is nothing to read the load from
+- [x] `<Physics debug>` live, without rebuilding the world
+- [x] Sleeping bodies skip the per-frame transform readback, as instanced bodies already did
+
 ### Skeleton bridge — `internal/skeleton.ts`
 
 The shared foundation for ragdolls _and_ skinned cloth. Its own module because both consume it.
 
-- [ ] Build a `Jolt.Skeleton` from a three.js `SkinnedMesh` bone hierarchy via `AddJoint(new Jolt.JPHString(name, len), parentIndex)`
-- [ ] Topologically sort bones parent-before-child — `Skeleton.AreJointsCorrectlyOrdered()` requires it and three.js `skeleton.bones` order is not guaranteed. Assert with it after building, or ragdolls break on some rigs and not others
-- [ ] Call `CalculateParentJointIndices()`
-- [ ] Maintain a stable bone-name → joint-index map, exposed for overrides and debugging
-- [ ] Derive a **low-detail ragdoll skeleton** from a bone subset — production ragdolls use ~15 bodies for a 100+ bone rig. Fewer bodies is both faster and more stable, and twist/IK/helper bones must never become bodies
-- [ ] Two-way mapper between the full animation skeleton and the ragdoll skeleton. Upstream C++ has `SkeletonMapper`; **it is not bound in JS**, so this is ours to write
-- [ ] Map both directions every frame: animation → ragdoll to drive it, ragdoll → animation to render the simulated result on the full-detail rig
-- [ ] `PhysicsSystem.SetSimShapeFilter` — lets one body carry a cheap simulation shape and a detailed query shape, filtering collisions between sub-shapes of the same body. Same problem the low-detail ragdoll solves, so design the two together rather than having them fight
-- [ ] `SkeletalAnimation.SetIsLooping` / `IsLooping` for the driving animation
-- [ ] `SkeletonPose` setup: `SetSkeleton`, `SetRootOffset`, per-joint `GetJoint(i)` → `SkeletalAnimationJointState` write of translation + rotation, then `CalculateJointMatrices()`
-- [ ] **Jolt pose → three.js bones**: `GetJointMatrices()` yields _model-space_ `Mat44`; three.js bones need local matrices. Convert by composing with the parent's inverse, accounting for `skeleton.boneInverses` (bind pose). **This is the riskiest code in the phase** — get it subtly wrong and characters look _almost_ right, the worst failure mode. Unit-test the round-trip against a known rig before building anything on it
-- [ ] **three.js bones → Jolt pose** (for `DriveToPoseUsingMotors`): read animated bone world matrices into joint states, then `CalculateJointStates()`
-- [ ] Allocation-free: `Mat44MemRef` heap views + reusable scratch `Matrix4`/`Quaternion`; this runs every frame per ragdoll
-- [ ] Handle non-uniform bone scale, and warn rather than silently producing wrong colliders
+- [x] Build a `Jolt.Skeleton` from a three.js `SkinnedMesh` bone hierarchy via `AddJoint(new Jolt.JPHString(name, len), parentIndex)`
+- [x] Topologically sort bones parent-before-child — `Skeleton.AreJointsCorrectlyOrdered()` requires it and three.js `skeleton.bones` order is not guaranteed. Assert with it after building, or ragdolls break on some rigs and not others
+- [x] Call `CalculateParentJointIndices()`
+- [x] Maintain a stable bone-name → joint-index map, exposed for overrides and debugging
+- [x] Derive a **low-detail ragdoll skeleton** from a bone subset — production ragdolls use ~15 bodies for a 100+ bone rig. Fewer bodies is both faster and more stable, and twist/IK/helper bones must never become bodies
+- [x] Two-way mapper between the full animation skeleton and the ragdoll skeleton. Upstream C++ has `SkeletonMapper`; **it is not bound in JS**, so this is ours to write
+- [x] Map both directions every frame: animation → ragdoll to drive it, ragdoll → animation to render the simulated result on the full-detail rig
+- [ ] `PhysicsSystem.SetSimShapeFilter` — lets one body carry a cheap simulation shape and a detailed query shape, filtering collisions between sub-shapes of the same body. Same problem the low-detail ragdoll solves, so design the two together rather than having them fight **Amended:** not wrapped. Measured with 8 piled ragdolls on the release build: a no-op `SimShapeFilterJS` runs 373 times a step at about 0.45 µs each, +4–7% on a 2.6 ms step — affordable, but the low-detail ragdoll already keeps simulation shapes cheap, so nothing here needs it. Reachable through `useJolt().physicsSystem`
+- [ ] `SkeletalAnimation.SetIsLooping` / `IsLooping` for the driving animation. **Amended:** the driving animation is a three.js `AnimationMixer` and the bridge reads the posed bones, so no Jolt animation is sampled; looping is the `AnimationAction`'s `loop`
+- [x] `SkeletonPose` setup: `SetSkeleton`, `SetRootOffset`, per-joint `GetJoint(i)` → `SkeletalAnimationJointState` write of translation + rotation, then `CalculateJointMatrices()`. **Amended:** `SetSkeleton` and `SetRootOffset` are in place; the bridge writes joint matrices and derives the states with `CalculateJointStates()`, and the get-up blends in world space, so no local-state write is needed
+- [x] **Jolt pose → three.js bones**: `GetJointMatrices()` yields _model-space_ `Mat44`; three.js bones need local matrices. Convert by composing with the parent's inverse, accounting for `skeleton.boneInverses` (bind pose). **This is the riskiest code in the phase** — get it subtly wrong and characters look _almost_ right, the worst failure mode. Unit-test the round-trip against a known rig before building anything on it
+- [x] **three.js bones → Jolt pose** (for `DriveToPoseUsingMotors`): read animated bone world matrices into joint states, then `CalculateJointStates()`
+- [x] Allocation-free: `Mat44MemRef` heap views + reusable scratch `Matrix4`/`Quaternion`; this runs every frame per ragdoll
+- [x] Handle non-uniform bone scale, and warn rather than silently producing wrong colliders
 
 ### `useRagdoll` — passive + active
 
-- [ ] Build `RagdollSettings`: `mSkeleton`, `mParts` (`ArrayRagdollPart`: a `BodyCreationSettings` + constraint settings per bone), `mAdditionalConstraints`
-- [ ] Call the required setup **in order**: `Stabilize()`, `DisableParentChildCollisions()`, `CalculateBodyIndexToConstraintIndex()`, `CalculateConstraintIndexToBodyIdxPair()`, `CalculateConstraintPriorities()` — skipping any of these produces a jittering or exploding ragdoll
-- [ ] `CreateRagdoll(collisionGroup, userData, physicsSystem)` → `Ragdoll`
-- [ ] Self-collision control via `GroupFilterTable(numGroups)` + `DisableCollision(sub1, sub2)` for adjacent bones, and a `CollisionGroup(filter, groupID, subGroupID)` per part
-- [ ] Lifecycle through the 0.3.0 shared constraint/body helper: `AddToPhysicsSystem` on mount, `RemoveFromPhysicsSystem` + destroy on unmount, `disposed`-aware. A ragdoll is one body **and** one constraint per ragdoll part, so the `useCar` leak class costs dozens of leaked objects per instance here rather than a handful
-- [ ] Mode `"passive"` — free simulation; drive the `SkinnedMesh` from `GetPose()`
-- [ ] Mode `"hardKeying"` — kinematic bodies via `DriveToPoseUsingKinematics(pose, deltaTime)`: animation wins, physics only reacts to the environment. Cheapest and most stable
-- [ ] Mode `"softKeying"` — velocities set on **dynamic** bodies to chase the target pose, so the ragdoll can be pushed off its animation (hard keying cannot be)
-- [ ] Mode `"motors"` — `DriveToPoseUsingMotors(prevPose, pose, deltaTime)`: true active ragdoll for hit reactions
-- [ ] Partial ragdoll: per-bone `dynamic | kinematic` so an arm goes limp while the body keeps animating
-- [ ] Blend back to animation (get-up): capture the ragdoll pose, crossfade toward the animation pose over N frames, then hand control back
-- [ ] `ResetWarmStart()` after teleporting or a pose snap
-- [ ] api: `applyImpulse`, `setLinearVelocity` / `setLinearAndAngularVelocity`, `getRootTransform`, `bodies`, `constraints`, `bounds` (`GetWorldSpaceBounds`), `activate`, `isActive`
-- [ ] Debug view of ragdoll bodies + constraint frames, hooked into `<PhysicsDebug />`
+- [x] Build `RagdollSettings`: `mSkeleton`, `mParts` (`ArrayRagdollPart`: a `BodyCreationSettings` + constraint settings per bone), `mAdditionalConstraints` **Amended:** `mAdditionalConstraints` stays empty: a skeleton is a tree, so every joint is a part's `mToParent`
+- [x] Call the required setup **in order**: `Stabilize()`, `DisableParentChildCollisions()`, `CalculateBodyIndexToConstraintIndex()`, `CalculateConstraintIndexToBodyIdxPair()`, `CalculateConstraintPriorities()` — skipping any of these produces a jittering or exploding ragdoll
+- [x] `CreateRagdoll(collisionGroup, userData, physicsSystem)` → `Ragdoll`
+- [x] Self-collision control via `GroupFilterTable(numGroups)` + `DisableCollision(sub1, sub2)` for adjacent bones, and a `CollisionGroup(filter, groupID, subGroupID)` per part **Amended:** `DisableParentChildCollisions(jointMatrices, 0.05)` builds the `GroupFilterTable` and the per-part `CollisionGroup`s itself, and also parts that overlap at rest; `useGroupFilterTable` is not involved. Each ragdoll gets its own group ID, so two ragdolls collide
+- [x] Lifecycle through the 0.3.0 shared constraint/body helper: `AddToPhysicsSystem` on mount, `RemoveFromPhysicsSystem` + destroy on unmount, `disposed`-aware. A ragdoll is one body **and** one constraint per ragdoll part, so the `useCar` leak class costs dozens of leaked objects per instance here rather than a handful **Amended:** its own effect in `useRagdoll` rather than the shared helper, which takes one body or one constraint; the leak test covers every mode and the get-up
+- [x] Mode `"passive"` — free simulation; drive the `SkinnedMesh` from `GetPose()` **Amended:** the bones are drawn from the interpolated bodies rather than `GetPose()`, so ragdolls interpolate like every other body
+- [x] Mode `"hardKeying"` — kinematic bodies via `DriveToPoseUsingKinematics(pose, deltaTime)`: animation wins, physics only reacts to the environment. Cheapest and most stable
+- [x] Mode `"softKeying"` — velocities set on **dynamic** bodies to chase the target pose, so the ragdoll can be pushed off its animation (hard keying cannot be) **Amended:** a critically damped spring on each body's velocity, integrated implicitly and with gravity cancelled, rather than setting it — setting it erased every shove on the next step
+- [x] Mode `"motors"` — `DriveToPoseUsingMotors(prevPose, pose, deltaTime)`: true active ragdoll for hit reactions **Amended:** the one-pose `DriveToPoseUsingMotors(pose)`. Motor springs are stiffness-based and sized per joint by what hangs off it: a frequency spring is sized by the child body alone, and a spine joint holding up the chest, head and arms sagged until gravity balanced it
+- [x] Partial ragdoll: per-bone `dynamic | kinematic` so an arm goes limp while the body keeps animating **Amended:** `kinematicBones`, in every mode but `passive`
+- [x] Blend back to animation (get-up): capture the ragdoll pose, crossfade toward the animation pose over N frames, then hand control back **Amended:** in world space over `seconds` of step time, the parts kinematic throughout
+- [x] `ResetWarmStart()` after teleporting or a pose snap
+- [x] api: `applyImpulse`, `setLinearVelocity` / `setLinearAndAngularVelocity`, `getRootTransform`, `bodies`, `constraints`, `bounds` (`GetWorldSpaceBounds`), `activate`, `isActive`
+- [x] Debug view of ragdoll bodies + constraint frames, hooked into `<PhysicsDebug />`
 
 ### `useCharacterModel` — auto-fit binding with per-bone overrides
 
-- [ ] Cluster skinned vertices per bone from the `skinIndex`/`skinWeight` attributes (weight-thresholded)
-- [ ] Fit a capsule per bone in bone-local space from that point cloud: radius from a distance percentile (not the max — outliers ruin it), half-height from the extent along the bone→child axis
-- [ ] Box or convex fit as an opt-in alternative for hands, feet and hips
-- [ ] Mass distribution from anthropometric ratios keyed off bone-name heuristics, total normalized to a `mass` prop
-- [ ] Default joint limits per bone class using `SwingTwistConstraintSettings` — shoulders/hips wide cone, elbows/knees narrow with near-zero twist, spine limited
-- [ ] Overrides API: `{ [boneName]: { shape, mass, constraint, exclude } }`
-- [ ] Exclude non-physical bones (twist/IK/helper) by default via name patterns; log what was excluded
-- [ ] Use `boneInverses` so fitting happens in bind pose, not whatever pose the mesh currently holds
-- [ ] Debug overlay of the fitted colliders on the mesh — the primary tuning tool, so build it early
-- [ ] Escape hatch: dump the generated config as JSON so a rig can be tuned once and committed
+- [x] Cluster skinned vertices per bone from the `skinIndex`/`skinWeight` attributes (weight-thresholded)
+- [x] Fit a capsule per bone in bone-local space from that point cloud: radius from a distance percentile (not the max — outliers ruin it), half-height from the extent along the bone→child axis **Amended:** pelvis and spine default to boxes: a torso segment is as wide as it is tall, so its capsule rounded up to a sphere as deep as the chest is wide
+- [x] Box or convex fit as an opt-in alternative for hands, feet and hips
+- [x] Mass distribution from anthropometric ratios keyed off bone-name heuristics, total normalized to a `mass` prop
+- [x] Default joint limits per bone class using `SwingTwistConstraintSettings` — shoulders/hips wide cone, elbows/knees narrow with near-zero twist, spine limited **Amended:** knees and elbows are one-way: the parent's twist axis is turned by half the range, so the symmetric cone covers 0…range in the direction the joint bends
+- [x] Overrides API: `{ [boneName]: { shape, mass, constraint, exclude } }` **Amended:** the key is `joint`, not `constraint`
+- [x] Exclude non-physical bones (twist/IK/helper) by default via name patterns; log what was excluded **Amended:** logged when the fit overlay is shown, and always listed in `model.excluded`
+- [x] Use `boneInverses` so fitting happens in bind pose, not whatever pose the mesh currently holds
+- [x] Debug overlay of the fitted colliders on the mesh — the primary tuning tool, so build it early
+- [x] Escape hatch: dump the generated config as JSON so a rig can be tuned once and committed
 
 ### Character upgrades
 
-- [ ] **Inner rigid body** — `mInnerBodyShape` / `SetInnerBodyShape` / `GetInnerBodyID`. `CharacterVirtual` has no body in the simulation, so today other bodies pass straight through it. An inner body fixes that, and is the answer to the most common complaint about virtual characters
-- [ ] `mInnerBodyIDOverride` — pin the inner body's ID, which exists specifically to keep client/server simulations deterministic
-- [ ] `mEnhancedInternalEdgeRemoval` on the character — stops the character catching on internal edges of triangle-mesh terrain
-- [ ] Compound shapes as the character shape (jolt 0.37.0), not just a capsule — for non-humanoid or asymmetric characters
-- [ ] `CharacterID` exposed, so a character stays identifiable after removal and character-vs-character collisions resolve deterministically
-- [ ] `HasCollidedWith` / `HasCollidedWithCharacter` / `GetActiveContacts` on the returned api
-- [ ] Full `CharacterContactListener` callback set — the current hook wires only `OnAdjustBodyVelocity`, `OnContactValidate`, `OnContactAdded` and `OnContactSolve`; jolt 0.32.0 added `OnContactPersisted`, `OnContactRemoved` and the four `OnCharacterContact*` variants
-- [ ] Carry a character on a conveyor belt. `CharacterContactSettings` has no surface-velocity field, so 0.3.0's `useConveyor` does not reach characters; the route is `OnContactSolve`'s `ioNewCharacterVelocity`
+- [x] **Inner rigid body** — `mInnerBodyShape` / `SetInnerBodyShape` / `GetInnerBodyID`. `CharacterVirtual` has no body in the simulation, so today other bodies pass straight through it. An inner body fixes that, and is the answer to the most common complaint about virtual characters
+- [x] `mInnerBodyIDOverride` — pin the inner body's ID, which exists specifically to keep client/server simulations deterministic
+- [x] `mEnhancedInternalEdgeRemoval` on the character — stops the character catching on internal edges of triangle-mesh terrain
+- [x] Compound shapes as the character shape (jolt 0.37.0), not just a capsule — for non-humanoid or asymmetric characters
+- [x] `CharacterID` exposed, so a character stays identifiable after removal and character-vs-character collisions resolve deterministically. Read-only: `CharacterID` cannot be built with a chosen value, so setting one is left for the determinism work
+- [x] `HasCollidedWith` / `HasCollidedWithCharacter` / `GetActiveContacts` on the returned api
+- [x] Full `CharacterContactListener` callback set — the current hook wires only `OnAdjustBodyVelocity`, `OnContactValidate`, `OnContactAdded` and `OnContactSolve`; jolt 0.32.0 added `OnContactPersisted`, `OnContactRemoved` and the four `OnCharacterContact*` variants
+- [x] Carry a character on a conveyor belt. `CharacterContactSettings` has no surface-velocity field, so 0.3.0's `useConveyor` does not reach characters. Done through `OnAdjustBodyVelocity` rather than `OnContactSolve`, as Jolt's own character sample does: the belt becomes the ground's velocity
 
 ### Character-vs-character collision
 
-- [ ] `CharacterVsCharacterCollisionSimple` registry on `Physics`; `Add`/`Remove` as `useCharacter` instances mount and unmount, so characters stop walking through each other (multiplayer / crowds)
-- [ ] `SetCharacterVsCharacterCollision` wired in `useCharacter`
+- [x] `CharacterVsCharacterCollisionSimple` registry on `Physics`; `Add`/`Remove` as `useCharacter` instances mount and unmount, so characters stop walking through each other (multiplayer / crowds)
+- [x] `SetCharacterVsCharacterCollision` wired in `useCharacter`
 
 ### Water volumes with flow
 
 Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bodyID, surfacePosition, surfaceNormal, buoyancy, linearDrag, angularDrag, fluidVelocity, gravity, deltaTime)`.
 
-- [ ] `<WaterVolume>` region component: AABox or box shape, with `surfaceLevel`, `buoyancy`, `linearDrag`, `angularDrag`, `flow: Vector3`
-- [ ] Apply from `useBeforePhysicsStep` — **per sub-step, not per frame**; applied per frame, floating objects visibly bob differently at 30 fps than at 120
-- [ ] Find submerged bodies with a broadphase query per region (`BroadPhaseQuery.CollideAABox` / `CollectTransformedShapes`), never by iterating every body in the world
-- [ ] Pooled Jolt temporaries throughout: this runs for every floating body every sub-step and is the single worst place for a per-frame WASM leak
-- [ ] Per-body opt-out and per-body buoyancy multiplier (`floats?: boolean | number`)
-- [ ] `onEnterWater` / `onExitWater` events for splash VFX and audio, deferred to the frame boundary
-- [ ] Swimming mode for `useCharacter`: switch gravity handling and clamp vertical velocity when submerged, implemented through the existing `overrideUpdate` hook rather than forking the update loop
-- [ ] Overlapping regions resolve deterministically (highest priority, or deepest surface — pick one and document it)
+- [x] `<WaterVolume>` region component: AABox or box shape, with `surfaceLevel`, `buoyancy`, `linearDrag`, `angularDrag`, `flow: Vector3`. **Amended:** an axis-aligned box only, with `waves` added: a height function bodies float on, tilted to its slope
+- [x] Apply from `useBeforePhysicsStep` — **per sub-step, not per frame**; applied per frame, floating objects visibly bob differently at 30 fps than at 120
+- [x] Find submerged bodies with a broadphase query per region (`BroadPhaseQuery.CollideAABox` / `CollectTransformedShapes`), never by iterating every body in the world
+- [x] Pooled Jolt temporaries throughout: this runs for every floating body every sub-step and is the single worst place for a per-frame WASM leak
+- [x] Per-body opt-out and per-body buoyancy multiplier (`floats?: boolean | number`)
+- [x] `onEnterWater` / `onExitWater` events for splash VFX and audio, deferred to the frame boundary
+- [x] Swimming mode for `useCharacter`: switch gravity handling and clamp vertical velocity when submerged, implemented through the existing `overrideUpdate` hook rather than forking the update loop. **Amended:** shipped as `useSwimming`. The shape stays the caller's: `moving` says when to take a swimming position, and `useCharacter`'s `setShape` swaps the shape
+- [x] Overlapping regions resolve deterministically (highest priority, or deepest surface — pick one and document it). **Amended:** highest priority, ties to the first mounted
 
 ### Soft bodies & cloth
 
-- [ ] `useSoftBody` from a `BufferGeometry`: vertices → `SoftBodySharedSettingsVertex`, faces → `AddFace`, then `CreateConstraints(vertexAttributes, len, bendType, angleTolerance)` and `Optimize()`
-- [ ] Expose `mNumIterations`, `mLinearDamping`, `mPressure` (inflatables), `mFriction`, `mRestitution`, `mGravityFactor` — all on `SoftBodyCreationSettings`
-- [ ] `mVertexRadius` — note it lives on `SoftBodyCreationSettings`, **not** `SoftBodySharedSettings`; it moved in jolt 0.37.0. Avoids z-fighting between cloth and the geometry it rests on
-- [ ] `mFacesDoubleSided` — renders and collides cloth faces from both sides, which is what a flag needs
-- [ ] Pinned vertices via `mInvMass = 0` for flags, banners and curtains
-- [ ] `CalculateVolumeConstraintVolumes()` for closed volumes
-- [ ] LRA / tether constraints for cloth (`mLRAType` = `EuclideanDistance` | `GeodesicDistance`, `mLRAMaxDistanceMultiplier`) — the standard fix for a cape stretching when the wearer sprints. `CreateConstraints` can auto-generate them
-- [ ] Note for the 0.2.1 imperative api: `AddForce` on a soft body applies to the **whole body** as of jolt 0.31.0, not per vertex as it did before
-- [ ] **Skinned cloth on a character**: `mSkinnedConstraints` + `SoftBodyMotionProperties.SkinVertices(rootTransform, jointMatrices, numJoints, hardSkinAll, tempAllocator)`, fed the _same_ joint matrices the skeleton bridge produces. This is the cape-on-a-character path, and it is nearly free once that bridge exists
-- [ ] `SetEnableSkinConstraints` / `SetSkinnedMaxDistanceMultiplier` for how far cloth may leave the skinned shape
-- [ ] Ray and shape casts against soft bodies via `SoftBodyShape`, so cloth is hittable rather than invisible to queries
-- [ ] Render sync: read `SoftBodyMotionProperties.GetVertices()` into a `BufferAttribute` each frame via a heap view + `needsUpdate` — allocation-free, and recompute normals only on request (not cheap)
-- [ ] `SoftBodyContactListenerJS` for cloth contact events, multiplexed like the rigid contact listener
-- [ ] Document the cost honestly: soft bodies are the most expensive thing in Jolt. Give vertex-count guidance
+- [x] `useSoftBody` from a `BufferGeometry`: vertices → `SoftBodySharedSettingsVertex`, faces → `AddFace`, then `CreateConstraints(vertexAttributes, len, bendType, angleTolerance)` and `Optimize()`
+- [x] Expose `mNumIterations`, `mLinearDamping`, `mPressure` (inflatables), `mFriction`, `mRestitution`, `mGravityFactor` — all on `SoftBodyCreationSettings`
+- [x] `mVertexRadius` — note it lives on `SoftBodyCreationSettings`, **not** `SoftBodySharedSettings`; it moved in jolt 0.37.0. Avoids z-fighting between cloth and the geometry it rests on
+- [x] `mFacesDoubleSided` — renders and collides cloth faces from both sides, which is what a flag needs
+- [x] Pinned vertices via `mInvMass = 0` for flags, banners and curtains
+- [x] `CalculateVolumeConstraintVolumes()` for closed volumes
+- [x] LRA / tether constraints for cloth (`mLRAType` = `EuclideanDistance` | `GeodesicDistance`, `mLRAMaxDistanceMultiplier`) — the standard fix for a cape stretching when the wearer sprints. `CreateConstraints` can auto-generate them
+- [x] Note for the 0.2.1 imperative api: `AddForce` on a soft body applies to the **whole body** as of jolt 0.31.0, not per vertex as it did before. **Amended:** Jolt's `AddImpulse` and `SetLinearVelocity` write the rigid velocity a soft body never reads, so `useSoftBody`'s `applyImpulse` and `setLinearVelocity` write the vertices instead
+- [x] **Skinned cloth on a character**: `mSkinnedConstraints` + `SoftBodyMotionProperties.SkinVertices(rootTransform, jointMatrices, numJoints, hardSkinAll, tempAllocator)`, fed the _same_ joint matrices the skeleton bridge produces. This is the cape-on-a-character path, and it is nearly free once that bridge exists. **Amended:** fed three.js's own bone matrices rather than the bridge's, which keeps a subset of bones and strips scale, so the cloth lands exactly where the skin is drawn; `useSoftBody`'s `skin` option
+- [x] `SetEnableSkinConstraints` / `SetSkinnedMaxDistanceMultiplier` for how far cloth may leave the skinned shape
+- [x] Ray and shape casts against soft bodies via `SoftBodyShape`, so cloth is hittable rather than invisible to queries. **Amended:** Jolt already routes queries through `SoftBodyShape`; `api.faceOf(subShapeID)` maps a hit to the geometry's triangle
+- [x] Render sync: read `SoftBodyMotionProperties.GetVertices()` into a `BufferAttribute` each frame via a heap view + `needsUpdate` — allocation-free, and recompute normals only on request (not cheap). **Amended:** normals are recomputed whenever the vertices move, opt out with `normals: false` — next to the solver they cost almost nothing, and a lit cloth with stale normals looks broken
+- [x] `SoftBodyContactListenerJS` for cloth contact events, multiplexed like the rigid contact listener
+- [x] Document the cost honestly: soft bodies are the most expensive thing in Jolt. Give vertex-count guidance
 
 ### Verification
 
-- [ ] Unit test the skeleton bridge round-trip: three.js bones → `SkeletonPose` → back to bones reproduces the original pose within epsilon
-- [ ] Test `AreJointsCorrectlyOrdered()` passes for a bone hierarchy deliberately supplied out of order
-- [ ] Test a ragdoll mount/unmount cycle returns `GetNumBodies()` **and** constraint count to baseline, `sGetFreeMemory` flat over N cycles
-- [ ] Test ragdoll self-collision: adjacent bones do not push each other apart at rest
-- [ ] Test buoyancy runs per sub-step (a body bobs identically at a 30 Hz and a 120 Hz fixed step)
-- [ ] Test water enter/exit events fire once per crossing, not per frame
-- [ ] Test soft-body vertex readback allocates nothing across N frames
-- [ ] Demo: ragdoll scene with a real glTF character — passive flop, hit reaction via motors, get-up blend
-- [ ] Demo: auto-fit collider debug overlay on that character
-- [ ] Demo: pool with a current, floating crates, swimming character
-- [ ] Demo: cape skinned to the character (shares the skeleton bridge's joint matrices)
+- [x] Unit test the skeleton bridge round-trip: three.js bones → `SkeletonPose` → back to bones reproduces the original pose within epsilon
+- [x] Test `AreJointsCorrectlyOrdered()` passes for a bone hierarchy deliberately supplied out of order
+- [x] Test a ragdoll mount/unmount cycle returns `GetNumBodies()` **and** constraint count to baseline, `sGetFreeMemory` flat over N cycles
+- [x] Test ragdoll self-collision: adjacent bones do not push each other apart at rest
+- [x] Test buoyancy runs per sub-step (a body bobs identically at a 30 Hz and a 120 Hz fixed step)
+- [x] Test water enter/exit events fire once per crossing, not per frame
+- [x] Test soft-body vertex readback allocates nothing across N frames
+- [x] Demo: ragdoll scene with a real glTF character — passive flop, hit reaction via motors, get-up blend
+- [x] Demo: auto-fit collider debug overlay on that character
+- [x] Demo: pool with a current, floating crates, swimming character
+- [x] Demo: cape skinned to the character (shares the skeleton bridge's joint matrices). **Amended:** on the Ragdoll character, skinned from three.js's bone matrices
 
 ---
 
@@ -285,6 +291,14 @@ The bulk of the work is here, not in the simulation.
 - [ ] Instanced strand rendering, thousands of strands in a handful of draw calls
 - [ ] Allocation-free per-frame update: heap views straight into `BufferAttribute`s, matching the 0.4.0 soft-body sync discipline
 - [ ] Optional LOD: fewer simulated segments and interpolated strands with distance
+
+### Self-collision
+
+Jolt soft bodies collide only with rigid bodies: cloth folding onto itself passes through and tangles, and two soft bodies pass through each other. Strands tangle the same way.
+
+- [ ] Opt-in `selfCollision: { thickness }` on `useSoftBody`: a spatial hash before each step pushes apart non-neighbouring vertices closer than `thickness`, on the heap like the 0.4.0 wind pass
+- [ ] The same pass between soft bodies, so a tablecloth rests on a jelly instead of sinking into it
+- [ ] Measure the cost per vertex and the smallest `thickness`, relative to vertex spacing, that stops a fast fold slipping through
 
 ### Verification
 

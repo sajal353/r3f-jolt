@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import initJolt from "jolt-physics/wasm-compat";
 import type Jolt from "jolt-physics";
-import { joltContext } from "./context";
+import { joltContext, physicsDebugContext } from "./context";
 import { createActivationRegistry } from "./internal/activation";
 import { createConstraintRegistry } from "./internal/constraints";
 import { createContactRegistry } from "./internal/contacts";
+import { createWaterRegistry } from "./internal/water";
 import { createStepRegistry } from "./internal/steps";
 import { createTemps } from "./internal/temps";
 import { useHandlerRef } from "./internal/useHandlerRef";
@@ -51,8 +52,7 @@ export interface PhysicsProps {
   paused?: boolean;
   /**
    * Turns the per-hook `debug` flag on for every hook that does not set it.
-   * Each hook reads it once, at mount, so changing it rebuilds every body in
-   * the world — `<PhysicsDebug />` is the toggle to reach for at runtime.
+   * Live: changing it adds or removes their overlays without touching a body.
    */
   debug?: boolean;
   timeStep?: number | "vary";
@@ -126,8 +126,9 @@ export const Physics = ({
   init = defaultInit,
   settingsOverride,
 }: PhysicsProps) => {
-  const [world, setWorld] = useState<Omit<JoltApi, "debug"> | null>(null);
+  const [world, setWorld] = useState<JoltApi | null>(null);
   const accumulatorRef = useRef(0);
+  const debugRef = useRef(debug);
   const invalidate = useThree((state) => state.invalidate);
 
   // One mutable clock for the world, handed to every consumer by reference so a
@@ -135,6 +136,7 @@ export const Physics = ({
   const timingRef = useRef<PhysicsTiming>({
     stepDelta: typeof timeStep === "number" ? timeStep : 1 / 60,
     stepCount: 0,
+    elapsed: 0,
     alpha: 0,
     interpolate: false,
   });
@@ -176,6 +178,7 @@ export const Physics = ({
       world.steps.run("before", stepDelta, index);
       world.joltInterface.Step(stepDelta, collisionSteps);
       timing.stepCount = index + 1;
+      timing.elapsed += stepDelta;
       world.steps.run("after", stepDelta, index);
     };
 
@@ -200,13 +203,16 @@ export const Physics = ({
 
     world.contacts.flush();
     world.activation.flush();
+    world.water.flush();
 
     // On `frameloop="demand"` nothing asks for the next frame, so a world with
     // anything still moving in it would freeze mid-fall. Asking while bodies are
     // awake keeps it running and lets it genuinely stop once everything sleeps,
     // which is the point of demand. A no-op on the default frame loop.
     if (
-      world.physicsSystem.GetNumActiveBodies(world.Jolt.EBodyType_RigidBody) > 0
+      world.physicsSystem.GetNumActiveBodies(world.Jolt.EBodyType_RigidBody) >
+        0 ||
+      world.physicsSystem.GetNumActiveBodies(world.Jolt.EBodyType_SoftBody) > 0
     ) {
       invalidate();
     }
@@ -224,6 +230,8 @@ export const Physics = ({
       constraints: ReturnType<typeof createConstraintRegistry>;
       steps: ReturnType<typeof createStepRegistry>;
       temps: Temps;
+      characters: Jolt.CharacterVsCharacterCollisionSimple;
+      water: ReturnType<typeof createWaterRegistry>;
       state: { disposed: boolean; destroyed: boolean };
     } | null = null;
 
@@ -280,11 +288,18 @@ export const Physics = ({
       const physicsSystem = joltInterface.GetPhysicsSystem();
       const bodyInterface = physicsSystem.GetBodyInterface();
       const state = { disposed: false, destroyed: false };
-      const contacts = createContactRegistry(jolt, physicsSystem);
+      const steps = createStepRegistry();
+      const contacts = createContactRegistry(jolt, physicsSystem, steps);
       const activation = createActivationRegistry(jolt, physicsSystem);
       const constraints = createConstraintRegistry();
-      const steps = createStepRegistry();
       const temps = createTemps(jolt);
+      const characters = new jolt.CharacterVsCharacterCollisionSimple();
+      const water = createWaterRegistry(
+        jolt,
+        joltInterface,
+        steps,
+        timingRef.current,
+      );
 
       const objectLayer = (group: number, mask: number) =>
         jolt.ObjectLayerPairFilterMask.prototype.sGetObjectLayer(group, mask);
@@ -297,6 +312,8 @@ export const Physics = ({
         constraints,
         steps,
         temps,
+        characters,
+        water,
         state,
       };
 
@@ -308,6 +325,8 @@ export const Physics = ({
         constraints.destroy();
         steps.destroy();
         temps.destroy();
+        water.destroy();
+        jolt.destroy(characters);
         jolt.destroy(joltInterface);
         created = null;
         return;
@@ -332,8 +351,13 @@ export const Physics = ({
         constraints,
         steps,
         temps,
+        characters,
+        water,
         timing: timingRef.current,
         step: (delta?: number) => advanceRef.current(delta),
+        get debug() {
+          return debugRef.current;
+        },
         state,
       });
     };
@@ -356,6 +380,8 @@ export const Physics = ({
           world.constraints.destroy();
           world.steps.destroy();
           world.temps.destroy();
+          world.water.destroy();
+          world.jolt.destroy(world.characters);
           world.jolt.destroy(world.joltInterface);
         });
       }
@@ -377,6 +403,10 @@ export const Physics = ({
       timing.alpha = 0;
     }
   }, [timeStep, interpolate]);
+
+  useEffect(() => {
+    debugRef.current = debug;
+  }, [debug]);
 
   const [gravityX, gravityY, gravityZ] = gravity;
 
@@ -420,12 +450,13 @@ export const Physics = ({
     advance(delta);
   }, updatePriority);
 
-  const value = useMemo(
-    () => (world ? { ...world, debug } : null),
-    [world, debug],
+  if (!world) return null;
+
+  return (
+    <joltContext.Provider value={world}>
+      <physicsDebugContext.Provider value={debug}>
+        {children}
+      </physicsDebugContext.Provider>
+    </joltContext.Provider>
   );
-
-  if (!value) return null;
-
-  return <joltContext.Provider value={value}>{children}</joltContext.Provider>;
 };

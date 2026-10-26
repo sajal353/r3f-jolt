@@ -33,8 +33,8 @@ const readInto = (target: Vector3, value: Vec3Input | undefined) => {
 
 /**
  * Friction does the dragging, so a belt with `friction: 0` carries nothing. A
- * `useCharacter` is never carried: `CharacterVirtual` runs its own contact
- * listener, and Jolt's character contact settings have no surface-velocity field.
+ * `useCharacter` standing on the belt is carried regardless of friction: it
+ * reads the belt as the ground's own velocity.
  */
 export const useConveyor = <S extends Jolt.Shape>(
   api: BodyApi<S> | undefined,

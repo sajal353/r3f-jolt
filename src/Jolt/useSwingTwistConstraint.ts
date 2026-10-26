@@ -6,6 +6,7 @@ import {
   type ConstraintBody,
   type ConstraintOptions,
 } from "./internal/useConstraint";
+import { readSwingTwistLoad } from "./internal/constraintLoad";
 import {
   applyMotor,
   resolveMotorState,
@@ -34,9 +35,12 @@ export interface UseSwingTwistConstraintOptions extends ConstraintOptions {
   planeAxis2?: Vec3Tuple;
   /** `cone` sweeps a circle, `pyramid` a rectangle. Cone by default. */
   swingType?: SwingType;
-  /** Radians. Swing away from the twist axis, in the plane-axis direction. */
+  /**
+   * Radians. Swing toward the normal axis (twist × plane) — rotation about
+   * the plane axis.
+   */
   normalHalfConeAngle?: number;
-  /** Radians. Swing away from the twist axis, perpendicular to the plane axis. */
+  /** Radians. Swing toward the plane axis — rotation about the normal axis. */
   planeHalfConeAngle?: number;
   twistMinAngle?: number;
   twistMaxAngle?: number;
@@ -214,6 +218,7 @@ export const useSwingTwistConstraint = (
     {
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castSwingTwist,
+      load: readSwingTwistLoad,
       api: (context) => createSwingTwistApi(context, options),
     },
   );

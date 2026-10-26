@@ -50,7 +50,30 @@ export {
   type CharacterApi,
   type CharacterShapeOptions,
   type CharacterUpdateOptions,
+  type CharacterShapes,
+  type CharacterActiveContact,
 } from "@/Jolt/useCharacter";
+export {
+  useSwimming,
+  type UseSwimmingOptions,
+  type SwimmingApi,
+} from "@/Jolt/useSwimming";
+export { WaterVolume, type WaterVolumeProps } from "@/Jolt/WaterVolume";
+export {
+  useSoftBody,
+  type UseSoftBodyOptions,
+  type SoftBodyApi,
+  type BendType,
+  type LRAType,
+  type SoftBodySkinOptions,
+} from "@/Jolt/useSoftBody";
+export { useSoftBodyContactListener } from "@/Jolt/useSoftBodyContactListener";
+export type {
+  CharacterContactHandlers,
+  CharacterBodyContact,
+  CharacterToCharacterContact,
+  CharacterContactVelocities,
+} from "@/Jolt/internal/characterContacts";
 
 export {
   useCar,
@@ -173,6 +196,7 @@ export type {
   ConstraintApi,
   ConstraintApiContext,
   ConstraintBody,
+  ConstraintLoad,
   ConstraintOptions,
 } from "@/Jolt/internal/useConstraint";
 export type {
@@ -184,6 +208,33 @@ export type {
   SpringOptions,
   LimitOptions,
 } from "@/Jolt/internal/constraintSettings";
+
+export {
+  useCharacterModel,
+  type CharacterModel,
+  type UseCharacterModelOptions,
+} from "@/Jolt/useCharacterModel";
+export {
+  useRagdoll,
+  type RagdollApi,
+  type RagdollMode,
+  type UseRagdollOptions,
+} from "@/Jolt/useRagdoll";
+export {
+  classifyBone,
+  selectRagdollBones,
+  type BoneClass,
+  type FitShapeKind,
+  type RagdollBoneConfig,
+  type RagdollBoneOverride,
+  type RagdollConfig,
+  type RagdollFitOptions,
+  type RagdollJointConfig,
+} from "@/Jolt/internal/ragdollFit";
+export {
+  NON_PHYSICAL_BONES,
+  type SkeletonRig,
+} from "@/Jolt/internal/skeleton";
 
 export { useBeforePhysicsStep } from "@/Jolt/useBeforePhysicsStep";
 export { useAfterPhysicsStep } from "@/Jolt/useAfterPhysicsStep";
@@ -268,6 +319,7 @@ export type {
   BroadPhaseLayerConfig,
   LayerConfig,
   ContactHandlers,
+  SoftBodyContactHandlers,
   ContactInfo,
   ContactRegistry,
   SurfaceVelocity,
@@ -279,4 +331,9 @@ export type {
   StepCallback,
   StepPhase,
   StepRegistry,
+  WaterEvent,
+  WaterEventHandler,
+  WaterSample,
+  WaterRegistry,
+  WaveHeight,
 } from "@/Jolt/types";

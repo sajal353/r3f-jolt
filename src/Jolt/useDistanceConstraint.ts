@@ -6,6 +6,7 @@ import {
   type ConstraintBody,
   type ConstraintOptions,
 } from "./internal/useConstraint";
+import { readDistanceLoad } from "./internal/constraintLoad";
 import {
   applySpring,
   resolvePair,
@@ -107,6 +108,7 @@ export const useDistanceConstraint = (
     {
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castDistance,
+      load: readDistanceLoad,
       api: createDistanceApi,
     },
   );

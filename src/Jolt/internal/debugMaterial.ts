@@ -17,6 +17,7 @@ export const debugColors = {
   character: "black",
   vehicle: "mediumslateblue",
   wheel: "lawngreen",
+  softBody: "coral",
 } as const;
 
 export type DebugShapeKind = keyof typeof debugColors;

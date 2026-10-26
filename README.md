@@ -12,7 +12,7 @@ Jolt Physics hooks for React Three Fiber.
 | `react` / `react-dom` | `>=19 <19.3`   |
 | `@react-three/fiber`  | `^9`           |
 | `three`               | `>=0.156`      |
-| `jolt-physics`        | `^1.1.0`       |
+| `jolt-physics`        | `^1.1.1`       |
 
 React 19 and R3F 9 are required — R3F 8 cannot run on React 19.
 
@@ -133,6 +133,8 @@ It is forced off for `timeStep="vary"`, which already lands exactly one step on 
 
 Static bodies are never interpolated, and a body that has just been created or teleported with `setPositionAndRotation` snaps rather than sliding in from where it used to be.
 
+A sleeping body is drawn at the exact pose it came to rest in and is not read again until it wakes, so a scene of settled bodies costs nothing per frame. A sleeping body moved through `bodyInterface` without activating it is not redrawn until it wakes; `api.setPositionAndRotation` handles this for you.
+
 ### Units
 
 Jolt is tuned for metres, kilograms and seconds. A 1-unit cube weighing 20 is a sensible crate. Very small or very large shapes need solver tuning; prefer scaling your world to metres.
@@ -143,7 +145,7 @@ Jolt is tuned for metres, kilograms and seconds. A 1-unit cube weighing 20 is a 
 | ------------------- | ----------------- | ------------------------------------------------- |
 | `gravity`           | `[0, -9.81, 0]`   | Live — changing it calls `SetGravity`             |
 | `paused`            | `false`           | Stops stepping; bodies stay alive                 |
-| `debug`             | `false`           | Default for every child hook's `debug`. Read once, at mount |
+| `debug`             | `false`           | Default for every child hook's `debug`. Live      |
 | `timeStep`          | `1/60`            | Or `"vary"` for frame-delta stepping              |
 | `interpolate`       | `true`            | Render between steps; ignored when `timeStep="vary"` |
 | `maxSubSteps`       | `4`               | Fixed steps allowed per frame                     |
@@ -160,9 +162,9 @@ Jolt is tuned for metres, kilograms and seconds. A 1-unit cube weighing 20 is a 
 | `init`              | `wasm-compat`     | A custom module initialiser                       |
 | `settingsOverride`  | —                 | `(settings, jolt) => void`, applied last          |
 
-Everything above the `physicsSettings` row except `gravity`, `paused` and `physicsSettings` is read when the world is built. Changing one afterwards does nothing until the world is rebuilt, which you do by giving `<Physics>` a new `key`.
+Everything above the `physicsSettings` row except `gravity`, `paused`, `debug` and `physicsSettings` is read when the world is built. Changing one afterwards does nothing until the world is rebuilt, which you do by giving `<Physics>` a new `key`.
 
-`debug` is the sharpest edge of that: every hook reads it at mount, so changing it *does* take effect — by destroying and rebuilding every body in the world, which drops them back to their starting transforms. Reach for [`<PhysicsDebug />`](#physicsdebug--everything-in-the-world) instead, which is a live toggle and draws more.
+`debug` adds and removes the per-hook overlays of every hook that does not set its own `debug`, without touching a body. A hook's own `debug` is read once, at mount.
 
 ### Solver settings
 
@@ -172,7 +174,7 @@ Everything above the `physicsSettings` row except `gravity`, `paused` and `physi
 <Physics physicsSettings={{ numVelocitySteps: 10, numPositionSteps: 2 }}>…</Physics>
 ```
 
-The names map one-to-one onto Jolt's `PhysicsSettings` fields with the `m` prefix dropped: `numVelocitySteps`, `numPositionSteps`, `baumgarte`, `speculativeContactDistance`, `penetrationSlop`, `linearCastThreshold`, `linearCastMaxPenetration`, `manifoldTolerance`, `maxPenetrationDistance`, `minVelocityForRestitution`, `timeBeforeSleep`, `pointVelocitySleepThreshold`, `deterministicSimulation`, `constraintWarmStart`, `useBodyPairContactCache`, `useManifoldReduction`, `useLargeIslandSplitter`, `allowSleeping`, `checkActiveEdges`, `maxInFlightBodyPairs`, `stepListenersBatchSize`, `stepListenerBatchesPerJob`.
+The names map one-to-one onto Jolt's `PhysicsSettings` fields with the `m` prefix dropped: `numVelocitySteps`, `numPositionSteps`, `baumgarte`, `speculativeContactDistance`, `penetrationSlop`, `linearCastThreshold`, `linearCastMaxPenetration`, `manifoldTolerance`, `maxPenetrationDistance`, `minVelocityForRestitution`, `timeBeforeSleep`, `pointVelocitySleepThreshold`, `constraintWarmStart`, `useBodyPairContactCache`, `useManifoldReduction`, `useLargeIslandSplitter`, `allowSleeping`, `checkActiveEdges`, `maxInFlightBodyPairs`, `stepListenersBatchSize`, `stepListenerBatchesPerJob`.
 
 Removing the prop does not put the previous values back — there is nothing to put back to, since the settings are the world's own. Name the values you want.
 
@@ -325,6 +327,8 @@ All of them take these options and return `[ref, api]`.
 | `gravityFactor`            | `1`                         | `0` makes a body float                             |
 | `allowSleeping`            | `true`                      |                                                    |
 | `onWake` / `onSleep`       | —                           | Delivered after the step, not from inside it       |
+| `floats`                   | `true`                      | `false` ignores [water](#water); a number scales its buoyancy |
+| `onEnterWater` / `onExitWater` | —                       | Dry to wet and back, delivered after the step      |
 | `allowedDOFs`              | all six                     | Raw `EAllowedDOFs` bit mask                        |
 | `lockRotations` / `lockTranslations` | `false`           | Ergonomic wrappers over `allowedDOFs`              |
 | `enabledRotations` / `enabledTranslations` | —         | `[x, y, z]` booleans                               |
@@ -644,7 +648,7 @@ Three things worth knowing:
 
 - **Friction does the dragging.** A belt with `friction: 0` carries nothing, and a light crate on a slow belt slips before it grips.
 - **Sleeping bodies report no contacts at all**, so a crate that dozed off on a stopped belt would never notice it start. `wake` handles this and is on by default; turn it off only if you are managing activation yourself.
-- **A `useCharacter` is not carried.** `CharacterVirtual` runs its own contact listener, and Jolt's character contact settings have no surface-velocity field to write.
+- **A `useCharacter` is carried too**, friction or not: it reads the belt as the ground's own velocity.
 
 ## Constraints
 
@@ -710,6 +714,20 @@ Every point and axis option comes in three forms: a shared one (`point`, `hingeA
 ### Springs and limits
 
 `limits: { min, max }` bounds a hinge (radians) or a slider (metres), and `limitsSpring` makes that bound springy rather than hard. A spring is `{ frequency, damping }` or `{ stiffness, damping }` — setting `stiffness` selects that mode.
+
+### Breaking
+
+`breakForce` (newtons) and `breakTorque` (newton-metres) switch a joint off on the first step that loads it past the limit, and `onBreak({ force, torque })` fires after that step with the load that did it. `setEnabled(true)` mends it.
+
+The load is averaged over the last 1/30 s, so the same impact breaks the same joint at any step rate. A steady load reads its true value; an impact reads its impulse spread over 1/30 s.
+
+```tsx
+usePointConstraint(null, plank, { point: [0, 4, 0], breakForce: 5000, onBreak });
+```
+
+- The load is what holds the joint together. Limits count; motors do not.
+- A limit only takes load once it is reached, so a joint whose limit catches a falling body reads an impact well above the static load.
+- `useFixedConstraint` cannot break: Jolt binds no load readout for it, and setting either option warns. A `useSixDOFConstraint` with every axis `"fixed"` holds the same and can break.
 
 ### Worth knowing
 
@@ -806,11 +824,181 @@ useFrame((_, delta) => {
 });
 ```
 
-`update(direction, jump, crouched, deltaTime, options?)` — `direction` is a world-space `Vector3` and is **not** mutated. The trailing options are `{ ignoreHorizontalMovementLock?, addToVelocity?, overrideUpdate? }`.
+`update(direction, jump, crouched, deltaTime, options?)` — `direction` is a world-space `Vector3` and is **not** mutated. The trailing options are `{ ignoreHorizontalMovementLock?, addToVelocity?, overrideUpdate? }`. `overrideUpdate(velocity, up, deltaTime)` replaces the velocity before the move.
 
-`options` is optional and deep-merged with the defaults. Alongside the movement settings it exposes `maxSlopeAngle`, `maxStrength`, `characterPadding`, `penetrationRecoverySpeed` and `predictiveContactDistance`. A non-vertical `up` is supported at the top level.
+`options` is optional and deep-merged with the defaults. Alongside the movement settings it exposes `maxSlopeAngle`, `maxStrength`, `characterPadding`, `penetrationRecoverySpeed`, `predictiveContactDistance` and `enhancedInternalEdgeRemoval` (stops catching on a triangle mesh's inner edges). A non-vertical `up` is supported at the top level.
 
-The character's position is its **feet**, so a settled character on a floor whose top face is `y = 0` reports `y ≈ 0`. The shape is swapped only when the crouch state actually changes, and debug meshes track the character every frame whether or not you call `update`.
+The character's position is its **feet**, so a settled character on a floor whose top face is `y = 0` reports `y ≈ 0`. The shape is swapped only when the crouch state changes, and a stand-up with no room overhead is retried on the next update rather than taken. `api.setShape(children | shape | null)` swaps in a shape of your own, placed from the feet, until `null` hands back the standing or crouching one; it returns `false` and changes nothing when the shape has no room. Compound children are built and freed by the hook; a Jolt shape stays yours. A shape that does not reach down to the feet leaves the character unsupported on land. Debug meshes track the character every frame whether or not you call `update`.
+
+Its weight presses on a dynamic body it stands on, under its centre, and never more than that body's own weight, so a heavy character on a light float sinks it rather than spinning it.
+
+Top-level options, all init-once:
+
+- `shape: { standing, crouching? }` replaces the capsules with compound children placed from the feet (the same children `useCompound` takes).
+- `innerBody: true | { standing, crouching? }` adds a kinematic body that follows the character, so raycasts, sensors and the solver see it. Without it a `CharacterVirtual` is invisible to the rest of the world. `innerBodyLayer` and `innerBodyIDOverride` set its layer and a fixed body ID.
+- `collideWithCharacters` (on by default) adds the character to the world's character-vs-character registry, so characters block each other.
+- `collideWithSoftBodies` (off by default): the character walks through cloth, and its `innerBody` pushes the cloth aside. Jolt's character queries report contacts well short of a soft body, so a character colliding with one stops about a metre away.
+- `userData` is what the character reports itself as in other characters' contacts.
+
+The api adds `characterID`, `innerBodyID`, `hasCollidedWith(bodyID)`, `hasCollidedWithCharacter(api | characterID)` and `getActiveContacts(target?)`, which fills plain objects instead of allocating each call.
+
+All eleven `CharacterContactListener` callbacks are options and stay live: `onContactValidate`, `onCharacterContactValidate`, `onContactAdded`, `onContactPersisted`, `onContactRemoved`, `onCharacterContactAdded`, `onCharacterContactPersisted`, `onCharacterContactRemoved`, `onContactSolve`, `onCharacterContactSolve` and `onAdjustBodyVelocity`. They run synchronously inside `update`, and the contact object passed to them is reused: copy what you keep. Normals point from the character towards what it touches. Belts from `useConveyor` carry a character.
+
+## Water
+
+`<WaterVolume>` is a box of water. Bodies in it float, are dragged towards its `flow`, and report crossing in and out.
+
+```tsx
+<WaterVolume
+  position={[0, -2, 0]}
+  size={[20, 4, 20]}
+  surfaceLevel={-0.3}
+  waves={(x, z, time) => 0.1 * Math.sin(x - time)}
+  flow={[1, 0, 0]}
+  onEnter={(event) => splash(event.position, event.velocity)}
+>
+  <mesh>{/* drawn at the box's centre */}</mesh>
+</WaterVolume>
+```
+
+Props, all live except `layer`: `position` (the box's centre), `size`, `surfaceLevel` (defaults to the top of the box), `waves`, `buoyancy` (`1.2`), `linearDrag` (`0.5`), `angularDrag` (`0.05`), `flow`, `priority`, `layer`, `onEnter`, `onExit`, `debug`.
+
+- **Buoyancy is relative to each body's own density**: `1` hovers, above floats, below sinks, whatever the body's mass. Jolt has no volume for a mesh, height field or plane, so those don't float.
+- **It runs before every physics step**, not every frame, so a float bobs the same at any frame rate.
+- **`waves(x, z, time)`** is the surface's height above `surfaceLevel` on the physics clock (`api.timing.elapsed`). Each body floats on the wave under it, tilted to its slope. Leave room in `size` for the crests.
+- **Overlapping volumes**: the one with the highest `priority` owns a body; on a tie, the one mounted first.
+- **A body asleep in the water is still in it**, and fires no exit. Changing a volume wakes what is in it.
+- Only the box picks bodies; the surface is level in world space unless `waves` moves it.
+- Jolt's drag grows with the square of speed, so it is weak near rest: a float takes a while to settle, and a fast one can leap clean out, unless `linearDrag` is raised.
+- `onEnter`/`onExit` fire for each volume a body crosses into or out of, with `{ bodyID, userData, position, velocity }`. The body options `onEnterWater`/`onExitWater` fire only between dry and wet. `api.water.sample(point)` answers how deep a point is.
+
+### `useSwimming(character, options?)`
+
+Swimming for a `useCharacter`, as its `overrideUpdate`:
+
+```tsx
+const swim = useSwimming(character, { depth: 1.2 });
+
+useFrame((_, delta) => {
+  swim.setVertical(keys.up ? 1 : keys.down ? -1 : 0);
+  character?.update(direction, jump, false, delta, {
+    overrideUpdate: swim.overrideUpdate,
+  });
+});
+```
+
+In water deeper than `depth` the character floats with its feet that far down, swims at `speed` of its walking speed, rises or dives at `verticalSpeed` on `setVertical`, and drifts with the flow unless `followFlow` is off. Read `swimming`, `moving` (across the water rather than treading it) and `depth` back each frame.
+
+The shape is yours. To put a swimmer in a swimming position, swap a shape in with `api.setShape` when `moving` turns true, turned with `character.SetRotation` to face the way it swims, and float the feet at the depth that shape needs with `swim.setFloatDepth(depth | null)`. **Systems › Water** does this, keeping the body's centre where it is as the shape changes.
+
+## Soft bodies
+
+`useSoftBody(geometry, options?)` simulates a `BufferGeometry` as cloth or an inflatable, and hands back a copy of it that follows the simulation:
+
+```tsx
+const flag = useMemo(() => new PlaneGeometry(3, 2, 24, 16), []);
+const [ref, api] = useSoftBody(flag, {
+  position: [0, 4, 0],
+  pinned: (point) => point.x < -1.49,
+  mass: 1.5,
+  wind: [3, 0, 1.5],
+});
+
+return <mesh ref={ref} geometry={api?.geometry} />;
+```
+
+Read at mount: `position`, `rotation`, `weld` (`1e-4`), `pinned` (geometry indices or `(position, index) => boolean`), `mass` (total; Jolt's default is 1 kg a vertex), `compliance`, `shearCompliance`, `bendCompliance`, `bend` (`"none"` · `"distance"` · `"dihedral"`), `angleTolerance`, `lra` (`"none"` · `"euclidean"` · `"geodesic"`), `lraMaxDistanceMultiplier`, `tetrahedra` with `volumeCompliance`, `maxLinearVelocity`, `facesDoubleSided`, `allowSleeping`, `userData`, `layer`, `group`, `mask`, `collisionGroup`, `enabled`, `debug`, `normals`, `settingsOverride(shared, creation)`. Live: `pressure`, `iterations`, `vertexRadius`, `friction`, `restitution`, `gravityFactor`, `linearDamping`, `wind`, `airDrag` (`1`), `floats`, `onEnterWater`, `onExitWater`.
+
+The api: `body`, `geometry`, `debugMesh`, `vertexCount`, `setEnabled`, `applyForce`, `applyImpulse`, `setLinearVelocity`, `setPosition`, `wake`, `sleep`, `isSleeping`, `getVertex`, `setVertex`, `setVertexVelocity`, `pin`, `isPinned`, `setWind`, `faceOf`.
+
+- **Vertices are welded by position**, so a `BoxGeometry`'s 24 seam vertices simulate as 8 corners while the copy keeps its UVs and seams. Every vertex index in the api is a geometry index.
+- **Positions are interpolated** between steps like every body, and normals are recomputed when they move (`normals: false` skips it). A sleeping soft body uploads nothing.
+- **`airDrag` and `wind`** push each face along its normal, against its motion through the air, before every step. Air drag is what lets cloth drift and settle rather than swing like chain.
+- **`pressure`** inflates a closed mesh. Build balls from an `IcosahedronGeometry`: a UV sphere's poles fan sliver triangles into one vertex that never stops trembling. `restitution` on a resting body trembles the same way.
+- **Hanging cloth** wants some `bendCompliance` (`0.01`–`0.1`) and, with `lra` tethers, a `lraMaxDistanceMultiplier` of about `1.02`; at exactly rest length the tethers fight the edges and the pinned rows shimmer.
+- **To drag a vertex**, call `setVertexVelocity` towards the target from `useBeforePhysicsStep`. `pin` + `setVertex` moves a point the cloth cannot pull back on, and a hard pull whips it.
+- `applyForce` acts on every vertex alike. `applyImpulse` and `setLinearVelocity` go to the free vertices; a pinned one moves only when set.
+- Rays and shape casts hit soft bodies; `faceOf(hit.subShapeID)` names the geometry triangle. `useBodyContacts` and `useSensor` work on soft bodies and on whatever touches them, and `useSoftBodyContactListener` is the raw listener. A `useCharacter` walks through soft bodies; give it an `innerBody` to push them. Soft bodies float in `<WaterVolume>` per vertex, so a light ball wants a high `floats`.
+- Collision is per vertex: thin or fast shapes can slip between vertices, and `vertexRadius` keeps cloth off what it rests on.
+
+Soft bodies are the most expensive thing in Jolt. Step time grows with vertices × `iterations` (release build, 5 iterations):
+
+| Vertices | ms per step |
+| -------- | ----------- |
+| 100      | 0.08        |
+| 576      | 0.39        |
+| 1024     | 0.70        |
+| 2025     | 1.38        |
+| 4096     | 2.78        |
+
+A few hundred vertices per cloth and a couple of thousand in a scene leave room for everything else.
+
+### Skinned cloth
+
+`skin` puts cloth on a character: a cape, a skirt, a banner on a back. Each vertex follows bones the way a skinned mesh does, and may stray from there only as far as you allow.
+
+```tsx
+const [ref, cape] = useSoftBody(capeGeometry, {
+  skin: { mesh: model.mesh, maxDistance: (point) => (point.y > 1.52 ? 0 : 0.5) },
+  iterations: 10,
+});
+```
+
+- **`skin.mesh`** is the `SkinnedMesh` whose skeleton the cloth follows. The geometry is in that mesh's own space, as a garment exported with the character is, and it is weighted through its own `skinIndex`/`skinWeight` (indices into `mesh.skeleton.bones`), or entirely to **`skin.bone`**. The cloth is placed from the mesh, so `position` and `rotation` are ignored.
+- **`skin.maxDistance`** (number or `(position, index) => number`, metres) is how far a vertex may leave its skinned position; unlimited by default. `0` holds a vertex to the skin, and so do `pinned` vertices. **`skin.backStopDistance`** and **`skin.backStopRadius`** keep a vertex out of a sphere behind the skinned surface — the body under the cloth. "Behind" is against the face normals, so wind faces counter-clockwise seen from outside. Use it where cloth rests on the body, like a cape's top over the shoulders: on hanging cloth that keeps touching it, the hard push out jitters.
+- Live: **`skinConstraints`** (`true`; off, only the held vertices follow) and **`skinnedMaxDistanceMultiplier`** (`1`). **`snapToSkin()`** puts every vertex back on the skin, at rest, on the next step: after teleporting the character.
+- The bones are three.js's own matrices, scale included, so the cloth sits exactly where the skin is drawn. They go to Jolt before every step, and the cloth is drawn against the bones as they are when it renders, so it does not trail the character. **Call `useSoftBody` after whatever moves the bones** (a mixer, `useRagdoll`) so it draws on this frame's pose.
+- Hold pinned and `maxDistance: 0` vertices to bones that move together. If the skin stretches the distances between held vertices, the rigid edges between them can never be met and the cloth shakes, harder with more `iterations`. A little `bendCompliance` (`0.001`) keeps air drag from rippling the cloth near a held edge.
+- Collide cloth with a ragdoll's torso at most: collision is per vertex, so a thin limb slips between vertices and tangles it, and cloth trapped under a lying body thrashes. A ragdolling character's cape wants `skinConstraints: false`, since the skin may lie under the floor.
+
+## Ragdolls
+
+`useCharacterModel` fits a ragdoll to a skinned character; `useRagdoll` builds it and drives the bones.
+
+```tsx
+const { scene, animations } = useGLTF("/character.glb");
+const [mixer] = useState(() => new AnimationMixer(scene));
+
+const model = useCharacterModel(scene, { mass: 70 });
+const [ragdoll] = useRagdoll(model, { mode: "hardKeying", mixer });
+
+// later: ragdoll.setMode("passive"), ragdoll.blendToAnimation(0.8)
+```
+
+### `useCharacterModel(object, options?)`
+
+Fits from the skin in its **bind pose**, so the current animation does not matter. Every `SkinnedMesh` sharing the first one's skeleton contributes.
+
+- **Bones:** picked by name (UE/Quaternius and Mixamo naming): pelvis, the lowest and highest spine bones, head, upper arm, forearm, hand, thigh, calf, foot. Fingers, toes, twist/IK/helper and end bones, the root and clavicles never become bodies (`NON_PHYSICAL_BONES`); they ride on their nearest kept ancestor, listed in `model.excluded`. `bones` names the set explicitly, `exclude` replaces the patterns.
+- **Shapes:** capsules on limbs and head, boxes on pelvis and spine, from the vertices each bone carries (`minWeight` 0.5) — length from the 5th–95th percentile along the bone, radius from the `radiusPercentile` (0.9) of distances.
+- **Mass:** `mass` (70 kg) spread by anthropometric share.
+- **Joints:** swing-twist with limits by bone kind; knees and elbows bend one way only.
+- **`overrides`:** `{ [bone]: { shape: "capsule" | "box" | "convex" | CompoundChild, mass, joint, exclude } }`.
+- **`debug`:** draws the fitted bodies on the bones, following the animation. Defaults to `<Physics debug>`.
+- **`toJSON()`** returns the config; pass it back as `config` to skip fitting.
+
+Returns `{ mesh, meshes, config, excluded, toJSON }`. `selectRagdollBones` and `classifyBone` are exported for custom selections.
+
+### `useRagdoll(model, options?)`
+
+One body per fitted bone, joined by swing-twist constraints, built in the bind pose and snapped onto the character as it stands. Parents and children never collide, nor do parts overlapping at rest; two ragdolls do.
+
+| `mode`         | Bodies                | Drawn from  |
+| -------------- | --------------------- | ----------- |
+| `"passive"`    | dynamic, limp         | the bodies  |
+| `"hardKeying"` | kinematic, on the animation exactly | the animation |
+| `"softKeying"` | dynamic, sprung toward the animation (`keyingFrequency` 3 Hz, `keyingDamping` 1, gravity cancelled) | the bodies |
+| `"motors"`     | dynamic, joint motors toward the animation's joint angles (`motorStrength` 10, `motorTorque` cap) | the bodies |
+
+- `setMode` switches at runtime on the same bodies; velocity carries over.
+- `kinematicBones` keeps the named bones kinematic and on the animation in every mode but `passive` — legs that stay planted while the upper body reacts. `setKinematicBones` changes them.
+- `mixer` is the animation to follow. **The hook updates it**, just before reading the pose; do not also update it elsewhere (drei's `useAnimations` does).
+- `motorStrength` is how many times over a joint's motor can hold what hangs off it; a joint sags at most about 1/strength radians.
+- Also `layer`, `group`, `mask`, `userData`, `friction`, `restitution`, `linearDamping`, `angularDamping`, `gravityFactor`.
+
+The api: `ragdoll`, `rig`, `bodies`, `bones`, `constraints`, `mode`, `setMode`, `setKinematicBones`, `bodyOf(bone)`, `boneOf(bodyID)`, `applyImpulse(impulse, bone?, point?)`, `setLinearVelocity`, `setLinearAndAngularVelocity`, `getRootTransform`, `bounds`, `setPose` (teleport onto the bones), `blendToAnimation(seconds, then?)` (get-up: blends joint by joint from where the ragdoll lies into whatever the mixer plays — a get-up clip — then hands over to `then`), `activate`, `isActive`, `resetWarmStart`.
+
+Bodies are interpolated like any other and `<PhysicsDebug />` draws them and their joints. Jolt's `Stabilize()` evens out neighbouring masses, so a hand ends up heavier than `config` says.
 
 ## `useCar`
 
@@ -998,25 +1186,25 @@ useBodyContacts(api?.body, {
 });
 ```
 
-A `ContactInfo` is `{ bodyID, userData, shapeUserData, point, normal, penetrationDepth, impactSpeed, impulse }` describing **the other** body. It is pooled — copy anything you keep past the handler. On `onExit` only `bodyID` and `userData` are meaningful, because the manifold is already gone.
+A `ContactInfo` is `{ bodyID, userData, shapeUserData, point, normal, penetrationDepth, impactSpeed, impulse, frictionImpulse }` describing **the other** body. It is pooled — copy anything you keep past the handler. On `onExit` only `bodyID` and `userData` are meaningful, because the manifold is already gone.
 
 `normal` points **from your body towards the other one**, so negating it is the direction your body was pushed. Both sides of a contact therefore read a normal that means the same thing to each of them, which Jolt's own does not: its manifold normal runs from body 1 to body 2 in an ordering the subscriber cannot see. `useContactListener` gets that raw manifold unchanged.
 
 #### How hard it hit
 
-`impactSpeed` and `impulse` are `0` unless you ask for them, because the estimate costs about ten calls into WASM per contact per step:
+`impactSpeed`, `impulse` and `frictionImpulse` are `0` unless you ask for them, because the estimate runs a solver pass per contact per step:
 
 ```tsx
 useBodyContacts(api?.body, { onEnter: (c) => bang(c.impulse) }, { contactForce: true });
 ```
 
-`impactSpeed` is the closing speed along the contact normal in m/s, read before the solver ran. `impulse` is that speed times the pair's effective mass, in kg·m/s.
+`impactSpeed` is the closing speed along the contact normal in m/s, read before the solver ran. `impulse` is the normal impulse in kg·m/s and `frictionImpulse` the tangential one, so a scrape reads a large `frictionImpulse` and a straight drop reads none.
 
-**`impulse` is an estimate.** Jolt binds no applied contact impulse, so it is derived and leaves the angular terms out of the effective mass — within about 10% of the true impulse head-on, about 70% high for a glancing hit. Rank a scrape against a crash with it; do not treat it as the solver's own number.
+Both come from Jolt's `EstimateCollisionResponse`, which runs the contact solver on this one contact, including restitution, friction, rotation and surface velocity. They match what the solver applies within a couple of percent. They are still estimates, because the real solver also sees every other contact on both bodies.
 
-It is closing *momentum*, so it scales with the mass of what was hit. To threshold across bodies of different sizes, divide that back out: `impulse * body.GetMotionProperties().GetInverseMass()` is the velocity change the blow would have caused, and compares a boulder against a pebble where the raw number does not.
+`impulse` is *momentum*, so it scales with the mass of what was hit. To threshold across bodies of different sizes, divide that back out: `impulse * body.GetMotionProperties().GetInverseMass()` is the velocity change the blow would have caused, and compares a boulder against a pebble where the raw number does not.
 
-A body that is not dynamic — static *or* kinematic — counts as immovable, which is what Jolt's solver does. A kinematic body reports a real inverse mass through the bindings, so reading that number instead would make the same drop onto a moving platform read softer than onto the ground.
+A body that is not dynamic — static *or* kinematic — counts as immovable, which is what Jolt's solver does.
 
 ### `useSensor` — what is inside a volume
 
@@ -1053,7 +1241,7 @@ useContactListener({
 });
 ```
 
-Many components can subscribe; the library multiplexes them onto Jolt's single listener. `onContactValidate` accepts by default and handlers run in registration order — the first `false` rejects the pair.
+Many components can subscribe; the library multiplexes them onto Jolt's single listener. `useSoftBodyContactListener({ onSoftBodyContactValidate, onSoftBodyContactAdded })` is the same for soft bodies, whose contacts Jolt reports once per step and pair. `onContactValidate` accepts by default and handlers run in registration order — the first `false` rejects the pair.
 
 Inside these handlers: **do not** retain a `Body` or manifold past the call, **do not** call `setState`, and **do not** create or destroy bodies. Use `useBodyContacts` when you need any of that.
 
@@ -1100,7 +1288,7 @@ Unlike bodies, joints are drawn from the library's own registry: Jolt exposes no
 
 ### Per-hook `debug` — one body
 
-`debug` on a hook (or `<Physics debug>` for all of them) overlays a wireframe of that collider only, coloured by shape kind. Better when you are looking at one thing. Colours come from the exported `debugColors`, so you can match them in your own UI.
+`debug` on a hook (or `<Physics debug>` for all of them, live) overlays a wireframe of that collider only, coloured by shape kind. Better when you are looking at one thing. Colours come from the exported `debugColors`, so you can match them in your own UI.
 
 | Hook                     | Colour                       |
 | ------------------------ | ---------------------------- |
@@ -1165,19 +1353,19 @@ pnpm install
 pnpm dev
 ```
 
-59 scenes in seven categories, one per hook or feature:
+66 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
 | **Shapes**       | all 12 shape hooks, one scene each · terrain from all three `heights` forms · per-triangle surface types |
 | **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · collision groups · auto colliders · motion quality |
 | **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale · conveyor    |
-| **Constraints**  | all 8 constraint hooks · motors · springs · rope built from chained distance joints                 |
+| **Constraints**  | all 8 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
-| **Systems**      | character · car · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
+| **Systems**      | character · character contacts · water · cloth · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
 
-Toolbar toggles for `<PhysicsDebug />`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
+Toolbar toggles for `<PhysicsDebug />`, `<Physics debug>`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 
 Switching scenes remounts the whole world, which doubles as the mount/unmount stress test.
 
