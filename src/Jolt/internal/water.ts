@@ -30,7 +30,7 @@ interface Tracked {
   canFloat: boolean;
   /** Set for a soft body, which floats per vertex. */
   soft: SoftBodyVertices | null;
-  seenAt: number;
+  seenOnRun: number;
 }
 
 interface Pending {
@@ -93,7 +93,11 @@ export const createWaterRegistry = (
   let current: WaterVolumeEntry | null = null;
   let delta = 0;
   let time = 0;
-  let stepIndex = 0;
+  /**
+   * Which pass this is. Not the step's index: a restored world runs a step of
+   * the same number again, and it would read every body as already claimed.
+   */
+  let currentRun = 0;
   let unsubscribe: (() => void) | null = null;
   let destroyed = false;
 
@@ -231,7 +235,7 @@ export const createWaterRegistry = (
     const record = tracked.get(bodyID);
 
     // Already claimed this step by a volume of higher priority.
-    if (record && record.seenAt === stepIndex) return;
+    if (record && record.seenOnRun === currentRun) return;
 
     const body = lock.TryGetBody(id);
     if (body.IsSensor()) return;
@@ -247,12 +251,12 @@ export const createWaterRegistry = (
           body.IsSoftBody() ||
           !noVolume.has(innermost(body.GetShape()).GetType()),
         soft: body.IsSoftBody() ? softBodyVertices(jolt, body) : null,
-        seenAt: stepIndex,
+        seenOnRun: currentRun,
       };
       tracked.set(bodyID, entry);
       queue("enter", bodyID, volume, readEvent(body, bodyID), true);
     } else {
-      entry.seenAt = stepIndex;
+      entry.seenOnRun = currentRun;
       if (entry.volume !== volume) {
         const event = readEvent(body, bodyID);
         queue("exit", bodyID, entry.volume, event, false);
@@ -310,10 +314,10 @@ export const createWaterRegistry = (
     queue("exit", bodyID, volumeGone ? null : record.volume, event, true);
   };
 
-  const run = (stepDelta: number, index: number) => {
+  const run = (stepDelta: number) => {
     delta = stepDelta;
     time = timing.elapsed;
-    stepIndex = index;
+    currentRun += 1;
 
     const worldGravity = physicsSystem.GetGravity();
     gravity.Set(worldGravity.GetX(), worldGravity.GetY(), worldGravity.GetZ());
@@ -357,7 +361,7 @@ export const createWaterRegistry = (
     current = null;
 
     for (const [bodyID, record] of tracked) {
-      if (record.seenAt === index) continue;
+      if (record.seenOnRun === currentRun) continue;
       tracked.delete(bodyID);
       leave(bodyID, record);
     }

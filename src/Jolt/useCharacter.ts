@@ -31,6 +31,7 @@ import {
 import { shapeToGeometry } from "./internal/shapeToGeometry";
 import { shapeFromResult } from "./internal/useBody";
 import { useHandlerRef } from "./internal/useHandlerRef";
+import type { SideState } from "./internal/snapshot";
 import type { JoltModule, QuatTuple, Vec3Tuple } from "./types";
 
 const degreesToRadians = (degrees: number) => degrees * (Math.PI / 180);
@@ -156,6 +157,7 @@ export interface CharacterActiveContact {
 
 export interface CharacterApi {
   character: Jolt.CharacterVirtual;
+  stateId: number | undefined;
   /** `GetID().GetValue()`: what other characters' contacts report it as. */
   characterID: number;
   /** Null without `innerBody`. */
@@ -617,10 +619,13 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       }
     };
 
-    const applyShape = (next: Jolt.Shape) =>
+    const applyShape = (
+      next: Jolt.Shape,
+      maxPenetration = 1.5 * physicsSystem.GetPhysicsSettings().mPenetrationSlop,
+    ) =>
       character.SetShape(
         next,
-        1.5 * physicsSystem.GetPhysicsSettings().mPenetrationSlop,
+        maxPenetration,
         broadPhaseFilter,
         layerFilter,
         bodyFilter,
@@ -629,8 +634,8 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       );
 
     /** Left as it was when the new shape has no room, and tried again next update. */
-    const takePosture = (posture: Posture) => {
-      if (!applyShape(shapes[posture].shape)) return;
+    const takePosture = (posture: Posture, maxPenetration?: number) => {
+      if (!applyShape(shapes[posture].shape, maxPenetration)) return;
 
       stateRef.current.posture = posture;
       if (innerShapes) character.SetInnerBodyShape(innerShapes[posture].shape);
@@ -681,6 +686,39 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
 
     const debugView = createDebugView(buildDebugMeshes, releaseDebugMeshes);
     debugViewRef.current = debugView;
+
+    /**
+     * Inertia and posture live out here, not in the character. A shape given to
+     * `setShape` is the caller's, and stays as it is. A restored posture was
+     * already in place then, so it goes back without testing for room.
+     */
+    const sideState: SideState = {
+      tag: "character",
+      owner: "character",
+      id: stateId ?? 0,
+      save: () => {
+        const { desiredVelocity, shouldSlide, posture } = stateRef.current;
+        return [
+          desiredVelocity.x,
+          desiredVelocity.y,
+          desiredVelocity.z,
+          shouldSlide ? 1 : 0,
+          posture === "crouching" ? 1 : 0,
+        ];
+      },
+      restore: ([x, y, z, slide, crouching]) => {
+        const current = stateRef.current;
+        current.desiredVelocity.set(x, y, z);
+        current.shouldSlide = slide === 1;
+
+        const posture: Posture = crouching === 1 ? "crouching" : "standing";
+        if (!current.custom && posture !== current.posture) {
+          takePosture(posture, Infinity);
+        }
+      },
+    };
+    const stopKeeping =
+      stateId === undefined ? () => {} : api.snapshots.keep(sideState);
 
     const linearVelocity = new Vector3();
     const verticalVelocity = new Vector3();
@@ -840,6 +878,7 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
 
     setCharacterApi({
       character,
+      stateId,
       characterID,
       innerBodyID,
       hasCollidedWith: (body) => character.HasCollidedWith(body),
@@ -857,15 +896,18 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       },
       setShape,
       saveState: () =>
-        state.disposed ? new Uint8Array(0) : api.snapshots.saveObject(character),
+        state.disposed
+          ? new Uint8Array(0)
+          : api.snapshots.saveObject(character, sideState),
       restoreState: (bytes) => {
         if (state.disposed || bytes.length === 0) return;
-        api.snapshots.restoreObject(character, bytes);
+        api.snapshots.restoreObject(character, bytes, sideState);
       },
     });
 
     return () => {
       removeState();
+      stopKeeping();
       setCharacterApi(undefined);
       debugView.hide();
       debugViewRef.current = null;

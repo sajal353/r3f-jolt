@@ -395,6 +395,19 @@ export const useCar = (options: UseCarOptions) => {
 
     let previousForward = 1;
 
+    const stopKeeping =
+      stateId === undefined
+        ? () => {}
+        : api.snapshots.keep({
+            tag: "car",
+            owner: "constraint",
+            id: stateId,
+            save: () => [previousForward],
+            restore: ([forward]) => {
+              previousForward = forward;
+            },
+          });
+
     const update = (input: CarInput): CarState => {
       if (state.disposed) return carState;
 
@@ -525,6 +538,7 @@ export const useCar = (options: UseCarOptions) => {
     });
 
     return () => {
+      stopKeeping();
       setCarApi(undefined);
       debugView.hide();
       debugViewRef.current = null;

@@ -13,9 +13,27 @@
 - `PhysicsTiming.restores` counts restores; interpolation, sleeping bodies' held poses and instanced meshes re-read after one.
 - `useRagdoll` adds its bodies and joints itself rather than through `Ragdoll.AddToPhysicsSystem`; behaviour is unchanged.
 
+- What hooks keep in JS to run the world is saved with it: a character's inertia and posture, a car's reverse logic, `useSwimming`, a joint's load towards `breakForce`, a sensor's `inside`.
+
+### Rollback (experimental)
+
+`useRollback`, `api.replay`, `timing.resimulating` and `updateLoop: "fixed"` may change in a minor release.
+
+- `useRollback({ capacity })`: a snapshot of each of the last `capacity` steps. `rewind(step)` goes back to a late input's step and re-simulates to the present; `snapshotAt(step)` hands over a step's snapshot, for desync checks.
+- `api.replay(bytes, untilStep)`: restore a snapshot and run fixed steps to a given one, leaving the accumulator alone.
+- `PhysicsTiming.resimulating`: true during a re-run and for the events it delivers, so a side effect can happen once.
+- `updateLoop: "fixed"`: runs off a timer and the wall clock, so a world keeps time in a background tab and never drops a step.
+- A `"start"` phase on `api.steps`, ahead of every `"before"` callback.
+- Saving a snapshot delivers queued contact, activation and water events first, so with `useRollback` they arrive once per step.
+
+### Fixes
+
+- Water no longer skips buoyancy on a step run a second time after a restore.
+
 ### Demo
 
 - Systems › Save & restore: a wrecking ball and a brick tower, every step kept for ten seconds, with a scrub bar, save and load.
+- Systems › Rollback: two worlds on their own clocks, kept identical across adjustable latency.
 
 ## 0.4.0
 

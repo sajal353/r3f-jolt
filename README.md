@@ -157,7 +157,7 @@ Jolt is tuned for metres, kilograms and seconds. A 1-unit cube weighing 20 is a 
 | `maxWorkerThreads`  | Jolt's default    | Only a `…-multithread` build has threads to create |
 | `physicsSettings`   | —                 | Solver and sleep settings, [below](#solver-settings). Live |
 | `updatePriority`    | `-1`              | Where the step sits in R3F's frame. Must stay negative     |
-| `updateLoop`        | `"follow"`        | `"independent"` takes the world off the frame loop, [below](#stepping-it-yourself) |
+| `updateLoop`        | `"follow"`        | `"independent"` takes the world off the frame loop; `"fixed"` (experimental) puts it on a timer. [Below](#stepping-it-yourself) |
 | `module`            | —                 | An already-initialised Jolt module                |
 | `init`              | `wasm-compat`     | A custom module initialiser                       |
 | `settingsOverride`  | —                 | `(settings, jolt) => void`, applied last          |
@@ -192,6 +192,8 @@ const { step, timing } = useJolt();
 ```
 
 `step(delta)` feeds `delta` through the accumulator, so it runs as many fixed steps as fit and keeps the remainder — `step()` with no argument is exactly one. It does nothing while `paused`.
+
+`updateLoop: "fixed"` (experimental) runs the world off a timer and the wall clock, as well as on each frame. It keeps time in a background tab, where frames stop, and it never drops a step: time past `maxSubSteps` is what `"follow"` throws away, whereas `"fixed"` ignores that cap and catches up, spending at most 50 ms per tick and leaving the rest for the next. Use it when the step count has to follow real time, as with a [peer](#rollback). It needs a numeric `timeStep`, and `paused` stops its clock.
 
 **`frameloop="demand"` works out of the box.** On demand, R3F draws a frame only when something asks for one, so a physics world would otherwise freeze mid-fall. `<Physics>` asks for the next frame while any body is awake, and stops asking once they have all gone to sleep — which is the point of demand rather than a workaround for it.
 
@@ -608,7 +610,8 @@ Both take `(delta, index)`: the duration of that step, and its number. `index` i
 - Nothing runs while `<Physics paused>`, because nothing is stepping.
 - With `timeStep="vary"` there is exactly one step per frame, so these behave like a `useFrame`.
 - Subscribers run in the order they mounted. A callback that subscribes another one from inside a step is held until the next step rather than run twice.
-- Contact events are still delivered once per frame, after the last step, so a contact made in this step has not been dispatched when your `after` callback runs.
+- Contact events are still delivered once per frame, after the last step, so a contact made in this step has not been dispatched when your `after` callback runs. Saving a snapshot delivers them first, so with [`useRollback`](#rollback) they arrive once per step.
+- A [rollback](#rollback) runs a step again under the same `index`, with `timing.resimulating` true.
 
 ## `useConveyor` — belts, walkways and turntables
 
@@ -1282,12 +1285,59 @@ Body ids run from 0 to `maxBodies - 1` and are unique per world; constraints and
 
 - **The same build and platform only.** Jolt is deterministic across runs of one build; a different wasm build, browser or CPU is not guaranteed to round floats alike.
 - **Ragdolls and soft bodies must be built identically** on both sides, from the same model and options.
-- **Only the world is saved.** State your own code keeps, and what the library has already reported through contact, sensor and water events, is not rewound; events after a restore follow the restored world.
+- **Your own state is not saved.** What the hooks keep in JS to run the world is: a character's inertia and posture, a car's reverse logic, `useSwimming`, a joint's load towards `breakForce`, a sensor's `inside`. A shape given to a character's `setShape` is not. Contact and water events already delivered are not taken back; later ones follow the restored world.
 - A character is moved by its `update` call, not by the step, so it replays only if your code calls `update` the same way.
+- **A ragdoll driven by animation and skinned cloth do not replay**, because they read the animation at frame rate. A passive ragdoll does.
+
+## Rollback
+
+> **Experimental.** `useRollback`, `api.replay`, `timing.resimulating` and `updateLoop: "fixed"` may change in a minor release.
+
+`useRollback({ capacity })` keeps a snapshot of the last `capacity` steps. When an input turns up late, `rewind(step)` goes back to it and runs forward to the present, so the world ends up where it would be had the input come on time. This is the core of rollback netcode: predict, then correct.
+
+```tsx
+const inputs = new Map<number, Input>();
+
+const Player = ({ socket }) => {
+  const rollback = useRollback({ capacity: 120 });
+  const [ref, api] = useSphere({ stateId: 1, radius: 0.5, position: [0, 1, 0] });
+
+  // Read inputs by step, here and only here, so a re-run sees the corrected one.
+  useBeforePhysicsStep((_, step) => {
+    const input = inputs.get(step) ?? lastKnownBefore(inputs, step);
+    if (input) api?.applyForce(input.force);
+  });
+
+  useEffect(() => {
+    socket.onmessage = ({ step, input }) => {
+      inputs.set(step, input);
+      if (!rollback.rewind(step)) requestFullState();
+    };
+  }, [rollback, socket]);
+
+  return <mesh ref={ref}>…</mesh>;
+};
+```
+
+| `useRollback` returns | |
+| --- | --- |
+| `rewind(step)` | Re-simulates from the start of `step`. True if the world now reflects it, which includes a step not yet reached. False, with the world untouched, if `step` has left the history |
+| `snapshotAt(step)` | The world as `step` began, or `null`. Compare two peers' with `isSameState` to detect a desync |
+
+`api.replay(bytes, untilStep)` is the primitive underneath, for your own history: restore a snapshot and run forward to a step.
+
+- **Everything that changes the world belongs in a step callback, keyed by step.** A force applied from a `useFrame` or a click is not in the re-run.
+- **Check `timing.resimulating` before a side effect.** Re-run steps fire step callbacks, contact events and `onBreak` again, with it true. A sound belongs behind it.
+- **The bodies must stay the same across the history.** A `rewind` past a body that mounted or unmounted throws, naming it, so keep a pool rather than spawning.
+- **`rewind` throws inside a step callback.** Call it where the input arrives.
+- **Each step saves the whole world**, at about 6 µs and 135 bytes a body: comfortable at a few hundred bodies, a third of a 60 Hz frame at a thousand.
+- A rewind costs one restore plus every step it re-runs, within a single frame, so long rewinds in a busy world will show. A corrected body jumps to its new place; smoothing that is the game's call.
+- A restore from anywhere else empties the history. `timeStep` must be numeric.
+- The [limits of save and restore](#save-and-restore) apply: the same build and platform only.
 
 ## `useJolt`
 
-Returns the physics context: `Jolt` (the module), `joltInterface`, `physicsSystem`, `bodyInterface`, `layers`, `groups`, `objectLayer(group, mask)`, `contacts`, `activation`, `constraints`, `steps`, `temps`, `timing`, [`step(delta?)`](#stepping-it-yourself), [`saveState(filter?)` / `restoreState(bytes)`](#save-and-restore), `stateIds`, `snapshots`, `debug` and `state`. Use it to reach anything the hooks do not wrap.
+Returns the physics context: `Jolt` (the module), `joltInterface`, `physicsSystem`, `bodyInterface`, `layers`, `groups`, `objectLayer(group, mask)`, `contacts`, `activation`, `constraints`, `steps`, `temps`, `timing`, [`step(delta?)`](#stepping-it-yourself), [`saveState(filter?)` / `restoreState(bytes)`](#save-and-restore), [`replay(bytes, untilStep)`](#rollback) (experimental), `stateIds`, `snapshots`, `debug` and `state`. Use it to reach anything the hooks do not wrap.
 
 ## State management
 
@@ -1389,7 +1439,7 @@ pnpm install
 pnpm dev
 ```
 
-67 scenes in seven categories, one per hook or feature:
+68 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
@@ -1399,7 +1449,7 @@ pnpm dev
 | **Constraints**  | all 8 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
-| **Systems**      | character · character contacts · water · cloth · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · save & restore · breakable objects |
+| **Systems**      | character · character contacts · water · cloth · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · save & restore · rollback · breakable objects |
 
 Toolbar toggles for `<PhysicsDebug />`, `<Physics debug>`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 

@@ -214,6 +214,7 @@ const watchLoad = <C extends Jolt.Constraint>(
   breakTorque: number | undefined,
   activate: () => void,
   onBreak: (load: ConstraintLoad) => void,
+  stateId: number | undefined,
 ) => {
   if (breakForce === undefined && breakTorque === undefined) {
     return () => {};
@@ -231,6 +232,16 @@ const watchLoad = <C extends Jolt.Constraint>(
   const impulses: ConstraintLoad = { force: 0, torque: 0 };
   const load: ConstraintLoad = { force: 0, torque: 0 };
   const recent = createLoadWindow(BREAK_SPAN);
+  const stopKeeping =
+    stateId === undefined
+      ? () => {}
+      : api.snapshots.keep({
+          tag: "load",
+          owner: "constraint",
+          id: stateId,
+          save: recent.save,
+          restore: recent.restore,
+        });
 
   const checkLoad = (delta: number) => {
     if (api.state.disposed) return;
@@ -257,7 +268,12 @@ const watchLoad = <C extends Jolt.Constraint>(
     onBreak({ ...load });
   };
 
-  return api.steps.add("after", checkLoad);
+  const stopChecking = api.steps.add("after", checkLoad);
+
+  return () => {
+    stopKeeping();
+    stopChecking();
+  };
 };
 
 /**
@@ -382,6 +398,7 @@ export const useConstraint = <
       breakTorque,
       activate,
       (broke) => breakHandler.current?.(broke),
+      options.stateId,
     );
 
     setConstraintApi({ ...shared, ...extras } as ConstraintApi<C> & E);

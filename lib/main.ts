@@ -239,6 +239,11 @@ export {
 } from "@/Jolt/internal/skeleton";
 
 export { useBeforePhysicsStep } from "@/Jolt/useBeforePhysicsStep";
+export {
+  useRollback,
+  type RollbackApi,
+  type UseRollbackOptions,
+} from "@/Jolt/useRollback";
 export { useAfterPhysicsStep } from "@/Jolt/useAfterPhysicsStep";
 export type { PhysicsSettingsOptions } from "@/Jolt/internal/physicsSettings";
 

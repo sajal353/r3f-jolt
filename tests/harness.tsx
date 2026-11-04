@@ -75,7 +75,7 @@ export interface RenderOptions {
   debug?: boolean;
   maxBodies?: number;
   physicsSettings?: PhysicsSettingsOptions;
-  updateLoop?: "follow" | "independent";
+  updateLoop?: "follow" | "independent" | "fixed";
   updatePriority?: number;
   /** Runs after the assert handler is installed, so a test can override both. */
   settingsOverride?: (settings: Jolt.JoltSettings, jolt: JoltModule) => void;

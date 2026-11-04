@@ -21,6 +21,8 @@ import { useCharacter } from "@/Jolt/useCharacter";
 import { useBox } from "@/Jolt/useBox";
 import { useConveyor } from "@/Jolt/useConveyor";
 import { useSphere } from "@/Jolt/useSphere";
+import { useRollback } from "@/Jolt/useRollback";
+import { useJolt } from "@/Jolt/useJolt";
 import { useShapeCaster } from "@/Jolt/useShapeCaster";
 import { useShapeOverlap } from "@/Jolt/useShapeOverlap";
 import { usePointQuery } from "@/Jolt/usePointQuery";
@@ -65,7 +67,13 @@ import {
 import { loadMannequin, playAt } from "./mannequin";
 
 const Ground = () => {
-  useBox({ size: [50, 1, 50], position: [0, -0.5, 0], motionType: "static" });
+  // Stated so `useRollback`'s world can be saved; nothing else here needs it.
+  useBox({
+    stateId: 900,
+    size: [50, 1, 50],
+    position: [0, -0.5, 0],
+    motionType: "static",
+  });
   return null;
 };
 
@@ -700,6 +708,25 @@ const Ragdoll = ({
  * Bodies and joints on `stateId`s, saved and restored one at a time: the
  * registries, the recorders and the hinge's re-adding into order.
  */
+const RolledBack = () => {
+  const { timing } = useJolt();
+  const rollback = useRollback({ capacity: 8 });
+
+  useSphere({
+    stateId: 1,
+    radius: 0.5,
+    position: [0, 2, 0],
+    motionType: "dynamic",
+  });
+  useCharacter({ stateId: 1, position: [3, 0, 0] });
+
+  useFrame(function rewindEachFrame() {
+    if (timing.stepCount > 4) rollback.rewind(timing.stepCount - 3);
+  });
+
+  return null;
+};
+
 const Stated = () => {
   const [, first] = useBox({
     stateId: 10,
@@ -859,6 +886,12 @@ describe("mount/unmount leak checks", () => {
 
   it("stateIds and per-object snapshots leave the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<Stated />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useRollback leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<RolledBack />, 60);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });

@@ -188,6 +188,14 @@ export interface PhysicsTiming {
    * this changes.
    */
   restores: number;
+  /**
+   * True while `replay` or a rollback's `rewind` runs steps a second time, and
+   * for the events those steps deliver. Check it before anything that should
+   * happen once, like a sound.
+   *
+   * @experimental May change in a minor release.
+   */
+  resimulating: boolean;
 }
 
 /**
@@ -198,7 +206,8 @@ export interface PhysicsTiming {
  */
 export type StepCallback = (delta: number, index: number) => void;
 
-export type StepPhase = "before" | "after";
+/** `"start"` runs ahead of every `"before"`, so it sees the world as the step found it. */
+export type StepPhase = "start" | "before" | "after";
 
 /**
  * The only registry with no Jolt object in it: these callbacks run *between*
@@ -389,6 +398,15 @@ export interface JoltApi {
    * the snapshot does — or, for a filtered one, at least those.
    */
   restoreState: (bytes: Uint8Array) => void;
+  /**
+   * Restores a snapshot, then runs fixed steps until `timing.stepCount` reaches
+   * `untilStep`, with `timing.resimulating` set throughout. Leaves the
+   * accumulator alone, works while paused, and needs a numeric `timeStep`.
+   * Throws if called from a step callback.
+   *
+   * @experimental May change in a minor release.
+   */
+  replay: (bytes: Uint8Array, untilStep: number) => void;
   /**
    * Advances the world by hand: the same accumulator, step callbacks and event
    * flushes a frame runs. Meant for `updateLoop: "independent"`, where nothing

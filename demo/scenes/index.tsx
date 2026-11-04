@@ -73,6 +73,7 @@ import { Instancing } from "./systems/Instancing";
 import { ManualStepping } from "./systems/ManualStepping";
 import { Breakable } from "./systems/Breakable";
 import { SaveRestore } from "./systems/SaveRestore";
+import { RollbackNetcode } from "./systems/Rollback";
 
 export interface Scene {
   name: string;
@@ -84,7 +85,7 @@ export interface Scene {
   /** Starting timestep. Defaults to `"vary"`; only scenes about a fixed step set it. */
   timeStep?: number | "vary";
   /** `"independent"` leaves the world still until the scene steps it itself. */
-  updateLoop?: "follow" | "independent";
+  updateLoop?: "follow" | "independent" | "fixed";
 }
 
 export interface Category {
@@ -987,6 +988,19 @@ export const categories: Category[] = [
             floor, each brick, the ball and its hinge carry a{" "}
             <code>stateId</code>: a snapshot names everything by it, and{" "}
             <code>saveState</code> refuses a world where anything lacks one.
+          </>
+        ),
+      },
+      {
+        name: "Rollback",
+        Component: RollbackNetcode,
+        hook: 'useRollback, updateLoop="fixed"',
+        hint: (
+          <>
+            Two worlds, each on its own clock, that hear of the other's input{" "}
+            <b>late</b> — drag the latency. Each predicts the other player, then
+            rewinds and re-runs when the real input lands, so the far ball
+            jumps while the two stay the same. <b>WASD</b> takes over red.
           </>
         ),
       },

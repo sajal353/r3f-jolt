@@ -137,5 +137,16 @@ export const createLoadWindow = (span: number) => {
       torques.length = 0;
       covered = 0;
     },
+
+    /** As flat numbers, for a snapshot. */
+    save: () => [covered, ...deltas, ...forces, ...torques],
+
+    restore: (values: number[]) => {
+      const count = (values.length - 1) / 3;
+      covered = values[0];
+      deltas.splice(0, deltas.length, ...values.slice(1, 1 + count));
+      forces.splice(0, forces.length, ...values.slice(1 + count, 1 + 2 * count));
+      torques.splice(0, torques.length, ...values.slice(1 + 2 * count));
+    },
   };
 };

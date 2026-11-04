@@ -21,6 +21,31 @@ const VERSION = 1;
 /** Header flag: a filtered snapshot, holding only what the filter selected. */
 const PARTIAL = 1;
 
+/**
+ * What a hook keeps in JS that the next steps depend on, or that a restore must
+ * agree with: Jolt's stream has no room for a character's inertia or a sensor's
+ * `inside` set. A snapshot carries these numbers beside the bodies they belong
+ * to, so a restored world neither moves differently nor reports stale contacts.
+ */
+export interface SideState {
+  /** Numbered in `SIDE_TAGS`, so bytes do not depend on who mounted first. */
+  tag: keyof typeof SIDE_TAGS;
+  /** Whose state this is: saved with it, and left out when a filter skips it. */
+  owner: "body" | "constraint" | "character";
+  /** The owner's number: a body's id value, otherwise its `stateId`. */
+  id: number;
+  save: () => number[];
+  restore: (values: number[]) => void;
+}
+
+const SIDE_TAGS = { character: 1, car: 2, swimming: 3, sensor: 4, load: 5 };
+
+interface SavedSide {
+  tag: number;
+  id: number;
+  values: number[];
+}
+
 interface Selection {
   partial: boolean;
   body: (value: number) => boolean;
@@ -35,6 +60,7 @@ interface Header {
   bodies: number[];
   constraints: number[];
   characters: number[];
+  sides: SavedSide[];
   offset: number;
 }
 
@@ -43,11 +69,17 @@ export interface Snapshots {
   restore: (bytes: Uint8Array) => void;
   saveBody: (body: Jolt.Body) => Uint8Array;
   restoreBody: (body: Jolt.Body, bytes: Uint8Array) => void;
-  saveObject: (object: Jolt.Constraint | Jolt.CharacterVirtual) => Uint8Array;
+  saveObject: (
+    object: Jolt.Constraint | Jolt.CharacterVirtual,
+    side?: SideState,
+  ) => Uint8Array;
   restoreObject: (
     object: Jolt.Constraint | Jolt.CharacterVirtual,
     bytes: Uint8Array,
+    side?: SideState,
   ) => void;
+  /** Carries a hook's JS state in every snapshot of its owner, until called off. */
+  keep: (side: SideState) => () => void;
   destroy: () => void;
 }
 
@@ -79,11 +111,13 @@ export const createSnapshots = (
   stateIds: StateIdRegistry,
   constraints: ConstraintRegistry,
   timing: PhysicsTiming,
+  flushEvents: () => void,
 ): Snapshots => {
   const bodyInterface = physicsSystem.GetBodyInterface();
   const writer = createStateWriter(jolt);
   const reader = createStateReader(jolt);
   const bodyIDs = new jolt.BodyIDVector();
+  const sides = new Set<SideState>();
 
   const FULL =
     jolt.EStateRecorderState_Global |
@@ -153,12 +187,16 @@ export const createSnapshots = (
     const words =
       4 +
       2 +
-      3 +
+      4 +
       header.bodies.length +
       header.constraints.length +
       header.characters.length;
     const size =
       words * 4 +
+      header.sides.reduce(
+        (total, side) => total + 12 + side.values.length * 8,
+        0,
+      ) +
       segments.reduce((total, segment) => total + 4 + segment.length, 0);
 
     const bytes = new Uint8Array(size);
@@ -184,6 +222,17 @@ export const createSnapshots = (
     list(header.constraints);
     list(header.characters);
 
+    u32(header.sides.length);
+    for (const side of header.sides) {
+      u32(side.tag);
+      u32(side.id);
+      u32(side.values.length);
+      for (const value of side.values) {
+        view.setFloat64(at, value, true);
+        at += 8;
+      }
+    }
+
     for (const segment of segments) {
       u32(segment.length);
       bytes.set(segment, at);
@@ -203,6 +252,16 @@ export const createSnapshots = (
       return value;
     };
     const list = () => Array.from({ length: u32() }, u32);
+    const f64 = () => {
+      const value = view.getFloat64(at, true);
+      at += 8;
+      return value;
+    };
+    const readSide = (): SavedSide => ({
+      tag: u32(),
+      id: u32(),
+      values: Array.from({ length: u32() }, f64),
+    });
 
     if (bytes.byteLength < 24 || u32() !== MAGIC || u32() !== VERSION) {
       throw new Error(
@@ -213,8 +272,7 @@ export const createSnapshots = (
 
     const partial = (u32() & PARTIAL) !== 0;
     const stepCount = u32();
-    const elapsed = view.getFloat64(at, true);
-    at += 8;
+    const elapsed = f64();
 
     return {
       partial,
@@ -223,11 +281,38 @@ export const createSnapshots = (
       bodies: list(),
       constraints: list(),
       characters: list(),
+      sides: Array.from({ length: u32() }, readSide),
       offset: at,
     };
   };
 
+  /** Registered order breaks ties, for two hooks on one owner. */
+  const savedSides = (includes: (side: SideState) => boolean): SavedSide[] =>
+    [...sides]
+      .filter(includes)
+      .map((side) => ({
+        tag: SIDE_TAGS[side.tag],
+        id: side.id >>> 0,
+        values: side.save(),
+      }))
+      .sort((a, b) => a.tag - b.tag || a.id - b.id);
+
+  const restoreSides = (saved: SavedSide[]) => {
+    const live = [...sides];
+
+    for (const record of saved) {
+      const at = live.findIndex(
+        (side) =>
+          SIDE_TAGS[side.tag] === record.tag && side.id >>> 0 === record.id,
+      );
+      if (at === -1) continue;
+      live.splice(at, 1)[0].restore(record.values);
+    }
+  };
+
   const saveWith = (selection: Selection) => {
+    // Events still queued are ones the JS state saved below has not heard yet.
+    flushEvents();
     constraints.order();
 
     const bodies = liveBodies();
@@ -294,14 +379,23 @@ export const createSnapshots = (
       segments.push(writer.take());
     }
 
+    const constraintIds = sortedConstraints.map((entry) => entry.stateId ?? 0);
+    const characterIds = sortedCharacters.map((entry) => entry.stateId ?? 0);
+    const owners = {
+      body: new Set(savedBodies),
+      constraint: new Set(constraintIds),
+      character: new Set(characterIds),
+    };
+
     return encode(
       {
         partial: selection.partial,
         stepCount: timing.stepCount,
         elapsed: timing.elapsed,
         bodies: savedBodies,
-        constraints: sortedConstraints.map((entry) => entry.stateId ?? 0),
-        characters: sortedCharacters.map((entry) => entry.stateId ?? 0),
+        constraints: constraintIds,
+        characters: characterIds,
+        sides: savedSides((side) => owners[side.owner].has(side.id)),
       },
       segments,
     );
@@ -423,6 +517,10 @@ export const createSnapshots = (
       );
     }
 
+    // Ahead of the stream: a posture changing the character's shape must not
+    // overwrite the contacts and bounds the stream is about to put back.
+    restoreSides(header.sides);
+
     let at = readSegment(bytes, header.offset, () => {
       if (!physicsSystem.RestoreState(reader.recorder)) {
         throw new Error("r3f-jolt: Jolt refused the snapshot's world state.");
@@ -466,16 +564,47 @@ export const createSnapshots = (
     });
   };
 
-  const saveObject = (object: Jolt.Constraint | Jolt.CharacterVirtual) => {
+  /** Laid out as a count of side values, the values, then Jolt's stream. */
+  const saveObject = (
+    object: Jolt.Constraint | Jolt.CharacterVirtual,
+    side?: SideState,
+  ) => {
     object.SaveState(writer.recorder);
-    return writer.take();
+    const stream = writer.take();
+    const values = side?.save() ?? [];
+
+    const bytes = new Uint8Array(4 + values.length * 8 + stream.length);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(0, values.length, true);
+    values.forEach((value, index) =>
+      view.setFloat64(4 + index * 8, value, true),
+    );
+    bytes.set(stream, 4 + values.length * 8);
+    return bytes;
   };
 
   const restoreObject = (
     object: Jolt.Constraint | Jolt.CharacterVirtual,
     bytes: Uint8Array,
+    side?: SideState,
   ) => {
-    reader.load(bytes, 0);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const count = bytes.byteLength < 4 ? -1 : view.getUint32(0, true);
+    const offset = 4 + count * 8;
+
+    if (count < 0 || offset > bytes.length) {
+      throw new Error(
+        "r3f-jolt: restoreState was given bytes saved from a different kind " +
+          "of object.",
+      );
+    }
+
+    const values = Array.from({ length: count }, (_, index) =>
+      view.getFloat64(4 + index * 8, true),
+    );
+    if (side && count > 0) side.restore(values);
+
+    reader.load(bytes, offset);
     object.RestoreState(reader.recorder);
 
     if (reader.failed() || reader.position() !== bytes.length) {
@@ -495,7 +624,12 @@ export const createSnapshots = (
       restore(bytes, body.GetID().GetIndexAndSequenceNumber()),
     saveObject,
     restoreObject,
+    keep: (side) => {
+      sides.add(side);
+      return () => sides.delete(side);
+    },
     destroy: () => {
+      sides.clear();
       writer.destroy();
       reader.destroy();
       jolt.destroy(bodyIDs);

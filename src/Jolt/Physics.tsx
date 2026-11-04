@@ -52,6 +52,9 @@ const loadModule = (init: JoltInit) => {
 
 const defaultInit: JoltInit = () => initJolt();
 
+/** How long one tick of the fixed loop may spend catching up, in milliseconds. */
+const CATCH_UP_BUDGET = 50;
+
 export interface PhysicsProps {
   children: ReactNode;
   gravity?: Vec3Tuple;
@@ -103,9 +106,12 @@ export interface PhysicsProps {
    * `"follow"` steps the world from R3F's frame loop, which is what you want
    * almost always. `"independent"` subscribes to no frame at all and the world
    * advances only through `api.step()` — for stepping by hand, for a loop of
-   * your own, and for a deterministic replay.
+   * your own, and for a deterministic replay. `"fixed"` runs on a timer and the
+   * wall clock, so it keeps time in a background tab and never drops a step,
+   * which `maxSubSteps` does; it needs a numeric `timeStep`. `"fixed"` is
+   * experimental and may change in a minor release.
    */
-  updateLoop?: "follow" | "independent";
+  updateLoop?: "follow" | "independent" | "fixed";
   module?: JoltModule;
   init?: JoltInit;
   settingsOverride?: (settings: Jolt.JoltSettings, jolt: JoltModule) => void;
@@ -144,6 +150,7 @@ export const Physics = ({
     stepCount: 0,
     elapsed: 0,
     restores: 0,
+    resimulating: false,
     alpha: 0,
     interpolate: false,
   });
@@ -160,6 +167,52 @@ export const Physics = ({
     settingsOverride,
   }));
 
+  const steppingRef = useRef(false);
+  const lastTickRef = useRef(0);
+
+  /**
+   * One step, with its subscribers either side of it. They run *between*
+   * `Step()` calls rather than inside one, so the world is theirs to touch;
+   * `stepCount` is advanced between the two phases so a callback reading the
+   * clock sees the step it is in rather than last frame's.
+   */
+  const runStep = (active: JoltApi, stepDelta: number) => {
+    const timing = timingRef.current;
+    const index = timing.stepCount;
+
+    steppingRef.current = true;
+    try {
+      timing.stepDelta = stepDelta;
+      active.steps.run("start", stepDelta, index);
+      active.steps.run("before", stepDelta, index);
+      active.constraints.order();
+      active.joltInterface.Step(stepDelta, collisionSteps);
+      timing.stepCount = index + 1;
+      timing.elapsed += stepDelta;
+      active.steps.run("after", stepDelta, index);
+    } finally {
+      steppingRef.current = false;
+    }
+  };
+
+  const settle = (active: JoltApi) => {
+    active.contacts.flush();
+    active.activation.flush();
+    active.water.flush();
+
+    // On `frameloop="demand"` nothing asks for the next frame, so a world with
+    // anything still moving in it would freeze mid-fall. Asking while bodies are
+    // awake keeps it running and lets it genuinely stop once everything sleeps,
+    // which is the point of demand. A no-op on the default frame loop.
+    if (
+      active.physicsSystem.GetNumActiveBodies(active.Jolt.EBodyType_RigidBody) >
+        0 ||
+      active.physicsSystem.GetNumActiveBodies(active.Jolt.EBodyType_SoftBody) > 0
+    ) {
+      invalidate();
+    }
+  };
+
   /**
    * One frame's worth of simulation. Shared by the frame loop and by
    * `api.step()`, so a world driven by hand runs exactly what a world driven by
@@ -172,32 +225,14 @@ export const Physics = ({
     const elapsed =
       delta ?? (typeof timeStep === "number" ? timeStep : 1 / 60);
 
-    /**
-     * One step, with its subscribers either side of it. They run *between*
-     * `Step()` calls rather than inside one, so the world is theirs to touch;
-     * `stepCount` is advanced between the two phases so a callback reading the
-     * clock sees the step it is in rather than last frame's.
-     */
-    const runStep = (stepDelta: number) => {
-      const index = timing.stepCount;
-
-      timing.stepDelta = stepDelta;
-      world.steps.run("before", stepDelta, index);
-      world.constraints.order();
-      world.joltInterface.Step(stepDelta, collisionSteps);
-      timing.stepCount = index + 1;
-      timing.elapsed += stepDelta;
-      world.steps.run("after", stepDelta, index);
-    };
-
     if (timeStep === "vary") {
-      runStep(Math.min(elapsed, 1 / 30));
+      runStep(world, Math.min(elapsed, 1 / 30));
     } else {
       accumulatorRef.current += elapsed;
 
       let steps = 0;
       while (accumulatorRef.current >= timeStep && steps < maxSubSteps) {
-        runStep(timeStep);
+        runStep(world, timeStep);
         accumulatorRef.current -= timeStep;
         steps += 1;
       }
@@ -209,24 +244,71 @@ export const Physics = ({
       timing.alpha = timing.interpolate ? accumulatorRef.current / timeStep : 0;
     }
 
-    world.contacts.flush();
-    world.activation.flush();
-    world.water.flush();
+    settle(world);
+  };
 
-    // On `frameloop="demand"` nothing asks for the next frame, so a world with
-    // anything still moving in it would freeze mid-fall. Asking while bodies are
-    // awake keeps it running and lets it genuinely stop once everything sleeps,
-    // which is the point of demand. A no-op on the default frame loop.
-    if (
-      world.physicsSystem.GetNumActiveBodies(world.Jolt.EBodyType_RigidBody) >
-        0 ||
-      world.physicsSystem.GetNumActiveBodies(world.Jolt.EBodyType_SoftBody) > 0
+  /**
+   * `updateLoop="fixed"`. Time owed stays owed: past the budget the rest waits
+   * for the next tick rather than being dropped, so the step count follows the
+   * wall clock however long a tab sat throttled.
+   */
+  const tickFixed = () => {
+    const now = performance.now();
+    const owed = (now - lastTickRef.current) / 1000;
+    lastTickRef.current = now;
+
+    if (typeof timeStep !== "number") return;
+    if (!world || world.state.disposed || paused) return;
+
+    accumulatorRef.current += owed;
+
+    let ran = false;
+    while (
+      accumulatorRef.current >= timeStep &&
+      performance.now() - now < CATCH_UP_BUDGET
     ) {
-      invalidate();
+      runStep(world, timeStep);
+      accumulatorRef.current -= timeStep;
+      ran = true;
+    }
+
+    const timing = timingRef.current;
+    timing.alpha = timing.interpolate
+      ? Math.min(accumulatorRef.current / timeStep, 1)
+      : 0;
+
+    if (ran) settle(world);
+  };
+
+  const replay = (bytes: Uint8Array, untilStep: number) => {
+    if (!world || world.state.disposed) {
+      throw new Error("r3f-jolt: replay on a world that is gone.");
+    }
+    if (typeof timeStep !== "number") {
+      throw new Error('r3f-jolt: replay needs a numeric timeStep, not "vary".');
+    }
+    if (steppingRef.current) {
+      throw new Error(
+        "r3f-jolt: replay or rewind from inside a step callback. Call it " +
+          "between steps, where the input arrives.",
+      );
+    }
+
+    const timing = timingRef.current;
+    world.snapshots.restore(bytes);
+
+    timing.resimulating = true;
+    try {
+      while (timing.stepCount < untilStep) runStep(world, timeStep);
+      settle(world);
+    } finally {
+      timing.resimulating = false;
     }
   };
 
   const advanceRef = useHandlerRef(advance);
+  const replayRef = useHandlerRef(replay);
+  const tickFixedRef = useHandlerRef(tickFixed);
 
   useEffect(() => {
     let cancelled = false;
@@ -302,6 +384,12 @@ export const Physics = ({
       const contacts = createContactRegistry(jolt, physicsSystem, steps);
       const activation = createActivationRegistry(jolt, physicsSystem);
       const constraints = createConstraintRegistry(physicsSystem);
+      const water = createWaterRegistry(
+        jolt,
+        joltInterface,
+        steps,
+        timingRef.current,
+      );
       const stateIds = createStateIdRegistry(jolt, physicsSystem);
       const snapshots = createSnapshots(
         jolt,
@@ -309,15 +397,14 @@ export const Physics = ({
         stateIds,
         constraints,
         timingRef.current,
+        function flushEvents() {
+          contacts.flush();
+          activation.flush();
+          water.flush();
+        },
       );
       const temps = createTemps(jolt);
       const characters = new jolt.CharacterVsCharacterCollisionSimple();
-      const water = createWaterRegistry(
-        jolt,
-        joltInterface,
-        steps,
-        timingRef.current,
-      );
 
       const objectLayer = (group: number, mask: number) =>
         jolt.ObjectLayerPairFilterMask.prototype.sGetObjectLayer(group, mask);
@@ -390,6 +477,8 @@ export const Physics = ({
           }
           snapshots.restore(bytes);
         },
+        replay: (bytes: Uint8Array, untilStep: number) =>
+          replayRef.current(bytes, untilStep),
         step: (delta?: number) => advanceRef.current(delta),
         get debug() {
           return debugRef.current;
@@ -424,7 +513,23 @@ export const Physics = ({
         });
       }
     };
-  }, [mount, advanceRef]);
+  }, [mount, advanceRef, replayRef]);
+
+  useEffect(() => {
+    if (updateLoop !== "fixed" || !world) return;
+    if (typeof timeStep !== "number") {
+      throw new Error(
+        'r3f-jolt: <Physics updateLoop="fixed"> needs a numeric timeStep, not "vary".',
+      );
+    }
+
+    lastTickRef.current = performance.now();
+    const timer = setInterval(function tick() {
+      tickFixedRef.current();
+    }, timeStep * 1000);
+
+    return () => clearInterval(timer);
+  }, [updateLoop, world, timeStep, tickFixedRef]);
 
   // A fixed step is known from the prop and stays correct while paused; a
   // varying one is only knowable per frame, so the step callback owns that case.
@@ -485,7 +590,8 @@ export const Physics = ({
   // to the subscriber only when priority is > 0.
   useFrame((_, delta) => {
     if (updateLoop === "independent") return;
-    advance(delta);
+    if (updateLoop === "fixed") tickFixed();
+    else advance(delta);
   }, updatePriority);
 
   if (!world) return null;
