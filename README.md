@@ -657,7 +657,7 @@ Three things worth knowing:
 
 ## Constraints
 
-Eight hooks, one per Jolt constraint type. Each takes two bodies and an options object, and returns `[api]` — `undefined` until both bodies exist, like every other hook here.
+Twelve hooks, one per Jolt constraint type. Each takes two bodies and an options object, and returns `[api]` — `undefined` until both bodies exist, like every other hook here.
 
 ```tsx
 const Door = () => {
@@ -692,6 +692,10 @@ const Door = () => {
 | `useConeConstraint` | a point, limits the lean | twist about the axis |
 | `useSwingTwistConstraint` | a point, limits lean **and** twist | within the limits |
 | `useSixDOFConstraint` | whatever you say | whatever you say |
+| `usePathConstraint` | a point on a curve | travel along it; rotation by `rotation` |
+| `useGearConstraint` | two rotations in a ratio | everything else: pair with hinges |
+| `useRackAndPinionConstraint` | a rotation and a travel in a ratio | everything else: pair with a hinge and a slider |
+| `usePulleyConstraint` | a rope's length over two fixed points | everything else |
 
 ### The two bodies
 
@@ -733,6 +737,78 @@ usePointConstraint(null, plank, { point: [0, 4, 0], breakForce: 5000, onBreak })
 - The load is what holds the joint together. Limits count; motors do not.
 - A limit only takes load once it is reached, so a joint whose limit catches a falling body reads an impact well above the static load.
 - `useFixedConstraint` cannot break: Jolt binds no load readout for it, and setting either option warns. A `useSixDOFConstraint` with every axis `"fixed"` holds the same and can break.
+
+### Paths
+
+`usePathConstraint(body1, body2, options)` holds body 2 to a curve fixed to body 1, or to the world with `null`, and leaves it free along the curve.
+
+```tsx
+const [ref, car] = useBox({
+  size: [1, 0.5, 1],
+  position: [0, 1, 0],
+  motionType: "dynamic",
+  mass: 80,
+});
+
+const [path] = usePathConstraint(null, car, {
+  points: [
+    { position: [0, 1, 0] },
+    { position: [8, 3, 0], normal: [0, 1, 0] },
+    { position: [8, 1, 8], tangent: [-8, 0, 0] },
+  ],
+  looping: true,
+  rotation: "path",
+  motor: { state: "velocity", targetVelocity: 6 },
+});
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `points` | — | `{ position, tangent?, normal? }`. The curve passes through each; fraction `i` is at point `i`. `tangent` defaults to from the point before to the point after, `normal` to world up |
+| `looping` | `false` | Joins the last point to the first. Do not repeat the first point |
+| `path` | — | In place of `points`: `{ maxFraction, looping?, at(fraction, out), closest?(position, hint) }`, called by Jolt during the step |
+| `pathPosition`, `pathRotation` | origin | Where the path sits on body 1 |
+| `pathFraction` | `0` | Where body 2 starts. It keeps its offset from that point |
+| `rotation` | `"free"` | `"path"` turns body 2 with the curve, `"fixed"` keeps it as it was; `"aroundTangent"`, `"aroundNormal"` and `"aroundBinormal"` leave one rotation free |
+| `maxFrictionForce` | `0` | Resists sliding along the path |
+| `motor` | off | `{ state, targetFraction, targetVelocity, …limits }` |
+
+The api adds `setMotorState`, `setTargetVelocity`, `setTargetFraction`, `setMaxFrictionForce` and `getPathFraction`. `samplePath({ points, looping }, perFraction?)` returns the curve as `Vector3[]`, for drawing a rail. `debug: true` draws it too; `<PhysicsDebug />` draws only the joint.
+
+- **`targetVelocity` is metres per second, `targetFraction` is a fraction.** A position motor's spring works in fractions, so it pulls harder across long spans than short ones. As with any position motor, walk a far target over rather than jumping to it, and a load sags against the spring.
+- **A path with a `normal` along its tangent throws at mount**, naming the fraction: nothing says which way is up there. The default normal is world up, so a path that goes vertical, a loop for one, needs its own.
+- **A `points` path looks for body 2 near where it last was**, up to one fraction either way, so a coaster stays on its own track where the path crosses itself. A body knocked further than that is pulled back rather than moved along. A `path` searches all of itself unless you give it `closest`.
+- It runs through JS rather than Jolt's own Hermite path, which the bindings cannot construct: about 50 µs per joint per step on the debug build.
+- It cannot break: Jolt binds no load readout for it.
+
+### Gears, racks and pulleys
+
+These tie motions together and hold nothing in place, so each moving part still needs a joint of its own.
+
+```tsx
+const [hinge1] = useHingeConstraint(null, small, { point: [0, 2, 0], hingeAxis: [0, 0, 1], normalAxis: [1, 0, 0] });
+const [hinge2] = useHingeConstraint(null, large, { point: [3, 2, 0], hingeAxis: [0, 0, 1], normalAxis: [1, 0, 0] });
+
+useGearConstraint(small, large, {
+  hingeAxis: [0, 0, 1],
+  teeth: [10, 20],
+  hinges: [hinge1, hinge2],
+});
+```
+
+| Hook | Options | Ratio |
+| --- | --- | --- |
+| `useGearConstraint(gear1, gear2, …)` | `hingeAxis` (or `hingeAxis1`, `hingeAxis2`), `teeth: [n1, n2]` or `ratio`, `hinges` | Gear 1 turns `-n2 / n1` times gear 2 |
+| `useRackAndPinionConstraint(pinion, rack, …)` | `hingeAxis`, `sliderAxis`, `teeth: { pinion, rack, length }` or `ratio`, `hinge`, `slider` | `ratio` radians of pinion per metre of rack |
+| `usePulleyConstraint(body1, body2, …)` | `bodyPoint` (or `bodyPoint1`, `bodyPoint2`), `fixedPoint1`, `fixedPoint2`, `ratio`, `minLength`, `maxLength` | The rope is `length1 + ratio × length2` long |
+
+- **Pass `hinges`, or `hinge` and `slider`.** Without them only the speeds are tied, so the two parts slowly slip out of step. They are read live, since those joints exist a render later. Each must turn the same way as the axis given here and start at its zero angle, or the correction pulls the wrong way.
+- **Gear `hinges` need one gear to turn a whole number of times per turn of the other**, 10:30 or 30:10. Jolt's correction reads hinge angles that wrap at ±π, which at a ratio like 20:30 reads as a false error each time round, so `hinges` is ignored there with a warning and only the speeds stay tied.
+- A gear or rack can take `breakTorque`; it reads no force. A pulley cannot break: Jolt binds no load readout for it.
+- A pulley goes slack rather than pushing: `minLength` is 0 and `maxLength` is the length at mount. `setLength(min, max)` winches it, and `getCurrentLength()`, `getMinLength()` and `getMaxLength()` read it.
+- **Nothing stops a body at a fixed point.** The rope is a sum of distances, so a body pulled up to one carries on through it. Leave room, or use limits of your own.
+- A hinge reads its angle wrapped to ±π, so compare gears with that in mind.
+- `debug` draws these as a line between the two bodies, which does not mean the joint is failing: they hold no shared point.
 
 ### Worth knowing
 
@@ -1439,14 +1515,14 @@ pnpm install
 pnpm dev
 ```
 
-68 scenes in seven categories, one per hook or feature:
+71 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
 | **Shapes**       | all 12 shape hooks, one scene each · terrain from all three `heights` forms · per-triangle surface types |
 | **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · collision groups · auto colliders · motion quality |
 | **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale · conveyor    |
-| **Constraints**  | all 8 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints |
+| **Constraints**  | all 12 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints · coaster and lift · gear train, rack, pulley · crane, turret, drawbridge |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
 | **Systems**      | character · character contacts · water · cloth · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · save & restore · rollback · breakable objects |

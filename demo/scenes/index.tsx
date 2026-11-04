@@ -44,6 +44,9 @@ import { SixDOFConstraintScene } from "./constraints/SixDOF";
 import { MotorsScene } from "./constraints/Motors";
 import { SpringsScene } from "./constraints/Springs";
 import { BreakingJointsScene } from "./constraints/Breaking";
+import { PathScene } from "./constraints/Path";
+import { MachineryScene } from "./constraints/Machinery";
+import { MotorisedScene } from "./constraints/Motorised";
 
 import { ClosestHit } from "./queries/ClosestHit";
 import { AnyHit } from "./queries/AnyHit";
@@ -579,6 +582,46 @@ export const categories: Category[] = [
             Every axis is separately <code>free</code>, <code>fixed</code> or
             limited, with its own spring, friction and motor. The other seven
             constraint hooks are shortcuts for its common configurations.
+          </>
+        ),
+      },
+      {
+        name: "Path",
+        Component: PathScene,
+        hook: "usePathConstraint, samplePath",
+        hint: (
+          <>
+            A body held to a curve, free along it. The car turns with the track
+            (<code>rotation: "path"</code>) and a <b>velocity</b> motor is its
+            chain: turn it off and gravity alone decides how far it gets. The
+            lift keeps level (<code>"fixed"</code>) under a <b>position</b>{" "}
+            motor, whose target is a fraction: fraction 2 is point 2.
+          </>
+        ),
+      },
+      {
+        name: "Machinery",
+        Component: MachineryScene,
+        hook: "useGearConstraint, useRackAndPinionConstraint, usePulleyConstraint",
+        hint: (
+          <>
+            These joints tie two motions together and hold nothing in place:
+            each wheel still needs its own hinge, and handing those to the joint
+            is what stops the two slipping out of step. Only the red wheel has a
+            motor. The pulley's rope has a fixed length, so the heavy block drops
+            as far as the light one rises.
+          </>
+        ),
+      },
+      {
+        name: "Motorised",
+        Component: MotorisedScene,
+        hook: "motor, setTargetAngle, setTargetPosition, setDistance",
+        hint: (
+          <>
+            Machines from the ordinary joints: the crane is a hinge, a slider
+            and a distance joint stacked; the turret is a hinge on a hinge; the
+            drawbridge is one hinge with limits for its rest positions.
           </>
         ),
       },

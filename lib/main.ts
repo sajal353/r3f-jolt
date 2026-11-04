@@ -167,6 +167,36 @@ export {
   type SliderConstraintExtras,
 } from "@/Jolt/useSliderConstraint";
 export {
+  usePathConstraint,
+  type UsePathConstraintOptions,
+  type PathConstraintApi,
+  type PathConstraintExtras,
+  type PathMotorOptions,
+  type PathRotation,
+} from "@/Jolt/usePathConstraint";
+export {
+  samplePath,
+  type CustomPath,
+  type PathPoint,
+  type PathSample,
+} from "@/Jolt/internal/constraintPath";
+export {
+  useGearConstraint,
+  type UseGearConstraintOptions,
+  type GearConstraintApi,
+} from "@/Jolt/useGearConstraint";
+export {
+  useRackAndPinionConstraint,
+  type UseRackAndPinionConstraintOptions,
+  type RackAndPinionConstraintApi,
+} from "@/Jolt/useRackAndPinionConstraint";
+export {
+  usePulleyConstraint,
+  type UsePulleyConstraintOptions,
+  type PulleyConstraintApi,
+  type PulleyConstraintExtras,
+} from "@/Jolt/usePulleyConstraint";
+export {
   useDistanceConstraint,
   type UseDistanceConstraintOptions,
   type DistanceConstraintApi,

@@ -26,6 +26,15 @@
 - A `"start"` phase on `api.steps`, ahead of every `"before"` callback.
 - Saving a snapshot delivers queued contact, activation and water events first, so with `useRollback` they arrive once per step.
 
+### Machinery constraints
+
+- `usePathConstraint`: body 2 held to a curve on body 1 or the world. `points` (`{ position, tangent?, normal? }`) or a computed `path`; `looping`, `pathPosition`, `pathRotation`, `pathFraction`, `rotation`, `maxFrictionForce`, and a `motor` driven in metres per second or to a fraction. A `points` path searches near the last fraction, so it holds its track where it crosses itself.
+- `samplePath({ points, looping }, perFraction?)`: the curve as `Vector3[]`, for drawing it.
+- `useGearConstraint`: two rotations in a ratio, by `teeth` or `ratio`. `hinges` corrects drift.
+- `useRackAndPinionConstraint`: a rotation and a travel in a ratio, by `teeth` or `ratio`. `hinge` and `slider` correct drift.
+- `usePulleyConstraint`: two bodies on one rope over two fixed points, with `ratio`, `minLength`, `maxLength`, `setLength` and `getCurrentLength`.
+- `breakTorque` on gear and rack joints.
+
 ### Fixes
 
 - Water no longer skips buoyancy on a step run a second time after a restore.
@@ -34,6 +43,9 @@
 
 - Systems › Save & restore: a wrecking ball and a brick tower, every step kept for ten seconds, with a scrub bar, save and load.
 - Systems › Rollback: two worlds on their own clocks, kept identical across adjustable latency.
+- Constraints › Path: a coaster on a banked circuit and a three-floor lift.
+- Constraints › Machinery: a gear train, a rack and pinion, a pulley.
+- Constraints › Motorised: a crane, a turret tracking a target, a drawbridge.
 
 ## 0.4.0
 

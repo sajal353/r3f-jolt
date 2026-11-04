@@ -22,6 +22,10 @@ import { useBox } from "@/Jolt/useBox";
 import { useConveyor } from "@/Jolt/useConveyor";
 import { useSphere } from "@/Jolt/useSphere";
 import { useRollback } from "@/Jolt/useRollback";
+import { usePathConstraint } from "@/Jolt/usePathConstraint";
+import { useGearConstraint } from "@/Jolt/useGearConstraint";
+import { useRackAndPinionConstraint } from "@/Jolt/useRackAndPinionConstraint";
+import { usePulleyConstraint } from "@/Jolt/usePulleyConstraint";
 import { useJolt } from "@/Jolt/useJolt";
 import { useShapeCaster } from "@/Jolt/useShapeCaster";
 import { useShapeOverlap } from "@/Jolt/useShapeOverlap";
@@ -708,6 +712,64 @@ const Ragdoll = ({
  * Bodies and joints on `stateId`s, saved and restored one at a time: the
  * registries, the recorders and the hinge's re-adding into order.
  */
+const Machinery = () => {
+  const axle: { hingeAxis: Vec3Tuple; normalAxis: Vec3Tuple } = {
+    hingeAxis: [0, 0, 1],
+    normalAxis: [1, 0, 0],
+  };
+  const box = {
+    size: [0.6, 0.6, 0.6] as Vec3Tuple,
+    motionType: "dynamic" as const,
+  };
+
+  const [, cart] = useBox({ ...box, position: [-4, 5, 0] });
+  usePathConstraint(null, cart, {
+    points: [
+      { position: [-4, 5, 0] },
+      { position: [0, 6, 0] },
+      { position: [4, 5, 0] },
+    ],
+    motor: { state: "velocity", targetVelocity: 1 },
+  });
+
+  const [, gear1] = useBox({ ...box, position: [0, 8, 0] });
+  const [, gear2] = useBox({ ...box, position: [2, 8, 0] });
+  const [hinge1] = useHingeConstraint(null, gear1, { ...axle, point: [0, 8, 0] });
+  const [hinge2] = useHingeConstraint(null, gear2, { ...axle, point: [2, 8, 0] });
+  useGearConstraint(gear1, gear2, {
+    hingeAxis: [0, 0, 1],
+    teeth: [10, 20],
+    hinges: [hinge1, hinge2],
+  });
+
+  const [, pinion] = useBox({ ...box, position: [0, 11, 0] });
+  const [, rack] = useBox({ ...box, position: [0, 10, 2] });
+  const [hinge] = useHingeConstraint(null, pinion, { ...axle, point: [0, 11, 0] });
+  const [slider] = useSliderConstraint(null, rack, {
+    point: [0, 10, 2],
+    sliderAxis: [1, 0, 0],
+    normalAxis: [0, 1, 0],
+  });
+  useRackAndPinionConstraint(pinion, rack, {
+    hingeAxis: [0, 0, 1],
+    sliderAxis: [1, 0, 0],
+    teeth: { pinion: 10, rack: 10, length: 1 },
+    hinge,
+    slider,
+  });
+
+  const [, left] = useBox({ ...box, position: [-3, 3, 3] });
+  const [, right] = useBox({ ...box, position: [3, 3, 3] });
+  usePulleyConstraint(left, right, {
+    bodyPoint1: [-3, 3, 3],
+    bodyPoint2: [3, 3, 3],
+    fixedPoint1: [-3, 9, 3],
+    fixedPoint2: [3, 9, 3],
+  });
+
+  return null;
+};
+
 const RolledBack = () => {
   const { timing } = useJolt();
   const rollback = useRollback({ capacity: 8 });
@@ -886,6 +948,12 @@ describe("mount/unmount leak checks", () => {
 
   it("stateIds and per-object snapshots leave the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<Stated />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("path, gear, rack-and-pinion and pulley joints leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<Machinery />, 30);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });

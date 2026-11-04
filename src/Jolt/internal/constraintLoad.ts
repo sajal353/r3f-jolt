@@ -80,6 +80,23 @@ export const readSixDOFLoad = (
   out.torque = constraint.GetTotalLambdaRotation().Length();
 };
 
+export const readGearLoad = (
+  constraint: Jolt.GearConstraint,
+  out: ConstraintLoad,
+) => {
+  out.force = 0;
+  out.torque = Math.abs(constraint.GetTotalLambda());
+};
+
+/** Measured at the pinion, so what it carries reads as a torque. */
+export const readRackLoad = (
+  constraint: Jolt.RackAndPinionConstraint,
+  out: ConstraintLoad,
+) => {
+  out.force = 0;
+  out.torque = Math.abs(constraint.GetTotalLambda());
+};
+
 /**
  * A joint's load averaged over the last `span` seconds of simulation. An impact
  * delivers about the same impulse whatever the step length, so dividing one

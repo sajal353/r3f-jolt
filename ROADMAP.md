@@ -229,9 +229,9 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 
 - [ ] `useMutableCompound` — `MutableCompoundShape.AddShape` / `RemoveShape` / `ModifyShape` / `ModifyShapes` at runtime plus `AdjustCenterOfMass()`: the breakable-crate primitive
 - [ ] Deformable terrain — `HeightFieldShape.SetHeights(x, y, sx, sy, heights, stride, tempAllocator)` for craters and digging, `GetHeights` for readback, with matching three.js geometry updates
-- [ ] Rails and platforms — `PathConstraint` + `PathConstraintPathHermite.AddPoint(position, tangent, normal)` for elevators, moving platforms and coasters; `PathConstraintPathJS` for procedural paths; `SetIsLooping`
-- [ ] Machinery — `GearConstraint`, `RackAndPinionConstraint`, `PulleyConstraint`
-- [ ] Motorised constraints — doors, cranes, turrets, drawbridges via `MotorSettings` + `SetMotorState`
+- [x] Rails and platforms — `PathConstraint` + `PathConstraintPathHermite.AddPoint(position, tangent, normal)` for elevators, moving platforms and coasters; `PathConstraintPathJS` for procedural paths; `SetIsLooping`. **Amended:** `usePathConstraint`. The bindings give `PathConstraintPathHermite` no constructor, so `points` runs its spline through `PathConstraintPathJS`, searching near the last fraction where Jolt searches the whole path
+- [x] Machinery — `GearConstraint`, `RackAndPinionConstraint`, `PulleyConstraint`. **Amended:** `useGearConstraint`, `useRackAndPinionConstraint`, `usePulleyConstraint`
+- [x] Motorised constraints — doors, cranes, turrets, drawbridges via `MotorSettings` + `SetMotorState`. **Amended:** the motors shipped in 0.3.0; this is Constraints › Motorised, with the door in Constraints › Motors
 - [ ] Trigger volumes built on 0.2.1 sensors + the contact registry
 
 ### Determinism, save/load, netcode
@@ -340,7 +340,7 @@ From the 336 classes in `jolt-physics@1.1.0`. Useful for spotting future opportu
 | `AssertFailedHandlerJS` + debug build, for the test suite | 0.2.0 |
 | Any/all raycasts | 0.2.1 |
 | Kinematic, sensors, damping, DOF locks, sleep | 0.2.1 |
-| All 12 constraint types + motors | 0.3.0 |
+| All 12 constraint types + motors | 0.3.0 for 8 hooks and motors; 0.5.0 for path, gear, rack-and-pinion and pulley |
 | Batch body add/remove · per-triangle mesh user data · heightfield materials | 0.3.0 |
 | Heightfield, tapered cylinder, scaled shapes | 0.3.0 |
 | Instancing, auto-colliders | 0.3.0 |

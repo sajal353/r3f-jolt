@@ -114,6 +114,8 @@ export interface ConstraintBuild<C extends Jolt.Constraint, E extends object> {
   api?: (context: ConstraintApiContext<C>) => E;
   /** Absent where Jolt binds no `GetTotalLambda*` for the type. */
   load?: (constraint: C, out: ConstraintLoad) => void;
+  /** Frees what `settings` made for the joint, once the joint has gone. */
+  release?: () => void;
 }
 
 const resolveBody = (api: JoltApi, value: ConstraintBody): Jolt.Body => {
@@ -417,6 +419,7 @@ export const useConstraint = <
 
       detach();
       constraint.Release();
+      build.release?.();
     };
   }, [api, body1, body2, mount, scene, breakHandler]);
 
