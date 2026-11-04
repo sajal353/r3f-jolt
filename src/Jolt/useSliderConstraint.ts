@@ -180,6 +180,7 @@ export const useSliderConstraint = (
     body2,
     options,
     {
+      hook: "useSliderConstraint",
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castSlider,
       load: readSliderLoad,

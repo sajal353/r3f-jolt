@@ -52,6 +52,7 @@ export const usePointConstraint = (
   options: UsePointConstraintOptions = {},
 ) =>
   useConstraint<Jolt.PointConstraint>(body1, body2, options, {
+    hook: "usePointConstraint",
     settings: (jolt, temps) => buildSettings(jolt, temps, options),
     cast: castPoint,
     load: readPointLoad,

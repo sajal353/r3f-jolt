@@ -113,6 +113,12 @@ export interface UseCharacterOptions extends CharacterContactHandlers {
   innerBodyLayer?: number;
   /** A fixed `GetIndexAndSequenceNumber()` for the inner body, so a client and a server agree on it. */
   innerBodyIDOverride?: number;
+  /**
+   * Names the character in `saveState`, which needs one on every character,
+   * and is the inner body's `stateId` too unless `innerBodyIDOverride` says
+   * otherwise. Characters are numbered apart from bodies and constraints.
+   */
+  stateId?: number;
   /** Blocks and is blocked by every other character that has it on. On by default. */
   collideWithCharacters?: boolean;
   /**
@@ -188,6 +194,12 @@ export interface CharacterApi {
   debugMeshCrouching: Mesh | null;
   /** The shape last given to `setShape`. */
   debugMeshCustom: Mesh | null;
+  /**
+   * This character alone: position, rotation, velocity, ground contacts. Not
+   * its inner body, which is a body of its own.
+   */
+  saveState: () => Uint8Array;
+  restoreState: (bytes: Uint8Array) => void;
 }
 
 type Posture = "standing" | "crouching";
@@ -391,6 +403,7 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       innerBody = false,
       innerBodyLayer = layer,
       innerBodyIDOverride,
+      stateId,
       collideWithCharacters = true,
       collideWithSoftBodies = false,
     } = mount;
@@ -434,8 +447,12 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     if (innerShapes) {
       settings.mInnerBodyShape = innerShapes.standing.shape;
       settings.mInnerBodyLayer = innerBodyLayer;
-      if (innerBodyIDOverride !== undefined) {
-        const override = new jolt.BodyID(innerBodyIDOverride);
+      const innerID = innerBodyIDOverride ?? stateId;
+      if (innerID !== undefined) {
+        if (innerBodyIDOverride === undefined) {
+          api.stateIds.check(innerID, "useCharacter");
+        }
+        const override = new jolt.BodyID(innerID);
         settings.mInnerBodyIDOverride = override;
         jolt.destroy(override);
       }
@@ -478,6 +495,12 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     const innerBodyID = innerShapes
       ? new jolt.BodyID(character.GetInnerBodyID().GetIndexAndSequenceNumber())
       : null;
+    if (innerBodyID) api.stateIds.track(innerBodyID, "useCharacter");
+    const removeState = api.stateIds.addCharacter({
+      stateId,
+      character,
+      hook: "useCharacter",
+    });
 
     const contactListener = createCharacterListener(jolt, {
       handlers: () => handlersRef.current,
@@ -833,9 +856,16 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         return debugView.current?.custom ?? null;
       },
       setShape,
+      saveState: () =>
+        state.disposed ? new Uint8Array(0) : api.snapshots.saveObject(character),
+      restoreState: (bytes) => {
+        if (state.disposed || bytes.length === 0) return;
+        api.snapshots.restoreObject(character, bytes);
+      },
     });
 
     return () => {
+      removeState();
       setCharacterApi(undefined);
       debugView.hide();
       debugViewRef.current = null;

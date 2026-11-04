@@ -9,13 +9,16 @@ export const Floor = ({
   color = "#2a2a2a",
   friction = 0.6,
   restitution = 0,
+  stateId,
 }: {
   size?: number;
   color?: string;
   friction?: number;
   restitution?: number;
+  stateId?: number;
 }) => {
   const [ref] = useBox({
+    stateId,
     position: [0, -0.5, 0],
     size: [size, 1, size],
     motionType: "static",

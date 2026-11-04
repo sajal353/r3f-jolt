@@ -134,6 +134,8 @@ export {
   type OrientedBoxInput,
 } from "@/Jolt/boxOverlap";
 
+export { isSameState } from "@/Jolt/internal/snapshot";
+
 export type {
   QueryBody,
   QueryMode,
@@ -315,6 +317,7 @@ export type {
   Temps,
   MotionType,
   PhysicsTiming,
+  StateFilter,
   BodyMaterial,
   BroadPhaseLayerConfig,
   LayerConfig,

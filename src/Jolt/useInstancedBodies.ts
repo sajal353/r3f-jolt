@@ -33,6 +33,8 @@ export interface InstanceTransform {
 }
 
 export interface UseInstancedBodiesOptions {
+  /** Instance `i` gets body `stateId + i`; see `BodyOptions.stateId`. */
+  stateId?: number;
   count: number;
   /**
    * One collider, shared by every instance — Jolt shapes are immutable and
@@ -137,6 +139,7 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
     /** 1 while an instance still has a transform worth writing to the mesh. */
     pending: new Uint8Array(0),
     lastStepCount: -1,
+    lastRestores: 0,
     primed: false,
   });
 
@@ -151,6 +154,7 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
     } = api;
 
     const {
+      stateId,
       count,
       collider,
       transforms,
@@ -263,7 +267,27 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
         typeof userData === "function" ? userData(index) : (userData ?? 0);
 
       bodySettingsOverride?.(settings, index);
-      bodies.push(bodyInterface.CreateBody(settings));
+
+      try {
+        bodies.push(
+          api.stateIds.createBody(
+            settings,
+            stateId === undefined ? undefined : stateId + index,
+            "useInstancedBodies",
+          ),
+        );
+      } catch (error) {
+        destroyBodies(
+          api,
+          bodies.map((body) => body.GetID().GetIndexAndSequenceNumber()),
+        );
+        jolt.destroy(settings);
+        jolt.destroy(position);
+        jolt.destroy(rotation);
+        shape.Release();
+        geometry.dispose();
+        throw error;
+      }
     }
 
     jolt.destroy(settings);
@@ -414,6 +438,13 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
     } = tracking;
 
     const interpolating = mount.interpolate ?? timing.interpolate;
+
+    // A restore can move sleeping instances, and leaves no history to blend.
+    if (timing.restores !== tracking.lastRestores) {
+      tracking.lastRestores = timing.restores;
+      tracking.primed = false;
+      pending.fill(1);
+    }
 
     // Only shift on a frame that actually stepped. Shifting every frame would
     // collapse previous onto current and defeat the interpolation.

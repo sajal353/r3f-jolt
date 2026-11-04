@@ -21,8 +21,17 @@ export const createTransformTracker = () => {
   const rotation = new Quaternion();
 
   let lastStepCount = -1;
+  let lastRestores = 0;
   let primed = false;
   let resting = false;
+
+  /** A restored world has no history worth blending from. */
+  const forgetIfRestored = (timing: PhysicsTiming) => {
+    if (timing.restores === lastRestores) return;
+    lastRestores = timing.restores;
+    primed = false;
+    resting = false;
+  };
 
   const readBody = (body: Jolt.Body) => {
     const bodyPosition = body.GetPosition();
@@ -52,6 +61,7 @@ export const createTransformTracker = () => {
     rotation: rotation as Readonly<Quaternion>,
 
     update: (body: Jolt.Body, timing: PhysicsTiming) => {
+      forgetIfRestored(timing);
       resting = false;
 
       if (!timing.interpolate) {
@@ -87,7 +97,8 @@ export const createTransformTracker = () => {
      * pose — stopping at a blend between the last two steps would leave it a
      * fraction of a step short — then holds it until `update` or `reset`.
      */
-    rest: (body: Jolt.Body) => {
+    rest: (body: Jolt.Body, timing: PhysicsTiming) => {
+      forgetIfRestored(timing);
       if (resting) return;
 
       readBody(body);

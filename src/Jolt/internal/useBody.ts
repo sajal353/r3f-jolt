@@ -67,6 +67,13 @@ export interface CollisionGroupOptions {
 }
 
 export interface BodyOptions {
+  /**
+   * The body's Jolt id, for `saveState`. A snapshot names bodies by id, and
+   * without one Jolt picks it from whatever mounted before, so a world mounted
+   * in a different order cannot take the snapshot. Unique per world, from 0
+   * up to `maxBodies`.
+   */
+  stateId?: number;
   position: Vec3Tuple;
   rotation?: QuatTuple;
   motionType: MotionType;
@@ -243,6 +250,13 @@ export interface BodyApi<S extends Jolt.Shape> {
    * warning rather than silently corrected.
    */
   setScale: (scale: Vec3Input, updateMassProperties?: boolean) => void;
+  /**
+   * This body alone: position, rotation, velocities and whether it sleeps.
+   * Empty while the body is out of the world.
+   */
+  saveState: () => Uint8Array;
+  /** Puts this body back as its own `saveState` found it. */
+  restoreState: (bytes: Uint8Array) => void;
 }
 
 /**
@@ -469,6 +483,7 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
     const { options, createShape, debugKind, extras } = mount;
 
     const {
+      stateId,
       position,
       rotation = [0, 0, 0, 1],
       motionType,
@@ -676,7 +691,23 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
 
     bodySettingsOverride?.(bodySettings);
 
-    const body = bodyInterface.CreateBody(bodySettings);
+    const body = (() => {
+      try {
+        return api.stateIds.createBody(
+          bodySettings,
+          stateId,
+          `use${debugKind[0].toUpperCase()}${debugKind.slice(1)}`,
+        );
+      } catch (error) {
+        jolt.destroy(bodySettings);
+        jolt.destroy(settingsPosition);
+        jolt.destroy(settingsRotation);
+        scaledShape?.Release();
+        shape.Release();
+        geometry.dispose();
+        throw error;
+      }
+    })();
 
     jolt.destroy(bodySettings);
     jolt.destroy(settingsPosition);
@@ -1041,6 +1072,14 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
         debugScale.set(target.GetX(), target.GetY(), target.GetZ());
         debugView.current?.scale.copy(debugScale);
       },
+
+      saveState: () =>
+        usable() ? api.snapshots.saveBody(body) : new Uint8Array(0),
+
+      restoreState: (bytes: Uint8Array) => {
+        if (!usable() || bytes.length === 0) return;
+        api.snapshots.restoreBody(body, bytes);
+      },
     };
 
     const published = {
@@ -1146,7 +1185,7 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
     if (bodyApi.body.IsActive()) {
       tracker.update(bodyApi.body, api.timing);
     } else {
-      tracker.rest(bodyApi.body);
+      tracker.rest(bodyApi.body, api.timing);
     }
 
     if (ref.current) tracker.applyTo(ref.current);

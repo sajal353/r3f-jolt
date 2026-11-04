@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0
+
+### Save and restore
+
+- `saveState(filter?)` and `restoreState(bytes)` on `useJolt()`: the whole world as a `Uint8Array` — bodies, contacts, constraints, characters and the step clock. `restoreState` puts `timing.stepCount` back too.
+- `stateId` on every body hook, `useSoftBody`, `useInstancedBodies` (instance `i` is `stateId + i`), `useRagdoll` (part `i` is `stateId + i`), `useCar`, `useCharacter` and the constraint hooks. Bodies are created on that Jolt id, so a world mounted in a different order takes the same snapshot. `saveState` throws, naming the hooks, if anything lacks one; a clash throws at mount, naming the holder; `restoreState` throws, listing the ids that differ, for a snapshot of another world.
+- Constraints with a `stateId` are solved in `stateId` order, so two worlds mounted differently simulate a snapshot alike.
+- A `filter` (`{ body, constraint, character }`, each by `stateId`) saves part of the world, without contacts or the clock.
+- `saveState()` / `restoreState(bytes)` on the body, soft-body, constraint and character apis, for one object alone.
+- `isSameState(a, b)`: byte-for-byte comparison, the determinism check.
+- `PhysicsTiming.restores` counts restores; interpolation, sleeping bodies' held poses and instanced meshes re-read after one.
+- `useRagdoll` adds its bodies and joints itself rather than through `Ragdoll.AddToPhysicsSystem`; behaviour is unchanged.
+
+### Demo
+
+- Systems › Save & restore: a wrecking ball and a brick tower, every step kept for ten seconds, with a scrub bar, save and load.
+
 ## 0.4.0
 
 ### Breaking changes

@@ -48,6 +48,8 @@ export interface CarState {
 }
 
 export interface UseCarOptions {
+  /** The chassis body's and the vehicle constraint's `stateId`, for `saveState`. */
+  stateId?: number;
   position: Vec3Tuple;
   rotation?: QuatTuple;
   castType?: "cylinder" | "sphere" | "ray";
@@ -127,6 +129,7 @@ export const useCar = (options: UseCarOptions) => {
     } = api;
 
     const {
+      stateId,
       position,
       rotation = [0, 0, 0, 1],
       castType = "cylinder",
@@ -186,11 +189,15 @@ export const useCar = (options: UseCarOptions) => {
 
     carShape.Release();
 
-    const carBody = bodyInterface.CreateBody(carBodySettings);
-
-    jolt.destroy(carBodySettings);
-    jolt.destroy(bodyPosition);
-    jolt.destroy(bodyRotation);
+    const carBody = (() => {
+      try {
+        return api.stateIds.createBody(carBodySettings, stateId, "useCar");
+      } finally {
+        jolt.destroy(carBodySettings);
+        jolt.destroy(bodyPosition);
+        jolt.destroy(bodyRotation);
+      }
+    })();
 
     bodyInterface.AddBody(carBody.GetID(), jolt.EActivation_Activate);
 
@@ -322,7 +329,7 @@ export const useCar = (options: UseCarOptions) => {
           : new jolt.VehicleCollisionTesterRay(layer);
 
     constraint.SetVehicleCollisionTester(collisionTester);
-    physicsSystem.AddConstraint(constraint);
+    const detach = api.constraints.attach(constraint, stateId, "useCar");
 
     const stepListener = new jolt.VehicleConstraintStepListener(constraint);
     physicsSystem.AddStepListener(stepListener);
@@ -528,7 +535,7 @@ export const useCar = (options: UseCarOptions) => {
       physicsSystem.RemoveStepListener(stepListener);
       jolt.destroy(stepListener);
 
-      physicsSystem.RemoveConstraint(constraint);
+      detach();
       constraint.Release();
 
       jolt.destroy(vehicleSettings);

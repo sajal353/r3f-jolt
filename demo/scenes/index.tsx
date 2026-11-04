@@ -72,6 +72,7 @@ import { StressTest } from "./systems/StressTest";
 import { Instancing } from "./systems/Instancing";
 import { ManualStepping } from "./systems/ManualStepping";
 import { Breakable } from "./systems/Breakable";
+import { SaveRestore } from "./systems/SaveRestore";
 
 export interface Scene {
   name: string;
@@ -970,6 +971,22 @@ export const categories: Category[] = [
             Nothing steps this world but the buttons. <code>updateLoop</code> of{" "}
             <code>"independent"</code> takes the world off the frame loop, and{" "}
             <code>api.step()</code> advances it exactly one step.
+          </>
+        ),
+      },
+      {
+        name: "Save & restore",
+        Component: SaveRestore,
+        hook: "saveState, restoreState, stateId",
+        updateLoop: "independent",
+        timeStep: 1 / 60,
+        hint: (
+          <>
+            Every step goes into a ten-second history — <b>drag the bar</b> to
+            scrub back through it, <b>play</b> to carry on from there. The
+            floor, each brick, the ball and its hinge carry a{" "}
+            <code>stateId</code>: a snapshot names everything by it, and{" "}
+            <code>saveState</code> refuses a world where anything lacks one.
           </>
         ),
       },

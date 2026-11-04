@@ -328,6 +328,7 @@ All of them take these options and return `[ref, api]`.
 | `allowSleeping`            | `true`                      |                                                    |
 | `onWake` / `onSleep`       | —                           | Delivered after the step, not from inside it       |
 | `floats`                   | `true`                      | `false` ignores [water](#water); a number scales its buoyancy |
+| `stateId`                  | —                           | The body's Jolt id, for [`saveState`](#save-and-restore) |
 | `onEnterWater` / `onExitWater` | —                       | Dry to wet and back, delivered after the step      |
 | `allowedDOFs`              | all six                     | Raw `EAllowedDOFs` bit mask                        |
 | `lockRotations` / `lockTranslations` | `false`           | Ergonomic wrappers over `allowedDOFs`              |
@@ -454,6 +455,7 @@ Vectors take a three `Vector3` or a `[x, y, z]` tuple; rotations take a `Quatern
 | `moveKinematic(p, r, deltaTime?)`       | The correct way to drive a kinematic body                 |
 | `moveTo(p, r, deltaTime?)`              | The same call, named for a grab loop                      |
 | `setScale(scale, updateMassProperties?)` | Replaces the collider with a scaled one                  |
+| `saveState()` / `restoreState(bytes)`   | This body alone; see [Save and restore](#save-and-restore) |
 | **Shape-specific** | Only on the hooks that can support them                                |
 | `setMaterial(m)` / `getMaterial()` | `usePlane` and `useConvex` — see below                 |
 | `getTriangleUserData(subShapeID)` | `useTrimesh`                                            |
@@ -736,6 +738,7 @@ usePointConstraint(null, plank, { point: [0, 4, 0], breakForce: 5000, onBreak })
 - **`debug: true`** draws the joint: body 1's centre → its anchor → body 2's anchor → body 2's centre. The middle segment has zero length while the constraint holds, so a visible line there is the solver failing to close the gap. `<PhysicsDebug />` draws every joint in the world the same way, in a single buffer — see [Debug rendering](#debug-rendering).
 - **`useFixedConstraint` returns a `TwoBodyConstraint`**, not a `FixedConstraint`. Jolt binds the settings but not the class; nothing is lost, since a weld has no runtime controls.
 - **Two joined bodies still collide with each other** unless you keep them apart or filter them. A hinge whose door overlaps its own frame is held open by the contact, not by the joint.
+- **`stateId`** names the joint for [`saveState`](#save-and-restore), and `saveState()` / `restoreState(bytes)` on the api save it alone: its accumulated impulses and motor state.
 
 ## Picking things up
 
@@ -835,7 +838,7 @@ Its weight presses on a dynamic body it stands on, under its centre, and never m
 Top-level options, all init-once:
 
 - `shape: { standing, crouching? }` replaces the capsules with compound children placed from the feet (the same children `useCompound` takes).
-- `innerBody: true | { standing, crouching? }` adds a kinematic body that follows the character, so raycasts, sensors and the solver see it. Without it a `CharacterVirtual` is invisible to the rest of the world. `innerBodyLayer` and `innerBodyIDOverride` set its layer and a fixed body ID.
+- `innerBody: true | { standing, crouching? }` adds a kinematic body that follows the character, so raycasts, sensors and the solver see it. Without it a `CharacterVirtual` is invisible to the rest of the world. `innerBodyLayer` and `innerBodyIDOverride` set its layer and a fixed body ID. `stateId` names the character for [`saveState`](#save-and-restore).
 - `collideWithCharacters` (on by default) adds the character to the world's character-vs-character registry, so characters block each other.
 - `collideWithSoftBodies` (off by default): the character walks through cloth, and its `innerBody` pushes the cloth aside. Jolt's character queries report contacts well short of a soft body, so a character colliding with one stops about a metre away.
 - `userData` is what the character reports itself as in other characters' contacts.
@@ -1249,9 +1252,42 @@ Inside these handlers: **do not** retain a `Body` or manifold past the call, **d
 
 `useJolt().contacts` exposes `subscribe(cb) => unsubscribe` and `getSnapshot()`, so you can drive `useSyncExternalStore` or a zustand store from contact activity without the library owning your state.
 
+## Save and restore
+
+`saveState()` returns the whole world as a `Uint8Array`: every body, contact, constraint and character, and the step clock. `restoreState(bytes)` puts it back, `timing.stepCount` included. Both are on `useJolt()`.
+
+```tsx
+const { saveState, restoreState } = useJolt();
+
+const checkpoint = saveState();
+// …later
+restoreState(checkpoint);
+```
+
+**Everything needs a `stateId`.** A snapshot names bodies by their Jolt id, and Jolt hands ids out in whatever order things mount, so a world mounted in a different order could not take the snapshot. A `stateId` makes the id yours.
+
+| Hook | What its `stateId` names |
+| --- | --- |
+| Body hooks, `useSoftBody`, `useCar` | The body; `useCar`'s vehicle constraint too |
+| `useInstancedBodies` | Instance `i` is body `stateId + i` |
+| `useRagdoll` | Part `i` is body `stateId + i`; the joint into part `i` is constraint `stateId + i` |
+| Constraint hooks | The constraint. Numbered apart from bodies |
+| `useCharacter` | The character, and its inner body unless `innerBodyIDOverride` says otherwise |
+
+Body ids run from 0 to `maxBodies - 1` and are unique per world; constraints and characters each have their own numbering. `saveState` throws, naming the hooks, if anything lacks one; a clash throws at mount, naming whoever holds the id; `restoreState` throws, listing the ids that differ, if the world does not hold exactly what the snapshot does. Constraints with a `stateId` are also solved in `stateId` order, so two worlds mounted differently simulate a snapshot alike.
+
+`saveState({ body, constraint, character })` saves only what the filters pick, each a function of `stateId`; a kind with no filter is left out. A filtered snapshot carries no contacts, gravity or step clock, and restores into any world that holds at least its ids. Body, soft-body, constraint and character apis each have `saveState()` / `restoreState(bytes)` for themselves alone.
+
+`isSameState(a, b)` compares two snapshots byte for byte, which is the determinism check: the same scene run twice to the same step gives the same bytes.
+
+- **The same build and platform only.** Jolt is deterministic across runs of one build; a different wasm build, browser or CPU is not guaranteed to round floats alike.
+- **Ragdolls and soft bodies must be built identically** on both sides, from the same model and options.
+- **Only the world is saved.** State your own code keeps, and what the library has already reported through contact, sensor and water events, is not rewound; events after a restore follow the restored world.
+- A character is moved by its `update` call, not by the step, so it replays only if your code calls `update` the same way.
+
 ## `useJolt`
 
-Returns the physics context: `Jolt` (the module), `joltInterface`, `physicsSystem`, `bodyInterface`, `layers`, `groups`, `objectLayer(group, mask)`, `contacts`, `activation`, `constraints`, `steps`, `temps`, `timing`, [`step(delta?)`](#stepping-it-yourself), `debug` and `state`. Use it to reach anything the hooks do not wrap.
+Returns the physics context: `Jolt` (the module), `joltInterface`, `physicsSystem`, `bodyInterface`, `layers`, `groups`, `objectLayer(group, mask)`, `contacts`, `activation`, `constraints`, `steps`, `temps`, `timing`, [`step(delta?)`](#stepping-it-yourself), [`saveState(filter?)` / `restoreState(bytes)`](#save-and-restore), `stateIds`, `snapshots`, `debug` and `state`. Use it to reach anything the hooks do not wrap.
 
 ## State management
 
@@ -1353,7 +1389,7 @@ pnpm install
 pnpm dev
 ```
 
-66 scenes in seven categories, one per hook or feature:
+67 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
@@ -1363,7 +1399,7 @@ pnpm dev
 | **Constraints**  | all 8 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
-| **Systems**      | character · character contacts · water · cloth · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
+| **Systems**      | character · character contacts · water · cloth · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · save & restore · breakable objects |
 
 Toolbar toggles for `<PhysicsDebug />`, `<Physics debug>`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 

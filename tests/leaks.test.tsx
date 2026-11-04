@@ -667,9 +667,21 @@ const RAGDOLL_MODES: RagdollMode[] = [
  * own scratch on the Jolt side, so a mode that forgot to free one would show
  * here.
  */
-const Ragdoll = ({ scene, mixer }: { scene: Object3D; mixer: AnimationMixer }) => {
+const Ragdoll = ({
+  scene,
+  mixer,
+  stateId,
+}: {
+  scene: Object3D;
+  mixer: AnimationMixer;
+  stateId?: number;
+}) => {
   const model = useCharacterModel(scene, { debug: true });
-  const [ragdoll] = useRagdoll(model, { mixer, kinematicBones: ["pelvis"] });
+  const [ragdoll] = useRagdoll(model, {
+    mixer,
+    kinematicBones: ["pelvis"],
+    stateId,
+  });
   const frame = useRef(0);
 
   useFrame(function cycleModes() {
@@ -679,6 +691,50 @@ const Ragdoll = ({ scene, mixer }: { scene: Object3D; mixer: AnimationMixer }) =
     const turn = frame.current / 10;
     if (turn === RAGDOLL_MODES.length + 1) ragdoll.blendToAnimation(0.1);
     else ragdoll.setMode(RAGDOLL_MODES[turn % RAGDOLL_MODES.length]);
+  });
+
+  return null;
+};
+
+/**
+ * Bodies and joints on `stateId`s, saved and restored one at a time: the
+ * registries, the recorders and the hinge's re-adding into order.
+ */
+const Stated = () => {
+  const [, first] = useBox({
+    stateId: 10,
+    size: [1, 1, 1],
+    position: [0, 2, 0],
+    motionType: "dynamic",
+  });
+  const [, second] = useBox({
+    stateId: 11,
+    size: [1, 1, 1],
+    position: [1.2, 2, 0],
+    motionType: "dynamic",
+  });
+  const [hinge] = useHingeConstraint(first, second, {
+    stateId: 5,
+    point: [0.6, 2, 0],
+    hingeAxis: [0, 0, 1],
+    normalAxis: [1, 0, 0],
+  });
+  useDistanceConstraint(second, null, { stateId: 2, point2: [1.2, 4, 0] });
+  useInstancedBodies({
+    stateId: 20,
+    count: 4,
+    collider: { type: "sphere", radius: 0.2 },
+    transforms: (index) => ({ position: [-2, 1 + index, 0] }),
+  });
+  const [, cloth] = useSoftBody(clothGeometry, { stateId: 30, position: [3, 2, 0] });
+  const frame = useRef(0);
+
+  useFrame(function saveAndRestore() {
+    frame.current += 1;
+    if (frame.current % 10 !== 0) return;
+    first?.restoreState(first.saveState());
+    hinge?.restoreState(hinge.saveState());
+    cloth?.restoreState(cloth.saveState());
   });
 
   return null;
@@ -786,6 +842,23 @@ describe("mount/unmount leak checks", () => {
       <Ragdoll scene={scene} mixer={mixer} />,
       80,
     );
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useRagdoll on a stateId leaves the heap flat across cycles", async () => {
+    const { scene, animations } = await loadMannequin();
+    const mixer = playAt(scene, animations, "Walk_Loop", 0);
+    const { baseline, after } = await cycles(
+      <Ragdoll scene={scene} mixer={mixer} stateId={200} />,
+      40,
+    );
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("stateIds and per-object snapshots leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<Stated />, 60);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });

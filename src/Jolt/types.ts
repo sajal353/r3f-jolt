@@ -1,6 +1,8 @@
 import type initJolt from "jolt-physics/wasm-compat";
 import type Jolt from "jolt-physics";
 import type { Quaternion, Vector3 } from "three";
+import type { StateIdRegistry } from "./internal/stateIds";
+import type { Snapshots } from "./internal/snapshot";
 
 export type JoltModule = Awaited<ReturnType<typeof initJolt>>;
 
@@ -180,6 +182,12 @@ export interface PhysicsTiming {
    */
   alpha: number;
   interpolate: boolean;
+  /**
+   * Counts `restoreState` calls. Anything holding on to a body's last pose —
+   * interpolation, a sleeping body's skipped readback — reads it again when
+   * this changes.
+   */
+  restores: number;
 }
 
 /**
@@ -311,7 +319,33 @@ export interface ConstraintRegistry {
   add: (entry: ConstraintEntry) => () => void;
   forEach: (visit: (entry: ConstraintEntry) => void) => void;
   size: () => number;
+  /** Adds the constraint to the world; the returned function takes it out. */
+  attach: (
+    constraint: Jolt.Constraint,
+    stateId: number | undefined,
+    hook: string,
+  ) => () => void;
+  /** Puts constraints with a `stateId` back in `stateId` order, if needed. */
+  order: () => void;
+  attached: () => readonly AttachedConstraint[];
   destroy: () => void;
+}
+
+export interface AttachedConstraint {
+  constraint: Jolt.Constraint;
+  stateId: number | undefined;
+  hook: string;
+}
+
+/**
+ * Picks what a filtered `saveState` holds, by `stateId`. A kind with no
+ * function is left out, and contacts, gravity and the step clock only travel
+ * in a full snapshot.
+ */
+export interface StateFilter {
+  body?: (stateId: number) => boolean;
+  constraint?: (stateId: number) => boolean;
+  character?: (stateId: number) => boolean;
 }
 
 export interface JoltApi {
@@ -341,6 +375,20 @@ export interface JoltApi {
   /** Every `<WaterVolume>` in the world, and what each body is floating in. */
   water: WaterRegistry;
   timing: PhysicsTiming;
+  stateIds: StateIdRegistry;
+  snapshots: Snapshots;
+  /**
+   * The whole world as bytes: every body, contact, constraint and character,
+   * and the step clock. Needs a `stateId` on each of them, and throws naming
+   * the ones without. With a `filter`, only what it selects.
+   */
+  saveState: (filter?: StateFilter) => Uint8Array;
+  /**
+   * Puts the world back as `saveState` found it, step clock included. Throws,
+   * listing the differences, unless the world holds exactly the `stateId`s
+   * the snapshot does — or, for a filtered one, at least those.
+   */
+  restoreState: (bytes: Uint8Array) => void;
   /**
    * Advances the world by hand: the same accumulator, step callbacks and event
    * flushes a frame runs. Meant for `updateLoop: "independent"`, where nothing

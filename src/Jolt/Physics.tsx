@@ -7,6 +7,11 @@ import { createActivationRegistry } from "./internal/activation";
 import { createConstraintRegistry } from "./internal/constraints";
 import { createContactRegistry } from "./internal/contacts";
 import { createWaterRegistry } from "./internal/water";
+import {
+  createStateIdRegistry,
+  type StateIdRegistry,
+} from "./internal/stateIds";
+import { createSnapshots, type Snapshots } from "./internal/snapshot";
 import { createStepRegistry } from "./internal/steps";
 import { createTemps } from "./internal/temps";
 import { useHandlerRef } from "./internal/useHandlerRef";
@@ -21,6 +26,7 @@ import type {
   JoltInit,
   JoltModule,
   PhysicsTiming,
+  StateFilter,
   Temps,
   Vec3Tuple,
 } from "./types";
@@ -137,6 +143,7 @@ export const Physics = ({
     stepDelta: typeof timeStep === "number" ? timeStep : 1 / 60,
     stepCount: 0,
     elapsed: 0,
+    restores: 0,
     alpha: 0,
     interpolate: false,
   });
@@ -176,6 +183,7 @@ export const Physics = ({
 
       timing.stepDelta = stepDelta;
       world.steps.run("before", stepDelta, index);
+      world.constraints.order();
       world.joltInterface.Step(stepDelta, collisionSteps);
       timing.stepCount = index + 1;
       timing.elapsed += stepDelta;
@@ -232,6 +240,8 @@ export const Physics = ({
       temps: Temps;
       characters: Jolt.CharacterVsCharacterCollisionSimple;
       water: ReturnType<typeof createWaterRegistry>;
+      stateIds: StateIdRegistry;
+      snapshots: Snapshots;
       state: { disposed: boolean; destroyed: boolean };
     } | null = null;
 
@@ -291,7 +301,15 @@ export const Physics = ({
       const steps = createStepRegistry();
       const contacts = createContactRegistry(jolt, physicsSystem, steps);
       const activation = createActivationRegistry(jolt, physicsSystem);
-      const constraints = createConstraintRegistry();
+      const constraints = createConstraintRegistry(physicsSystem);
+      const stateIds = createStateIdRegistry(jolt, physicsSystem);
+      const snapshots = createSnapshots(
+        jolt,
+        physicsSystem,
+        stateIds,
+        constraints,
+        timingRef.current,
+      );
       const temps = createTemps(jolt);
       const characters = new jolt.CharacterVsCharacterCollisionSimple();
       const water = createWaterRegistry(
@@ -314,6 +332,8 @@ export const Physics = ({
         temps,
         characters,
         water,
+        stateIds,
+        snapshots,
         state,
       };
 
@@ -326,6 +346,8 @@ export const Physics = ({
         steps.destroy();
         temps.destroy();
         water.destroy();
+        snapshots.destroy();
+        stateIds.destroy();
         jolt.destroy(characters);
         jolt.destroy(joltInterface);
         created = null;
@@ -354,6 +376,20 @@ export const Physics = ({
         characters,
         water,
         timing: timingRef.current,
+        stateIds,
+        snapshots,
+        saveState: (filter?: StateFilter) => {
+          if (state.disposed) {
+            throw new Error("r3f-jolt: saveState on a world that is gone.");
+          }
+          return snapshots.save(filter);
+        },
+        restoreState: (bytes: Uint8Array) => {
+          if (state.disposed) {
+            throw new Error("r3f-jolt: restoreState on a world that is gone.");
+          }
+          snapshots.restore(bytes);
+        },
         step: (delta?: number) => advanceRef.current(delta),
         get debug() {
           return debugRef.current;
@@ -381,6 +417,8 @@ export const Physics = ({
           world.steps.destroy();
           world.temps.destroy();
           world.water.destroy();
+          world.snapshots.destroy();
+          world.stateIds.destroy();
           world.jolt.destroy(world.characters);
           world.jolt.destroy(world.joltInterface);
         });
