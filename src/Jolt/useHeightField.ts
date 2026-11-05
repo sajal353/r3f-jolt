@@ -11,6 +11,7 @@ import {
   shapeToGeometry,
 } from "./internal/shapeToGeometry";
 import { writeHeightSamples } from "./internal/heightFieldSamples";
+import { readBounds, unionBounds, wakeBodiesIn } from "./internal/wakeBodies";
 import type { HeightFieldSamples } from "./internal/heightFieldSamples";
 import type { Vec3Tuple } from "./types";
 
@@ -79,8 +80,9 @@ export interface HeightFieldExtras {
   getHeights: (x: number, z: number, sizeX: number, sizeZ: number) => Float32Array;
   /**
    * Writes a patch back and re-triangulates `api.geometry` in place, so the
-   * mesh and the collider cannot drift. Same block-alignment rule as
-   * `getHeights`, and the same clamping to `range` as the build.
+   * mesh and the collider cannot drift, and wakes whatever sits on it. Same
+   * block-alignment rule as `getHeights`, and the same clamping to `range` as
+   * the build.
    */
   setHeights: (
     x: number,
@@ -94,6 +96,25 @@ export interface HeightFieldExtras {
   /** Identity tokens, in `materialIndices` order. Empty without them. */
   materials: Jolt.PhysicsMaterial[];
 }
+
+interface Region {
+  x: number;
+  z: number;
+  sizeX: number;
+  sizeZ: number;
+}
+
+const mergeRegions = (first: Region, second: Region): Region => {
+  const x = Math.min(first.x, second.x);
+  const z = Math.min(first.z, second.z);
+
+  return {
+    x,
+    z,
+    sizeX: Math.max(first.x + first.sizeX, second.x + second.sizeX) - x,
+    sizeZ: Math.max(first.z + first.sizeZ, second.z + second.sizeZ) - z,
+  };
+};
 
 const POWERS_OF_TWO = [2, 4, 8];
 
@@ -162,6 +183,8 @@ const checkRegion = (
  */
 export const useHeightField = (options: UseHeightFieldOptions) => {
   const {
+    stateId,
+    rotation,
     heights,
     sampleCount,
     offset = [0, 0, 0],
@@ -270,13 +293,17 @@ export const useHeightField = (options: UseHeightFieldOptions) => {
     "heightField",
     ({
       jolt,
+      body,
       shape,
       geometry,
       api,
       usable,
+      onDispose,
     }: BodyApiContext<Jolt.HeightFieldShape>): HeightFieldExtras => {
       const noCollisionValue =
         jolt.HeightFieldShapeConstantValues.prototype.cNoCollisionValue;
+      const { bodyInterface } = api;
+      const samples = shape.GetSampleCount();
 
       // One scratch buffer per call rather than one held for the body's life:
       // deformation happens on impact, not per frame.
@@ -296,6 +323,175 @@ export const useHeightField = (options: UseHeightFieldOptions) => {
         return value;
       };
 
+      const readRegion = ({ x, z, sizeX, sizeZ }: Region) =>
+        withBuffer(sizeX * sizeZ, (buffer, view) => {
+          shape.GetHeights(x, z, sizeX, sizeZ, buffer.data(), sizeX);
+          return view.slice();
+        });
+
+      const writeRegion = (
+        { x, z, sizeX, sizeZ }: Region,
+        values: ArrayLike<number>,
+      ) => {
+        withBuffer(sizeX * sizeZ, (buffer, view) => {
+          for (let i = 0; i < values.length; i += 1) {
+            const height = values[i];
+            view[i] = Number.isNaN(height) ? noCollisionValue : height;
+          }
+
+          shape.SetHeights(
+            x,
+            z,
+            sizeX,
+            sizeZ,
+            buffer.data(),
+            sizeX,
+            api.joltInterface.GetTempAllocator(),
+          );
+        });
+      };
+
+      /**
+       * `SetHeights` changes the shape and nothing that has read it: the body's
+       * bounds in the broadphase still end at the old heights, so a new hill
+       * collides with nothing above them, and contacts cached against the old
+       * surface hold a body in the air.
+       */
+      const notifyChanged = () => {
+        bodyInterface.NotifyShapeChanged(
+          body.GetID(),
+          body.GetShape().GetCenterOfMass(),
+          false,
+          jolt.EActivation_DontActivate,
+        );
+        refillShapeGeometry(jolt, shape, geometry);
+      };
+
+      /** A rotated or scaled field wakes everything over it, not just the patch. */
+      const isPlain = () =>
+        !rotation && jolt.getPointer(body.GetShape()) === jolt.getPointer(shape);
+
+      const wakeOver = (
+        { x, z, sizeX, sizeZ }: Region,
+        before: ReturnType<typeof readBounds>,
+      ) => {
+        const box = unionBounds(before, readBounds(body));
+
+        if (isPlain()) {
+          const origin = body.GetPosition();
+          const left = origin.GetX() + offset[0];
+          const back = origin.GetZ() + offset[2];
+
+          // A step further than the samples written: the triangles either side
+          // of them moved as well.
+          box.min[0] = left + (x - 1) * sampleScale[0];
+          box.max[0] = left + (x + sizeX) * sampleScale[0];
+          box.min[2] = back + (z - 1) * sampleScale[2];
+          box.max[2] = back + (z + sizeZ) * sampleScale[2];
+        }
+
+        wakeBodiesIn(jolt, bodyInterface, box);
+      };
+
+      // What a snapshot needs on top of Jolt's stream, which knows nothing of a
+      // shape's contents. Only a field with a `stateId` can be in one, so only
+      // that one pays for keeping its first heights.
+      const tracked = stateId !== undefined;
+      const whole: Region = { x: 0, z: 0, sizeX: samples, sizeZ: samples };
+      let pristine: Float32Array | null = null;
+      let edited: Region | null = null;
+      let savedValues: number[] | null = null;
+
+      const noteEdit = (region: Region) => {
+        if (!tracked) return;
+        pristine ??= readRegion(whole);
+        edited = edited ? mergeRegions(edited, region) : region;
+        savedValues = null;
+      };
+
+      const saveHeights = () => {
+        if (!edited) return [];
+
+        savedValues ??= [
+          edited.x,
+          edited.z,
+          edited.sizeX,
+          edited.sizeZ,
+          ...readRegion(edited),
+        ];
+        return savedValues;
+      };
+
+      const restoreHeights = (values: number[]) => {
+        const current = saveHeights();
+        const unchanged =
+          current.length === values.length &&
+          current.every((value, index) => value === values[index]);
+        if (unchanged) return;
+
+        const firstHeights = pristine ?? readRegion(whole);
+        pristine = firstHeights;
+
+        const saved: Region | null =
+          values.length > 0
+            ? {
+                x: values[0],
+                z: values[1],
+                sizeX: values[2],
+                sizeZ: values[3],
+              }
+            : null;
+
+        // Whatever was edited since has to go back too, so it starts from the
+        // first heights and lays the saved patch over them.
+        const region =
+          edited && saved ? mergeRegions(edited, saved) : (edited ?? saved);
+
+        if (region) {
+          const merged = new Float32Array(region.sizeX * region.sizeZ);
+
+          for (let row = 0; row < region.sizeZ; row += 1) {
+            for (let column = 0; column < region.sizeX; column += 1) {
+              const sampleX = region.x + column;
+              const sampleZ = region.z + row;
+              const inSaved =
+                saved &&
+                sampleX >= saved.x &&
+                sampleX < saved.x + saved.sizeX &&
+                sampleZ >= saved.z &&
+                sampleZ < saved.z + saved.sizeZ;
+
+              merged[row * region.sizeX + column] =
+                saved && inSaved
+                  ? values[
+                      4 +
+                        (sampleZ - saved.z) * saved.sizeX +
+                        (sampleX - saved.x)
+                    ]
+                  : firstHeights[sampleZ * samples + sampleX];
+            }
+          }
+
+          writeRegion(region, merged);
+          notifyChanged();
+        }
+
+        edited = saved;
+        savedValues = saved ? values : null;
+      };
+
+      if (tracked) {
+        onDispose(
+          api.snapshots.keep({
+            tag: "shape",
+            owner: "body",
+            id: body.GetID().GetIndexAndSequenceNumber(),
+            save: saveHeights,
+            restore: restoreHeights,
+          }),
+        );
+      }
+
       return {
         getMinHeight: () => shape.GetMinHeightValue(),
         getMaxHeight: () => shape.GetMaxHeightValue(),
@@ -311,14 +507,11 @@ export const useHeightField = (options: UseHeightFieldOptions) => {
             sizeX,
             sizeZ,
             shape.GetBlockSize(),
-            shape.GetSampleCount(),
+            samples,
             "getHeights",
           );
 
-          return withBuffer(sizeX * sizeZ, (buffer, view) => {
-            shape.GetHeights(x, z, sizeX, sizeZ, buffer.data(), sizeX);
-            return view.slice();
-          });
+          return readRegion({ x, z, sizeX, sizeZ });
         },
 
         setHeights: (
@@ -336,7 +529,7 @@ export const useHeightField = (options: UseHeightFieldOptions) => {
             sizeX,
             sizeZ,
             shape.GetBlockSize(),
-            shape.GetSampleCount(),
+            samples,
             "setHeights",
           );
 
@@ -347,24 +540,13 @@ export const useHeightField = (options: UseHeightFieldOptions) => {
             );
           }
 
-          withBuffer(sizeX * sizeZ, (buffer, view) => {
-            for (let i = 0; i < values.length; i += 1) {
-              const height = values[i];
-              view[i] = Number.isNaN(height) ? noCollisionValue : height;
-            }
+          const region = { x, z, sizeX, sizeZ };
+          const before = readBounds(body);
 
-            shape.SetHeights(
-              x,
-              z,
-              sizeX,
-              sizeZ,
-              buffer.data(),
-              sizeX,
-              api.joltInterface.GetTempAllocator(),
-            );
-          });
-
-          refillShapeGeometry(jolt, shape, geometry);
+          noteEdit(region);
+          writeRegion(region, values);
+          notifyChanged();
+          wakeOver(region, before);
         },
 
         noCollisionValue,

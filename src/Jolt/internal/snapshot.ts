@@ -38,7 +38,14 @@ export interface SideState {
   restore: (values: number[]) => void;
 }
 
-const SIDE_TAGS = { character: 1, car: 2, swimming: 3, sensor: 4, load: 5 };
+const SIDE_TAGS = {
+  character: 1,
+  car: 2,
+  swimming: 3,
+  sensor: 4,
+  load: 5,
+  shape: 6,
+};
 
 interface SavedSide {
   tag: number;

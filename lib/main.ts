@@ -21,6 +21,11 @@ export {
   type CompoundChild,
 } from "@/Jolt/useCompound";
 export {
+  useMutableCompound,
+  type UseMutableCompoundOptions,
+  type MutableCompoundExtras,
+} from "@/Jolt/useMutableCompound";
+export {
   useTrimesh,
   type UseTrimeshOptions,
   type TrimeshSource,

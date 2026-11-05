@@ -227,12 +227,12 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 
 ### Destruction & dynamic worlds
 
-- [ ] `useMutableCompound` — `MutableCompoundShape.AddShape` / `RemoveShape` / `ModifyShape` / `ModifyShapes` at runtime plus `AdjustCenterOfMass()`: the breakable-crate primitive
-- [ ] Deformable terrain — `HeightFieldShape.SetHeights(x, y, sx, sy, heights, stride, tempAllocator)` for craters and digging, `GetHeights` for readback, with matching three.js geometry updates
+- [x] `useMutableCompound` — `MutableCompoundShape.AddShape` / `RemoveShape` / `ModifyShape` / `ModifyShapes` at runtime plus `AdjustCenterOfMass()`: the breakable-crate primitive. **Amended:** the bindings have no `Constraint::NotifyShapeChanged`, so `adjustCenterOfMass` warns about joints on the body rather than carrying them across
+- [x] Deformable terrain — `HeightFieldShape.SetHeights(x, y, sx, sy, heights, stride, tempAllocator)` for craters and digging, `GetHeights` for readback, with matching three.js geometry updates. **Amended:** the api shipped in 0.3.0 without notifying the body, which 0.5.0 fixes; this is Shapes › Craters
 - [x] Rails and platforms — `PathConstraint` + `PathConstraintPathHermite.AddPoint(position, tangent, normal)` for elevators, moving platforms and coasters; `PathConstraintPathJS` for procedural paths; `SetIsLooping`. **Amended:** `usePathConstraint`. The bindings give `PathConstraintPathHermite` no constructor, so `points` runs its spline through `PathConstraintPathJS`, searching near the last fraction where Jolt searches the whole path
 - [x] Machinery — `GearConstraint`, `RackAndPinionConstraint`, `PulleyConstraint`. **Amended:** `useGearConstraint`, `useRackAndPinionConstraint`, `usePulleyConstraint`
 - [x] Motorised constraints — doors, cranes, turrets, drawbridges via `MotorSettings` + `SetMotorState`. **Amended:** the motors shipped in 0.3.0; this is Constraints › Motorised, with the door in Constraints › Motors
-- [ ] Trigger volumes built on 0.2.1 sensors + the contact registry
+- [x] Trigger volumes built on 0.2.1 sensors + the contact registry. **Amended:** shipped in 0.3.0 as `useSensor`
 
 ### Determinism, save/load, netcode
 
@@ -250,8 +250,8 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 ### Verification
 
 - [ ] Test tank and motorcycle mount/unmount teardown parity with `useCar`
-- [ ] Test `MutableCompoundShape` add/remove/modify keeps mass properties sane after `AdjustCenterOfMass()`
-- [ ] Test heightfield `SetHeights` updates both physics and render geometry
+- [x] Test `MutableCompoundShape` add/remove/modify keeps mass properties sane after `AdjustCenterOfMass()`
+- [x] Test heightfield `SetHeights` updates both physics and render geometry
 - [x] CI determinism test: identical scene run twice, `StateRecorderImpl.IsEqual` passes. **Amended:** `isSameState` on the bytes
 - [x] Test snapshot restore with bodies created in a different mount order fails loudly. **Amended:** with `stateId`s it restores exactly and simulates alike; without them `saveState` refuses, and a snapshot of a different set of ids is refused with the differences listed
 

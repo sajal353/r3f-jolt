@@ -295,7 +295,7 @@ Modules are cached per initialiser, so mounting several `<Physics>` trees instan
 
 ## Body hooks
 
-`useBox` · `useSphere` · `useCapsule` · `useCylinder` · `useTaperedCapsule` · `useTaperedCylinder` · `useConvex` · `useCompound` · `useTrimesh` · `usePlane` · `useHeightField` · `useEmpty` · `useAutoCollider`
+`useBox` · `useSphere` · `useCapsule` · `useCylinder` · `useTaperedCapsule` · `useTaperedCylinder` · `useConvex` · `useCompound` · `useMutableCompound` · `useTrimesh` · `usePlane` · `useHeightField` · `useEmpty` · `useAutoCollider`
 
 Plus [`useInstancedBodies`](#useinstancedbodies--one-mesh-one-shape-many-bodies) for many bodies of one kind.
 
@@ -368,6 +368,7 @@ Jolt has **no centre-of-mass override**. That comes from the shape, so shift it 
 | `useTaperedCylinder`| `topRadius`, `bottomRadius`, `height`, `convexRadius?`, `renderSegments?` |
 | `useConvex`         | `vertices: number[][]`                           |
 | `useCompound`       | `shapes: CompoundChild[]`                        |
+| `useMutableCompound`| `shapes: CompoundChild[]`                        |
 | `useTrimesh`        | `mesh: BufferGeometry \| { position, index? }`, `buildQuality?`, `triangleUserData?` |
 | `usePlane`          | `normal?`, `constant?`, `point?`, `halfExtent?`, `renderSize?`, `renderSegments?` |
 | `useHeightField`    | `heights`, `sampleCount`, `offset?`, `sampleScale?`, `blockSize?`, `bitsPerSample?`, `range?`, `materialIndices?` |
@@ -378,6 +379,37 @@ Jolt has **no centre-of-mass override**. That comes from the shape, so shift it 
 `useTrimesh` accepts a `BufferGeometry` directly and derives the index when the geometry is non-indexed. **A trimesh body is always static** — Jolt mesh shapes cannot be dynamic.
 
 `useCompound` children are `{ type, position, rotation?, … }` where `type` is `box`, `sphere`, `capsule`, `cylinder`, `taperedCapsule` or `convex`. An invalid child is skipped with a console error and the rest of the compound still builds.
+
+#### `useMutableCompound` — children that change
+
+```tsx
+const [ref, crate] = useMutableCompound({
+  shapes: planks,
+  position: [0, 2, 0],
+  motionType: "dynamic",
+});
+
+crate.removeShape(index);
+crate.adjustCenterOfMass();
+
+<mesh ref={ref} geometry={crate.geometry} />;
+```
+
+| Method | |
+| --- | --- |
+| `addShape(child, index?)` | Returns the child's index, or -1 for a child that could not be built |
+| `removeShape(index)` | Later children move down one. Refuses the last child of a body that moves, which would have no mass |
+| `modifyShape(index, position, rotation?, child?)` | Moves a child, and swaps what it is when given `child` |
+| `modifyShapes(start, positions, rotations)` | Moves a run of children in one go |
+| `adjustCenterOfMass()` | Makes the body turn about the middle of what it now holds |
+| `getShapeCount()` / `getShape(index)` | A child's `position` and `rotation` |
+
+- Positions stay in the frame `shapes` was written in, whatever the centre of mass does. The body does not move when the centre of mass does, and a spinning body's children keep their velocities.
+- **Nothing moves the centre of mass but `adjustCenterOfMass`**, so call it after a change big enough to feel. A body that lost one side keeps turning about a point it no longer has until you do.
+- Mass follows the children. `mass` scales with what is left: 8 kg across eight equal children is 7 kg with one gone. `massProperties` stays as given.
+- `api.geometry` is rebuilt in place on every change, and whatever rested on a removed child wakes and falls.
+- **A joint on the body moves with the centre of mass**, because Jolt's JS bindings cannot tell a constraint it changed. `adjustCenterOfMass` warns; rebuild the joint with `key`.
+- It is slower to collide with than `useCompound`, so use it only when the children really do change.
 
 `useTaperedCylinder` is a cylinder with two radii, and with one of them at zero it is a cone. Flat ends are the whole difference from `useTaperedCapsule`: this stands where a tapered capsule rolls.
 
@@ -421,7 +453,8 @@ Worth knowing:
 - **`range` is the span the field can *store*.** It defaults to the span of the samples you gave it, which means `setHeights` can never push a sample outside the terrain's own extremes — silently clamped, not warned. Widen it now for terrain that will be deformed later.
 - **`getHeights` and `setHeights` work in whole blocks.** `x`, `z`, `sizeX` and `sizeZ` must all be multiples of `blockSize`. Jolt only asserts on this in a debug build; in a release build a misaligned region reads past the end of the heap, so the hook refuses instead.
 - An 8-bit `bitsPerSample` over a wide `range` is 256 discrete steps however precise the samples were, and terrain terraces visibly when the two are mismatched.
-- Render geometry is the collider's own triangulation, and `setHeights` regenerates it in place, so the mesh and the physics cannot drift apart.
+- Render geometry is the collider's own triangulation, and `setHeights` regenerates it in place, so the mesh and the physics cannot drift apart. It also wakes whatever sits on the patch, so a body falls into a crater dug beneath it.
+- `setHeights` re-quantises every block it touches and the blocks around them, so reading a patch and writing it back moves it slightly: up to 1.2 cm on a test terrain with a 16 m `range` at 8 bits, and it does not settle with more passes.
 
 ### Returned api
 
@@ -1365,6 +1398,11 @@ Body ids run from 0 to `maxBodies - 1` and are unique per world; constraints and
 - A character is moved by its `update` call, not by the step, so it replays only if your code calls `update` the same way.
 - **A ragdoll driven by animation and skinned cloth do not replay**, because they read the animation at frame rate. A passive ragdoll does.
 
+Shapes that change are saved too, when the hook has a `stateId`:
+
+- **`useMutableCompound`** restores to the byte, children and centre of mass and all. It can only bring back children it has held, so a fresh mount refuses a snapshot holding one added later, unless the same child has been added since.
+- **`useHeightField`** adds 8 bytes per sample in the area `setHeights` has touched. A restore that has to write heights is only exact to `setHeights`' quantisation, about 1 cm, so a replay across a dig is close rather than byte-identical. With nothing dug since the snapshot it writes nothing and stays exact.
+
 ## Rollback
 
 > **Experimental.** `useRollback`, `api.replay`, `timing.resimulating` and `updateLoop: "fixed"` may change in a minor release.
@@ -1515,11 +1553,11 @@ pnpm install
 pnpm dev
 ```
 
-71 scenes in seven categories, one per hook or feature:
+72 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
-| **Shapes**       | all 12 shape hooks, one scene each · terrain from all three `heights` forms · per-triangle surface types |
+| **Shapes**       | all 12 shape hooks, one scene each · craters · terrain from all three `heights` forms · per-triangle surface types |
 | **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · collision groups · auto colliders · motion quality |
 | **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale · conveyor    |
 | **Constraints**  | all 12 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints · coaster and lift · gear train, rack, pulley · crane, turret, drawbridge |

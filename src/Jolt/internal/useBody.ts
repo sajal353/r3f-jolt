@@ -292,6 +292,8 @@ export interface BodyApiContext<S extends Jolt.Shape> {
   usable: () => boolean;
   /** Wake the body after a change that should have a visible effect. */
   activate: () => void;
+  /** Runs as the body goes, ahead of the body itself. */
+  onDispose: (release: () => void) => void;
 }
 
 export const finishShape = <S extends Jolt.Shape>(shape: S): S => {
@@ -1082,6 +1084,8 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
       },
     };
 
+    const disposers: (() => void)[] = [];
+
     const published = {
       ...bodyApiBase,
       ...extras?.({
@@ -1092,6 +1096,7 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
         geometry,
         usable,
         activate: () => bodyInterface.ActivateBody(id),
+        onDispose: (release: () => void) => disposers.push(release),
       }),
     };
 
@@ -1107,6 +1112,8 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
     return () => {
       aliveRef.current = false;
       setBodyApi(undefined);
+
+      for (const release of disposers) release();
 
       debugView.hide();
       debugViewRef.current = null;

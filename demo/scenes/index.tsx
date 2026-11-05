@@ -11,6 +11,7 @@ import { Trimesh } from "./shapes/Trimesh";
 import { Plane } from "./shapes/Plane";
 import { HeightField } from "./shapes/HeightField";
 import { TerrainSources } from "./shapes/TerrainSources";
+import { Craters } from "./shapes/Craters";
 import { TaperedCylinder } from "./shapes/TaperedCylinder";
 import { Empty } from "./shapes/Empty";
 import { SurfaceTypes } from "./shapes/SurfaceTypes";
@@ -216,6 +217,19 @@ export const categories: Category[] = [
             drops through a <b>hole</b> — a <code>null</code> sample.{" "}
             <i>raise a hill</i> is <code>setHeights</code>, which only works
             because <code>range</code> reserved headroom at build time.
+          </>
+        ),
+      },
+      {
+        name: "Craters",
+        Component: Craters,
+        hook: "useHeightField",
+        hint: (
+          <>
+            <b>Click the ground</b> to drop a shell. Where it lands,{" "}
+            <code>getHeights</code> reads the patch and <code>setHeights</code>{" "}
+            digs it out in whole blocks. The balls have gone to sleep and wake
+            when the ground goes from under them.
           </>
         ),
       },
@@ -1050,18 +1064,21 @@ export const categories: Category[] = [
       {
         name: "Breakable objects",
         Component: Breakable,
-        hook: "useBodyContacts, useConvex",
+        hook: "useMutableCompound, useBodyContacts",
         hint: (
           <>
             <b>Click to fire.</b> A dry-stacked brick wall — no joints, just
-            friction — splitting two generations deep to a ceiling of{" "}
-            <b>200 chunks</b>. A piece goes when the estimated impulse would
-            change <i>its own</i> velocity by 0.8 m/s: <code>impulse</code> is
-            momentum, so only a mass-relative threshold breaks a brick and its
-            chips alike. The split runs from <code>useBodyContacts</code>, whose
-            handler fires <b>between steps</b> — building bodies inside
-            Jolt&apos;s own contact callback is illegal. <code>impulse</code> is
-            an estimate, not a number Jolt reported.
+            friction. Each brick is cut up <b>before the first render</b> and
+            held together as one <code>useMutableCompound</code>. A knock chips
+            it with <code>removeShape</code> and <code>adjustCenterOfMass</code>{" "}
+            lets what is left tip; a cannonball shatters it. A chunk flies on the
+            hull it had in the compound, so a break builds nothing, and chunks
+            ignore each other. A brick goes when the estimated impulse would change{" "}
+            <i>its own</i> velocity by 0.8 m/s: <code>impulse</code> is momentum,
+            so only a mass-relative threshold breaks a whole brick and a piece
+            of one alike. It runs from <code>useBodyContacts</code>, whose
+            handler fires <b>between steps</b> — changing bodies inside
+            Jolt&apos;s own contact callback is illegal.
           </>
         ),
       },

@@ -14,8 +14,10 @@ import type { TrimeshExtras } from "@/Jolt/useTrimesh";
 import type { RaycastHit } from "@/Jolt/internal/raycast";
 import type { HeightFieldSamples } from "@/Jolt/internal/heightFieldSamples";
 import type { Vec3Tuple } from "@/Jolt/types";
+import { isSameState } from "@/Jolt/internal/snapshot";
 import {
   expectNoAsserts,
+  getApi,
   renderPhysics,
   step,
   unmount,
@@ -78,13 +80,16 @@ const Terrain = ({
   heights = heightAt,
   sampleCount = 16,
   range,
+  stateId,
 }: {
   name: string;
   heights?: HeightFieldSamples;
   sampleCount?: number;
   range?: [number, number];
+  stateId?: number;
 }) => {
   const [, api] = useHeightField({
+    stateId,
     heights,
     sampleCount,
     blockSize: 4,
@@ -255,6 +260,171 @@ describe("useHeightField", () => {
     // The render geometry is regenerated in place, so the mesh cannot drift
     // away from the collider that was just deformed.
     expect(terrain.geometry.getAttribute("position").count).toBeGreaterThan(0);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("draws what it collides with after setHeights", async () => {
+    const renderer = await renderPhysics(
+      <Terrain name="terrain" heights={() => 0} range={[-8, 8]} />,
+    );
+
+    const terrain = taken<BodyApi<Jolt.HeightFieldShape> & HeightFieldExtras>(
+      "terrain",
+    );
+
+    terrain.setHeights(4, 4, 4, 4, new Float32Array(16).fill(5));
+
+    const position = terrain.geometry.getAttribute("position");
+    let top = -Infinity;
+    for (let index = 0; index < position.count; index += 1) {
+      top = Math.max(top, position.getY(index));
+    }
+    expect(top).toBeCloseTo(terrain.getHeight(5, 5), 4);
+    expect(top).toBeCloseTo(5, 1);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("collides above the heights it was built with", async () => {
+    const renderer = await renderPhysics(
+      <>
+        <Terrain name="terrain" heights={() => 0} range={[-8, 8]} />
+        <Faller name="ball" position={[7.5, 8, 7.5]} />
+      </>,
+      { timeStep: 1 / 60 },
+    );
+
+    await step(renderer, 1);
+
+    const terrain = taken<BodyApi<Jolt.HeightFieldShape> & HeightFieldExtras>(
+      "terrain",
+    );
+    terrain.setHeights(4, 4, 8, 8, new Float32Array(64).fill(5));
+
+    await step(renderer, 180);
+
+    const ball = taken<BodyApi<Jolt.Shape>>("ball");
+    expect(ball.body.GetPosition().GetY()).toBeGreaterThan(5);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("drops what rests on ground dug out from under it", async () => {
+    const renderer = await renderPhysics(
+      <>
+        <Terrain
+          name="terrain"
+          heights={() => 0}
+          sampleCount={32}
+          range={[-8, 8]}
+        />
+        <Faller name="over" position={[6, 0.6, 6]} />
+        <Faller name="away" position={[26, 0.6, 26]} />
+      </>,
+      { timeStep: 1 / 60 },
+    );
+
+    await step(renderer, 240);
+
+    const over = taken<BodyApi<Jolt.Shape>>("over");
+    const away = taken<BodyApi<Jolt.Shape>>("away");
+    expect(over.isSleeping()).toBe(true);
+    expect(away.isSleeping()).toBe(true);
+
+    const terrain = taken<BodyApi<Jolt.HeightFieldShape> & HeightFieldExtras>(
+      "terrain",
+    );
+    terrain.setHeights(4, 4, 4, 4, new Float32Array(16).fill(-3));
+
+    expect(over.isSleeping()).toBe(false);
+    expect(away.isSleeping()).toBe(true);
+
+    await step(renderer, 120);
+    expect(over.body.GetPosition().GetY()).toBeLessThan(-1);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("drops an awake body the same way, past its cached contact", async () => {
+    const renderer = await renderPhysics(
+      <>
+        <Terrain name="terrain" heights={() => 0} range={[-8, 8]} />
+        <Faller name="over" position={[6, 0.6, 6]} />
+      </>,
+      { timeStep: 1 / 60 },
+    );
+
+    await step(renderer, 30);
+
+    const terrain = taken<BodyApi<Jolt.HeightFieldShape> & HeightFieldExtras>(
+      "terrain",
+    );
+    terrain.setHeights(4, 4, 4, 4, new Float32Array(16).fill(-3));
+
+    await step(renderer, 90);
+    const over = taken<BodyApi<Jolt.Shape>>("over");
+    expect(over.body.GetPosition().GetY()).toBeLessThan(-1);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("carries setHeights in a snapshot", async () => {
+    const renderer = await renderPhysics(
+      <Terrain
+        name="terrain"
+        heights={() => 1}
+        sampleCount={32}
+        range={[-8, 8]}
+        stateId={1}
+      />,
+      { timeStep: 1 / 60 },
+    );
+
+    await step(renderer, 1);
+
+    const api = getApi();
+    const terrain = taken<BodyApi<Jolt.HeightFieldShape> & HeightFieldExtras>(
+      "terrain",
+    );
+
+    const untouched = api.saveState();
+    const flat = terrain.getHeights(8, 8, 4, 4)[0];
+
+    terrain.setHeights(8, 8, 4, 4, new Float32Array(16).fill(4));
+    const first = api.saveState();
+    expect(isSameState(first, untouched)).toBe(false);
+
+    terrain.setHeights(16, 16, 8, 8, new Float32Array(64).fill(-2));
+    terrain.setHeights(8, 8, 4, 4, new Float32Array(16).fill(6));
+
+    // Back to the first edit: that patch again, and the later one gone.
+    api.restoreState(first);
+    expect(terrain.getHeight(9, 9)).toBeCloseTo(4, 1);
+    expect(terrain.getHeight(18, 18)).toBeCloseTo(flat, 1);
+    expect(isSameState(api.saveState(), first)).toBe(true);
+
+    const position = terrain.geometry.getAttribute("position");
+    let lowest = Infinity;
+    for (let index = 0; index < position.count; index += 1) {
+      lowest = Math.min(lowest, position.getY(index));
+    }
+    expect(lowest).toBeGreaterThan(0);
+
+    // And back past every edit.
+    api.restoreState(untouched);
+    expect(terrain.getHeight(9, 9)).toBeCloseTo(flat, 1);
+    expect(isSameState(api.saveState(), untouched)).toBe(true);
+
+    // With nothing edited since, a restore writes nothing, so nothing drifts.
+    const before = terrain.getHeights(0, 0, 32, 32);
+    api.restoreState(api.saveState());
+    expect(terrain.getHeights(0, 0, 32, 32)).toEqual(before);
 
     await unmount(renderer);
     expectNoAsserts();

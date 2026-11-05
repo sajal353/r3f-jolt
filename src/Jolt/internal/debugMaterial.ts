@@ -9,6 +9,7 @@ export const debugColors = {
   taperedCapsule: "orange",
   convex: "magenta",
   compound: "crimson",
+  mutableCompound: "crimson",
   trimesh: "hotpink",
   plane: "cyan",
   heightField: "tomato",

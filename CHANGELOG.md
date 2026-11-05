@@ -35,8 +35,14 @@
 - `usePulleyConstraint`: two bodies on one rope over two fixed points, with `ratio`, `minLength`, `maxLength`, `setLength` and `getCurrentLength`.
 - `breakTorque` on gear and rack joints.
 
+### Dynamic worlds
+
+- `useMutableCompound`: a compound whose children change at runtime. `addShape`, `removeShape`, `modifyShape`, `modifyShapes`, `adjustCenterOfMass`, `getShapeCount`, `getShape`. `api.geometry` is rebuilt in place, what rested on a removed child wakes, and `mass` scales with what is left. With a `stateId` it restores to the byte.
+- `useHeightField` with a `stateId` carries `setHeights` in a snapshot.
+
 ### Fixes
 
+- `setHeights` now tells Jolt the shape changed and wakes what sits on the patch. A hill raised above the terrain's old heights collided with nothing above them, and a body over a new crater stayed in the air, awake or asleep.
 - Water no longer skips buoyancy on a step run a second time after a restore.
 
 ### Demo

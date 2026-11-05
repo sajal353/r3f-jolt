@@ -155,7 +155,7 @@ const measures = (child: CompoundChild): Record<string, unknown> | null => {
   }
 };
 
-const describeInvalidChild = (child: CompoundChild): string | null => {
+export const describeInvalidChild = (child: CompoundChild): string | null => {
   const dimensions = measures(child);
 
   if (!dimensions) return "unknown shape type";
@@ -177,7 +177,7 @@ const describeInvalidChild = (child: CompoundChild): string | null => {
  * Jolt asserts on a rotation that is not unit length to within about 1e-5,
  * which a quaternion typed in by hand, or saved to four decimals, is not.
  */
-const normalizedRotation = (rotation: QuatTuple | undefined): QuatTuple => {
+export const normalizedRotation = (rotation: QuatTuple | undefined): QuatTuple => {
   if (!rotation) return [0, 0, 0, 1];
   const length = Math.hypot(...rotation);
   if (length === 0) return [0, 0, 0, 1];
@@ -187,6 +187,51 @@ const normalizedRotation = (rotation: QuatTuple | undefined): QuatTuple => {
     rotation[2] / length,
     rotation[3] / length,
   ];
+};
+
+/** A child at its own origin, for a compound that places it itself. */
+export const createBareChildShape = (
+  jolt: JoltModule,
+  child: CompoundChild,
+  hook: string,
+): Jolt.Shape => {
+  const inner = createChildSettings(jolt, child);
+  const result = inner.Create();
+  jolt.destroy(inner);
+  return shapeFromResult<Jolt.Shape>(result, hook);
+};
+
+/** Adds the children to the settings, skipping any that would fail the whole. */
+export const addCompoundChildren = (
+  jolt: JoltModule,
+  settings: Jolt.CompoundShapeSettings,
+  children: CompoundChild[],
+  label: string,
+) => {
+  const at = new jolt.Vec3();
+  const facing = new jolt.Quat(0, 0, 0, 1);
+
+  for (const [index, child] of children.entries()) {
+    const problem = describeInvalidChild(child);
+
+    if (problem) {
+      console.error(
+        `[r3f-jolt] ${label}: skipping child ${index} (${child.type}) — ${problem}.`,
+      );
+      continue;
+    }
+
+    const [x, y, z] = child.position;
+    at.Set(x, y, z);
+
+    const [rx, ry, rz, rw] = child.rotation ?? [0, 0, 0, 1];
+    facing.Set(rx, ry, rz, rw);
+
+    settings.AddShape(at, facing, createChildSettings(jolt, child), 0);
+  }
+
+  jolt.destroy(at);
+  jolt.destroy(facing);
 };
 
 /**
@@ -472,30 +517,7 @@ const build = (
 
     case "compound": {
       const settings = new jolt.StaticCompoundShapeSettings();
-      const at = new jolt.Vec3();
-      const facing = new jolt.Quat(0, 0, 0, 1);
-
-      for (const [index, child] of descriptor.shapes.entries()) {
-        const problem = describeInvalidChild(child);
-
-        if (problem) {
-          console.error(
-            `[r3f-jolt] compound: skipping child ${index} (${child.type}) — ${problem}.`,
-          );
-          continue;
-        }
-
-        const [x, y, z] = child.position;
-        at.Set(x, y, z);
-
-        const [rx, ry, rz, rw] = child.rotation ?? [0, 0, 0, 1];
-        facing.Set(rx, ry, rz, rw);
-
-        settings.AddShape(at, facing, createChildSettings(jolt, child), 0);
-      }
-
-      jolt.destroy(at);
-      jolt.destroy(facing);
+      addCompoundChildren(jolt, settings, descriptor.shapes, "compound");
 
       const result = settings.Create();
       // AddShape took a reference to each child, so destroying the compound

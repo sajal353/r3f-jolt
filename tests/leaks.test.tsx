@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { describe, expect, it } from "vitest";
 import type Jolt from "jolt-physics";
 import {
@@ -48,6 +48,8 @@ import { useCharacterModel } from "@/Jolt/useCharacterModel";
 import { useRagdoll, type RagdollMode } from "@/Jolt/useRagdoll";
 import { useSwimming } from "@/Jolt/useSwimming";
 import type { CompoundChild } from "@/Jolt/useCompound";
+import { useMutableCompound } from "@/Jolt/useMutableCompound";
+import { useHeightField } from "@/Jolt/useHeightField";
 import { WaterVolume } from "@/Jolt/WaterVolume";
 import { useSoftBody } from "@/Jolt/useSoftBody";
 import { useSoftBodyContactListener } from "@/Jolt/useSoftBodyContactListener";
@@ -770,6 +772,58 @@ const Machinery = () => {
   return null;
 };
 
+const CHANGING_CHILD: CompoundChild = {
+  type: "box",
+  position: [2, 0, 0],
+  size: [1, 1, 1],
+};
+
+/** Every edit, on one with a `stateId` that keeps the children and one that does not. */
+const ChangingCompound = ({ stateId }: { stateId?: number }) => {
+  const [, compound] = useMutableCompound({
+    stateId,
+    shapes: [
+      { type: "box", position: [-1, 0, 0], size: [1, 1, 1] },
+      { type: "sphere", position: [1, 0, 0], radius: 0.5 },
+    ],
+    position: [0, 5, 0],
+    motionType: "dynamic",
+  });
+
+  useEffect(() => {
+    if (!compound) return;
+
+    const added = compound.addShape(CHANGING_CHILD);
+    compound.modifyShape(added, [2, 1, 0], [0, 0, 0, 1], CHANGING_CHILD);
+    compound.modifyShapes(0, [[-1, 1, 0]], [[0, 0, 0, 1]]);
+    compound.removeShape(1);
+    compound.adjustCenterOfMass();
+    if (stateId !== undefined) compound.restoreState(compound.saveState());
+  }, [compound, stateId]);
+
+  return null;
+};
+
+const DiggingTerrain = ({ stateId }: { stateId?: number }) => {
+  const [, terrain] = useHeightField({
+    stateId,
+    heights: () => 0,
+    sampleCount: 16,
+    blockSize: 4,
+    range: [-8, 8],
+    position: [0, 0, 0],
+  });
+
+  useEffect(() => {
+    if (!terrain) return;
+
+    terrain.setHeights(4, 4, 4, 4, new Float32Array(16).fill(-2));
+    if (stateId !== undefined) terrain.restoreState(terrain.saveState());
+  }, [terrain, stateId]);
+
+  return null;
+};
+
 const RolledBack = () => {
   const { timing } = useJolt();
   const rollback = useRollback({ capacity: 8 });
@@ -948,6 +1002,30 @@ describe("mount/unmount leak checks", () => {
 
   it("stateIds and per-object snapshots leave the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<Stated />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useMutableCompound leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(
+      <>
+        <ChangingCompound />
+        <ChangingCompound stateId={7} />
+      </>,
+      30,
+    );
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("a deformed heightfield leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(
+      <>
+        <DiggingTerrain />
+        <DiggingTerrain stateId={8} />
+      </>,
+      30,
+    );
     expect(after).toBe(baseline);
     expectNoAsserts();
   });
