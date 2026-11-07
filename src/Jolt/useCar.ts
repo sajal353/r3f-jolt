@@ -1,29 +1,20 @@
-import { useEffect, useRef, useState } from "react";
-import { useThree } from "@react-three/fiber";
-import {
-  type BufferGeometry,
-  CylinderGeometry,
-  Group,
-  Mesh,
-  Quaternion,
-  Vector3,
-} from "three";
+import type { BufferGeometry, Group, Scene } from "three";
+import type { RefObject } from "react";
 import type Jolt from "jolt-physics";
-import { useJolt } from "./useJolt";
-import { shapeToGeometry } from "./internal/shapeToGeometry";
-import { syncObject } from "./internal/syncObject";
 import {
-  createDebugMaterial,
-  disposeDebugMaterial,
-} from "./internal/debugMaterial";
-import {
-  createDebugView,
-  useDebugFlag,
-  useDebugView,
-  type DebugView,
-} from "./internal/debugView";
-import { shapeFromResult } from "./internal/useBody";
-import type { QuatTuple, Vec3Tuple } from "./types";
+  type BuiltVehicle,
+  createTelemetry,
+  createVehicle,
+  installTireCallbacks,
+  setTorqueCurve,
+  useVehicle,
+  type VehicleCastType,
+  type VehicleState,
+  type VehicleTelemetry,
+  type VehicleTireOptions,
+  type VehicleWheelState,
+} from "./internal/vehicle";
+import type { JoltApi, QuatTuple, Vec3Tuple } from "./types";
 
 export interface CarInput {
   forward: boolean;
@@ -34,25 +25,16 @@ export interface CarInput {
   modifier: boolean;
 }
 
-export interface CarWheelState {
-  index: number;
-  position: Vector3;
-  rotation: Quaternion;
-}
+export type CarWheelState = VehicleWheelState;
 
-export interface CarState {
-  position: Vector3;
-  rotation: Quaternion;
-  velocity: Vector3;
-  wheels: CarWheelState[];
-}
+export type CarState = VehicleState;
 
-export interface UseCarOptions {
+export interface UseCarOptions extends VehicleTireOptions {
   /** The chassis body's and the vehicle constraint's `stateId`, for `saveState`. */
   stateId?: number;
   position: Vec3Tuple;
   rotation?: QuatTuple;
-  castType?: "cylinder" | "sphere" | "ray";
+  castType?: VehicleCastType;
   wheelSettings: {
     radius: number;
     width: number;
@@ -81,6 +63,12 @@ export interface UseCarOptions {
   handBrakeTorque?: number;
   mass?: number;
   maxTorque?: number;
+  /**
+   * Fraction of `maxTorque` by fraction of the engine's maximum RPM, as
+   * `[rpmFraction, torque]` points. Jolt's default rises from 0.8 to 1 at 0.66
+   * and falls back to 0.8.
+   */
+  torqueCurve?: [rpmFraction: number, torque: number][];
   clutchStrength?: number;
   debug?: boolean;
   layer?: number;
@@ -94,14 +82,10 @@ export interface CarApi {
    * you need to keep.
    */
   update: (input: CarInput) => CarState;
+  /** The drivetrain now, in an object that is **reused between calls**. */
+  telemetry: () => VehicleTelemetry;
   debugGroup: Group | null;
   geometry: BufferGeometry;
-}
-
-interface CarDebugView {
-  group: Group;
-  chassis: Mesh;
-  wheels: Mesh[];
 }
 
 const FL_WHEEL = 0;
@@ -109,373 +93,217 @@ const FR_WHEEL = 1;
 const BL_WHEEL = 2;
 const BR_WHEEL = 3;
 
-export const useCar = (options: UseCarOptions) => {
-  const api = useJolt();
-  const scene = useThree((state) => state.scene);
+const buildCarSettings = (jolt: JoltApi["Jolt"], mount: UseCarOptions) => {
+  const {
+    wheelSettings,
+    vehicleSize,
+    suspension = { minLength: 0.3, maxLength: 0.5 },
+    maxSteerAngle = 30,
+    maxPitchRollAngle = 60,
+    driveType = "rwd",
+    frontBackLimitedSlipRatio = 1.4,
+    leftRightLimitedSlipRatio = 1.4,
+    antiRollbar = true,
+    brakeTorque = 6000,
+    brakeBias = 0.8,
+    handBrakeTorque = 8000,
+    maxTorque = 500,
+    torqueCurve,
+    clutchStrength = 10,
+  } = mount;
 
-  const debugViewRef = useRef<DebugView<CarDebugView> | null>(null);
-  const [carApi, setCarApi] = useState<CarApi>();
+  const vehicleSettings = new jolt.VehicleConstraintSettings();
+  vehicleSettings.mMaxPitchRollAngle = maxPitchRollAngle * (Math.PI / 180);
+  vehicleSettings.mWheels.clear();
 
-  // Init-once, like the body hooks: snapshot at mount, rebuild with `key`.
-  const [mount] = useState(() => options);
+  const steerAngle = maxSteerAngle * (Math.PI / 180);
+  const bias = Math.min(Math.max(brakeBias, 0), 1);
 
-  useEffect(() => {
-    const {
-      Jolt: jolt,
-      bodyInterface,
-      physicsSystem,
-      layers,
-      state,
-    } = api;
+  if (brakeBias !== bias) {
+    console.warn(
+      `[r3f-jolt] useCar: brakeBias must be between 0 and 1, received ${brakeBias}.`,
+    );
+  }
 
-    const {
-      stateId,
-      position,
-      rotation = [0, 0, 0, 1],
-      castType = "cylinder",
-      wheelSettings,
-      vehicleSize,
-      suspension = { minLength: 0.3, maxLength: 0.5 },
-      maxSteerAngle = 30,
-      maxPitchRollAngle = 60,
-      driveType = "rwd",
-      frontBackLimitedSlipRatio = 1.4,
-      leftRightLimitedSlipRatio = 1.4,
-      antiRollbar = true,
-      brakeTorque = 6000,
-      brakeBias = 0.8,
-      handBrakeTorque = 8000,
-      mass = 1500,
-      maxTorque = 500,
-      clutchStrength = 10,
-      layer = layers.LAYER_MOVING,
-    } = mount;
-
-    const centreOfMassOffset = new jolt.Vec3(0, -vehicleSize.height / 2, 0);
-    const halfExtent = new jolt.Vec3(
+  const wheelPositions: Vec3Tuple[] = [
+    [
       vehicleSize.width / 2,
-      vehicleSize.height / 2,
-      vehicleSize.length / 2,
-    );
-    const carShapeSettings = new jolt.OffsetCenterOfMassShapeSettings(
-      centreOfMassOffset,
-      new jolt.BoxShapeSettings(halfExtent),
-    );
-    jolt.destroy(halfExtent);
-    jolt.destroy(centreOfMassOffset);
+      -wheelSettings.offsetDown,
+      wheelSettings.offsetForward,
+    ],
+    [
+      -vehicleSize.width / 2,
+      -wheelSettings.offsetDown,
+      wheelSettings.offsetForward,
+    ],
+    [
+      vehicleSize.width / 2,
+      -wheelSettings.offsetDown,
+      -wheelSettings.offsetForward,
+    ],
+    [
+      -vehicleSize.width / 2,
+      -wheelSettings.offsetDown,
+      -wheelSettings.offsetForward,
+    ],
+  ];
 
-    const shapeResult = carShapeSettings.Create();
-    jolt.destroy(carShapeSettings);
-    const carShape = shapeFromResult<Jolt.Shape>(shapeResult, "useCar");
+  for (let index = 0; index < wheelPositions.length; index += 1) {
+    const isFront = index === FL_WHEEL || index === FR_WHEEL;
+    const wheel = new jolt.WheelSettingsWV();
+    const wheelPosition = new jolt.Vec3(...wheelPositions[index]);
 
-    const bodyPosition = new jolt.RVec3(position[0], position[1], position[2]);
-    const bodyRotation = new jolt.Quat(
-      rotation[0],
-      rotation[1],
-      rotation[2],
-      rotation[3],
-    );
+    wheel.mPosition = wheelPosition;
+    jolt.destroy(wheelPosition);
 
-    const carBodySettings = new jolt.BodyCreationSettings(
-      carShape,
-      bodyPosition,
-      bodyRotation,
-      jolt.EMotionType_Dynamic,
-      layer,
-    );
-    carBodySettings.mOverrideMassProperties =
-      jolt.EOverrideMassProperties_CalculateInertia;
-    carBodySettings.mMassPropertiesOverride.mMass = mass;
+    wheel.mMaxSteerAngle = isFront ? steerAngle : 0;
+    wheel.mRadius = wheelSettings.radius;
+    wheel.mWidth = wheelSettings.width;
+    wheel.mSuspensionMinLength = suspension.minLength;
+    wheel.mSuspensionMaxLength = suspension.maxLength;
 
-    carShape.Release();
+    // Braking is independent of which wheels are driven. The service brake
+    // acts on all four, biased forward because weight transfers to the front
+    // under deceleration; the handbrake acts on the rear axle only.
+    const axleShare = isFront ? bias : 1 - bias;
+    wheel.mMaxBrakeTorque = (brakeTorque * axleShare) / 2;
+    wheel.mMaxHandBrakeTorque = isFront ? 0 : handBrakeTorque / 2;
 
-    const carBody = (() => {
-      try {
-        return api.stateIds.createBody(carBodySettings, stateId, "useCar");
-      } finally {
-        jolt.destroy(carBodySettings);
-        jolt.destroy(bodyPosition);
-        jolt.destroy(bodyRotation);
-      }
-    })();
+    vehicleSettings.mWheels.push_back(wheel);
+  }
 
-    bodyInterface.AddBody(carBody.GetID(), jolt.EActivation_Activate);
+  const controllerSettings = new jolt.WheeledVehicleControllerSettings();
+  controllerSettings.mEngine.mMaxTorque = maxTorque;
+  if (torqueCurve) {
+    setTorqueCurve(controllerSettings.mEngine, torqueCurve, "useCar");
+  }
+  controllerSettings.mTransmission.mClutchStrength = clutchStrength;
+  controllerSettings.mDifferentials.clear();
 
-    const vehicleSettings = new jolt.VehicleConstraintSettings();
-    vehicleSettings.mMaxPitchRollAngle = maxPitchRollAngle * (Math.PI / 180);
-    vehicleSettings.mWheels.clear();
+  const addDifferential = (
+    leftWheel: number,
+    rightWheel: number,
+    torqueRatio: number,
+  ) => {
+    const differential = new jolt.VehicleDifferentialSettings();
+    differential.mLeftWheel = leftWheel;
+    differential.mRightWheel = rightWheel;
+    differential.mLimitedSlipRatio = leftRightLimitedSlipRatio;
+    differential.mEngineTorqueRatio = torqueRatio;
+    controllerSettings.mDifferentials.push_back(differential);
+    jolt.destroy(differential);
+  };
 
-    const steerAngle = maxSteerAngle * (Math.PI / 180);
-    const bias = Math.min(Math.max(brakeBias, 0), 1);
+  if (driveType === "awd") {
+    addDifferential(BL_WHEEL, BR_WHEEL, 0.5);
+    addDifferential(FL_WHEEL, FR_WHEEL, 0.5);
+  } else if (driveType === "fwd") {
+    addDifferential(FL_WHEEL, FR_WHEEL, 1);
+  } else {
+    addDifferential(BL_WHEEL, BR_WHEEL, 1);
+  }
 
-    if (brakeBias !== bias) {
-      console.warn(
-        `[r3f-jolt] useCar: brakeBias must be between 0 and 1, received ${brakeBias}.`,
-      );
-    }
+  controllerSettings.mDifferentialLimitedSlipRatio = frontBackLimitedSlipRatio;
+  vehicleSettings.mController = controllerSettings;
 
-    const wheelPositions: Vec3Tuple[] = [
-      [
-        vehicleSize.width / 2,
-        -wheelSettings.offsetDown,
-        wheelSettings.offsetForward,
-      ],
-      [
-        -vehicleSize.width / 2,
-        -wheelSettings.offsetDown,
-        wheelSettings.offsetForward,
-      ],
-      [
-        vehicleSize.width / 2,
-        -wheelSettings.offsetDown,
-        -wheelSettings.offsetForward,
-      ],
-      [
-        -vehicleSize.width / 2,
-        -wheelSettings.offsetDown,
-        -wheelSettings.offsetForward,
-      ],
-    ];
+  if (antiRollbar) {
+    vehicleSettings.mAntiRollBars.clear();
 
-    const wheels: Jolt.WheelSettingsWV[] = [];
+    const frontBar = new jolt.VehicleAntiRollBar();
+    frontBar.mLeftWheel = FL_WHEEL;
+    frontBar.mRightWheel = FR_WHEEL;
+    vehicleSettings.mAntiRollBars.push_back(frontBar);
+    jolt.destroy(frontBar);
 
-    for (let index = 0; index < wheelPositions.length; index += 1) {
-      const isFront = index === FL_WHEEL || index === FR_WHEEL;
-      const wheel = new jolt.WheelSettingsWV();
-      const wheelPosition = new jolt.Vec3(...wheelPositions[index]);
+    const rearBar = new jolt.VehicleAntiRollBar();
+    rearBar.mLeftWheel = BL_WHEEL;
+    rearBar.mRightWheel = BR_WHEEL;
+    vehicleSettings.mAntiRollBars.push_back(rearBar);
+    jolt.destroy(rearBar);
+  }
 
-      wheel.mPosition = wheelPosition;
-      jolt.destroy(wheelPosition);
+  return vehicleSettings;
+};
 
-      wheel.mMaxSteerAngle = isFront ? steerAngle : 0;
-      wheel.mRadius = wheelSettings.radius;
-      wheel.mWidth = wheelSettings.width;
-      wheel.mSuspensionMinLength = suspension.minLength;
-      wheel.mSuspensionMaxLength = suspension.maxLength;
+const buildCar = (
+  api: JoltApi,
+  scene: Scene,
+  mount: UseCarOptions,
+  latest: RefObject<UseCarOptions>,
+): BuiltVehicle<CarApi> => {
+  const { Jolt: jolt, bodyInterface, layers, state: world } = api;
 
-      // Braking is independent of which wheels are driven. The service brake
-      // acts on all four, biased forward because weight transfers to the front
-      // under deceleration; the handbrake acts on the rear axle only.
-      const axleShare = isFront ? bias : 1 - bias;
-      wheel.mMaxBrakeTorque = (brakeTorque * axleShare) / 2;
-      wheel.mMaxHandBrakeTorque = isFront ? 0 : handBrakeTorque / 2;
+  const {
+    stateId,
+    position,
+    rotation = [0, 0, 0, 1],
+    castType = "cylinder",
+    wheelSettings,
+    vehicleSize,
+    mass = 1500,
+    layer = layers.LAYER_MOVING,
+  } = mount;
 
-      vehicleSettings.mWheels.push_back(wheel);
-      wheels.push(wheel);
-    }
+  const vehicle = createVehicle(api, scene, {
+    hook: "useCar",
+    stateId,
+    position,
+    rotation,
+    size: vehicleSize,
+    mass,
+    layer,
+    castType,
+    wheelWidth: wheelSettings.width,
+    buildSettings: () => buildCarSettings(jolt, mount),
+  });
 
-    const controllerSettings = new jolt.WheeledVehicleControllerSettings();
-    controllerSettings.mEngine.mMaxTorque = maxTorque;
-    controllerSettings.mTransmission.mClutchStrength = clutchStrength;
-    controllerSettings.mDifferentials.clear();
+  const { body: carBody, constraint, state: carState, debugView } = vehicle;
 
-    const addDifferential = (
-      leftWheel: number,
-      rightWheel: number,
-      torqueRatio: number,
-    ) => {
-      const differential = new jolt.VehicleDifferentialSettings();
-      differential.mLeftWheel = leftWheel;
-      differential.mRightWheel = rightWheel;
-      differential.mLimitedSlipRatio = leftRightLimitedSlipRatio;
-      differential.mEngineTorqueRatio = torqueRatio;
-      controllerSettings.mDifferentials.push_back(differential);
-      jolt.destroy(differential);
-    };
+  const controller = jolt.castObject(
+    constraint.GetController(),
+    jolt.WheeledVehicleController,
+  );
 
-    if (driveType === "awd") {
-      addDifferential(BL_WHEEL, BR_WHEEL, 0.5);
-      addDifferential(FL_WHEEL, FR_WHEEL, 0.5);
-    } else if (driveType === "fwd") {
-      addDifferential(FL_WHEEL, FR_WHEEL, 1);
-    } else {
-      addDifferential(BL_WHEEL, BR_WHEEL, 1);
-    }
+  const tireCallbacks = installTireCallbacks(
+    jolt,
+    constraint,
+    controller,
+    mount,
+    latest,
+  );
 
-    controllerSettings.mDifferentialLimitedSlipRatio =
-      frontBackLimitedSlipRatio;
-    vehicleSettings.mController = controllerSettings;
+  let previousForward = 1;
 
-    if (antiRollbar) {
-      vehicleSettings.mAntiRollBars.clear();
+  const stopKeeping =
+    stateId === undefined
+      ? () => {}
+      : api.snapshots.keep({
+          tag: "car",
+          owner: "constraint",
+          id: stateId,
+          save: () => [previousForward],
+          restore: ([forward]) => {
+            previousForward = forward;
+          },
+        });
 
-      const frontBar = new jolt.VehicleAntiRollBar();
-      frontBar.mLeftWheel = FL_WHEEL;
-      frontBar.mRightWheel = FR_WHEEL;
-      vehicleSettings.mAntiRollBars.push_back(frontBar);
-      jolt.destroy(frontBar);
+  const update = (input: CarInput): CarState => {
+    if (world.disposed) return carState;
 
-      const rearBar = new jolt.VehicleAntiRollBar();
-      rearBar.mLeftWheel = BL_WHEEL;
-      rearBar.mRightWheel = BR_WHEEL;
-      vehicleSettings.mAntiRollBars.push_back(rearBar);
-      jolt.destroy(rearBar);
-    }
+    let forward = input.forward ? 1 : input.backward ? -1 : 0;
+    const right = input.right ? 1 : input.left ? -1 : 0;
+    let brake = 0;
+    let handbrake = 0;
 
-    const constraint = new jolt.VehicleConstraint(carBody, vehicleSettings);
-
-    // AddConstraint takes the only reference, so RemoveConstraint would delete
-    // the constraint outright and a following destroy() would be a double free.
-    constraint.AddRef();
-
-    const collisionTester =
-      castType === "cylinder"
-        ? new jolt.VehicleCollisionTesterCastCylinder(layer, 0.05)
-        : castType === "sphere"
-          ? new jolt.VehicleCollisionTesterCastSphere(
-              layer,
-              0.05 * wheelSettings.width,
-            )
-          : new jolt.VehicleCollisionTesterRay(layer);
-
-    constraint.SetVehicleCollisionTester(collisionTester);
-    const detach = api.constraints.attach(constraint, stateId, "useCar");
-
-    const stepListener = new jolt.VehicleConstraintStepListener(constraint);
-    physicsSystem.AddStepListener(stepListener);
-
-    const controller = jolt.castObject(
-      constraint.GetController(),
-      jolt.WheeledVehicleController,
-    );
-
-    const geometry = shapeToGeometry(jolt, carBody.GetShape());
-
-    const wheelRight = new jolt.Vec3(0, 1, 0);
-    const wheelUp = new jolt.Vec3(1, 0, 0);
-
-    const buildDebugView = (): CarDebugView => {
-      const group = new Group();
-      const chassis = new Mesh(geometry, createDebugMaterial("wheel"));
-      group.add(chassis);
-
-      const debugWheels = wheels.map((_, index) => {
-        const settings = constraint.GetWheel(index).GetSettings();
-        const debugWheel = new Mesh(
-          new CylinderGeometry(
-            settings.mRadius,
-            settings.mRadius,
-            settings.mWidth,
-            8,
-            1,
-          ),
-          createDebugMaterial("vehicle"),
-        );
-        group.add(debugWheel);
-        return debugWheel;
-      });
-
-      syncObject(group, carBody);
-      scene.add(group);
-      return { group, chassis, wheels: debugWheels };
-    };
-
-    const releaseDebugView = ({ group, chassis, wheels }: CarDebugView) => {
-      scene.remove(group);
-      disposeDebugMaterial(chassis);
-      for (const debugWheel of wheels) {
-        debugWheel.geometry.dispose();
-        disposeDebugMaterial(debugWheel);
-      }
-    };
-
-    const debugView = createDebugView(buildDebugView, releaseDebugView);
-    debugViewRef.current = debugView;
-
-    const carState: CarState = {
-      position: new Vector3(),
-      rotation: new Quaternion(),
-      velocity: new Vector3(),
-      wheels: wheels.map((_, index) => ({
-        index,
-        position: new Vector3(),
-        rotation: new Quaternion(),
-      })),
-    };
-
-    let previousForward = 1;
-
-    const stopKeeping =
-      stateId === undefined
-        ? () => {}
-        : api.snapshots.keep({
-            tag: "car",
-            owner: "constraint",
-            id: stateId,
-            save: () => [previousForward],
-            restore: ([forward]) => {
-              previousForward = forward;
-            },
-          });
-
-    const update = (input: CarInput): CarState => {
-      if (state.disposed) return carState;
-
-      let forward = input.forward ? 1 : input.backward ? -1 : 0;
-      const right = input.right ? 1 : input.left ? -1 : 0;
-      let brake = 0;
-      let handbrake = 0;
-
-      if (previousForward * forward < 0) {
-        const bodyRotation = carBody.GetRotation().Conjugated();
-        const bodyVelocity = carBody.GetLinearVelocity();
-
-        carState.rotation.set(
-          bodyRotation.GetX(),
-          bodyRotation.GetY(),
-          bodyRotation.GetZ(),
-          bodyRotation.GetW(),
-        );
-        carState.velocity.set(
-          bodyVelocity.GetX(),
-          bodyVelocity.GetY(),
-          bodyVelocity.GetZ(),
-        );
-
-        const localVelocity = carState.velocity.applyQuaternion(
-          carState.rotation,
-        ).z;
-
-        if (
-          (forward > 0 && localVelocity < -0.1) ||
-          (forward < 0 && localVelocity > 0.1)
-        ) {
-          forward = 0;
-          brake = 1;
-        }
-      }
-
-      previousForward = forward !== 0 ? forward : previousForward;
-
-      if (input.handbrake) {
-        forward = 0;
-        handbrake = 1;
-      }
-
-      if (!input.modifier) {
-        forward = forward > 0 ? forward * 0.5 : forward;
-      }
-
-      controller.SetDriverInput(forward, right, brake, handbrake);
-
-      if (right || forward || brake || handbrake) {
-        bodyInterface.ActivateBody(carBody.GetID());
-      }
-
-      const bodyPosition = carBody.GetPosition();
-      const bodyRotation = carBody.GetRotation();
+    if (previousForward * forward < 0) {
+      const inverseRotation = carBody.GetRotation().Conjugated();
       const bodyVelocity = carBody.GetLinearVelocity();
 
-      carState.position.set(
-        bodyPosition.GetX(),
-        bodyPosition.GetY(),
-        bodyPosition.GetZ(),
-      );
       carState.rotation.set(
-        bodyRotation.GetX(),
-        bodyRotation.GetY(),
-        bodyRotation.GetZ(),
-        bodyRotation.GetW(),
+        inverseRotation.GetX(),
+        inverseRotation.GetY(),
+        inverseRotation.GetZ(),
+        inverseRotation.GetW(),
       );
       carState.velocity.set(
         bodyVelocity.GetX(),
@@ -483,87 +311,60 @@ export const useCar = (options: UseCarOptions) => {
         bodyVelocity.GetZ(),
       );
 
-      for (let index = 0; index < carState.wheels.length; index += 1) {
-        const transform = constraint.GetWheelLocalTransform(
-          index,
-          wheelRight,
-          wheelUp,
-        );
-        const translation = transform.GetTranslation();
-        const wheelRotation = transform.GetRotation().GetQuaternion();
-        const wheel = carState.wheels[index];
+      const localVelocity = carState.velocity.applyQuaternion(
+        carState.rotation,
+      ).z;
 
-        wheel.position.set(
-          translation.GetX(),
-          translation.GetY(),
-          translation.GetZ(),
-        );
-        wheel.rotation.set(
-          wheelRotation.GetX(),
-          wheelRotation.GetY(),
-          wheelRotation.GetZ(),
-          wheelRotation.GetW(),
-        );
-
-        const debugWheel = debugView.current?.wheels[index];
-        if (debugWheel) {
-          debugWheel.position.copy(wheel.position);
-          debugWheel.quaternion.copy(wheel.rotation);
-        }
+      if (
+        (forward > 0 && localVelocity < -0.1) ||
+        (forward < 0 && localVelocity > 0.1)
+      ) {
+        forward = 0;
+        brake = 1;
       }
+    }
 
-      const debugGroup = debugView.current?.group;
-      if (debugGroup) {
-        debugGroup.position.copy(carState.position);
-        debugGroup.quaternion.copy(carState.rotation);
-      }
+    previousForward = forward !== 0 ? forward : previousForward;
 
-      return carState;
-    };
+    if (input.handbrake) {
+      forward = 0;
+      handbrake = 1;
+    }
 
-    // Publishing an externally-created resource to render. The rule exempts a
-    // setState whose value derives from a React ref
-    // (`enableAllowSetStateFromRefsInEffects`, on by default), which is why the
-    // sibling hooks are silent — they happen to publish ref-closing callbacks.
-    // This one owns no ref, so the exemption does not apply.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setCarApi({
+    if (!input.modifier) {
+      forward = forward > 0 ? forward * 0.5 : forward;
+    }
+
+    controller.SetDriverInput(forward, right, brake, handbrake);
+
+    if (right || forward || brake || handbrake) {
+      bodyInterface.ActivateBody(carBody.GetID());
+    }
+
+    return vehicle.sync();
+  };
+
+  return {
+    vehicle,
+    api: {
       carBody,
       constraint,
       update,
+      telemetry: createTelemetry(api, controller),
       get debugGroup() {
         return debugView.current?.group ?? null;
       },
-      geometry,
-    });
-
-    return () => {
+      geometry: vehicle.geometry,
+    },
+    release: () => {
       stopKeeping();
-      setCarApi(undefined);
-      debugView.hide();
-      debugViewRef.current = null;
-      geometry.dispose();
+      if (world.destroyed) return;
+      for (const callbacks of tireCallbacks) jolt.destroy(callbacks);
+    },
+  };
+};
 
-      if (state.destroyed) return;
-
-      physicsSystem.RemoveStepListener(stepListener);
-      jolt.destroy(stepListener);
-
-      detach();
-      constraint.Release();
-
-      jolt.destroy(vehicleSettings);
-
-      jolt.destroy(wheelRight);
-      jolt.destroy(wheelUp);
-
-      bodyInterface.RemoveBody(carBody.GetID());
-      bodyInterface.DestroyBody(carBody.GetID());
-    };
-  }, [api, mount, scene]);
-
-  const debug = useDebugFlag(mount.debug);
-  useDebugView(carApi, debugViewRef, debug);
-
+export const useCar = (options: UseCarOptions) => {
+  const carApi = useVehicle(options, buildCar);
   return [carApi] as [CarApi | undefined];
 };

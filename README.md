@@ -1146,6 +1146,34 @@ Braking is independent of `driveType`. The service brake acts on all four wheels
 
 Each axle's share is split evenly between its two wheels, so the defaults give 2400 per front wheel, 600 per rear wheel, and 4000 of handbrake per rear wheel. `brakeBias: 0.5` is a balanced setup; `1` is front-only.
 
+### Drivetrain
+
+`telemetry()` returns `{ rpm, gear, ratio, clutch }`, in an object reused between calls. `gear` is 0 in neutral and negative in reverse; `clutch` runs from 0, disengaged, to 1.
+
+`torqueCurve` is the fraction of `maxTorque` by fraction of the engine's maximum RPM, as `[rpmFraction, torque]` points. Jolt holds the engine at its minimum RPM through the clutch, so a car on a curve of zeros still creeps in first gear.
+
+```tsx
+torqueCurve: [[0, 0.5], [0.7, 1], [1, 0.65]],
+```
+
+### Tire callbacks
+
+A tire's friction is already mixed with the `material.friction` of what it is on, so a slippery surface needs no callback. These two are for grip that depends on more than that. Each is a JS call inside the step, so keep it cheap, keep it free of world changes, and keep it pure if the world is replayed.
+
+`tireGrip(tire)` sets how much a grounded tire may push. `tire` carries `wheel`, `bodyID`, `suspensionImpulse`, `longitudinalFriction`, `lateralFriction`, `longitudinalSlip`, `lateralSlip` and `deltaTime`, and is reused between calls. `longitudinalImpulse` and `lateralImpulse` start as friction × suspension impulse; write to them to change the limit. It runs once per wheel per solver iteration, about 9 times a wheel per step. Wheels are 0 front left, 1 front right, 2 rear left, 3 rear right.
+
+```tsx
+tireGrip: (tire) => {
+  if (tire.bodyID !== ICE_STATE_ID) return;
+  tire.longitudinalImpulse *= 0.12;
+  tire.lateralImpulse *= 0.12;
+},
+```
+
+`combineFriction(wheel, direction, tireFriction, body)` returns the friction to use, once per wheel for `"longitudinal"` and once for `"lateral"` each step. Without it the rule is `√(tireFriction × body friction)`.
+
+Either has to be given at mount for it to run. After that, each render's function is the one called.
+
 ## Queries
 
 Five ways to ask the world a question, none of which move anything or add anything to it.

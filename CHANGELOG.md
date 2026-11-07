@@ -40,6 +40,15 @@
 - `useMutableCompound`: a compound whose children change at runtime. `addShape`, `removeShape`, `modifyShape`, `modifyShapes`, `adjustCenterOfMass`, `getShapeCount`, `getShape`. `api.geometry` is rebuilt in place, what rested on a removed child wakes, and `mass` scales with what is left. With a `stateId` it restores to the byte.
 - `useHeightField` with a `stateId` carries `setHeights` in a snapshot.
 
+### Vehicles
+
+- `useCar` is built on a shared vehicle core. Its api and its simulation are unchanged.
+- `torqueCurve` on `useCar`: the engine's torque by fraction of its maximum RPM.
+- `api.telemetry()`: `{ rpm, gear, ratio, clutch }`, in a reused object.
+- `tireGrip(tire)`: the impulse limits of a grounded tire, with the body under it and its slip. Once per wheel per solver iteration.
+- `combineFriction(wheel, direction, tireFriction, body)`: replaces Jolt's `√(tire × body)`. Once per wheel per direction per step.
+- `TireContact`, `TireFrictionDirection` and `VehicleTelemetry` are exported.
+
 ### Fixes
 
 - `setHeights` now tells Jolt the shape changed and wakes what sits on the patch. A hill raised above the terrain's old heights collided with nothing above them, and a body over a new crater stayed in the air, awake or asleep.

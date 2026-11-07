@@ -217,13 +217,13 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 
 ### Advanced vehicles
 
-- [ ] Extract a shared vehicle core from `useCar` (constraint + step listener + collision tester + teardown) so all three vehicle types share one correct lifecycle
+- [x] Extract a shared vehicle core from `useCar` (constraint + step listener + collision tester + teardown) so all three vehicle types share one correct lifecycle
 - [ ] `useTank` — `TrackedVehicleControllerSettings`, `WheelSettingsTV`, `VehicleTrackSettings` with left/right tracks and `mDrivenWheel`
 - [ ] `useMotorcycle` — `MotorcycleControllerSettings` including lean angle and lean spring
-- [ ] Drivetrain telemetry for audio and UI: `VehicleEngine.GetCurrentRPM()`, `VehicleTransmission.GetCurrentGear()` / `GetCurrentRatio()` / `GetClutchFriction()` — engine pitch, shift SFX, tachometer
-- [ ] Engine torque curve via `LinearCurve` on `VehicleEngineSettings`
-- [ ] Surface-dependent grip through `WheeledVehicleControllerCallbacksJS` + `TireMaxImpulseCallbackResult` (tarmac / gravel / ice)
-- [ ] `VehicleConstraintCallbacksJS` for slip combining
+- [x] Drivetrain telemetry for audio and UI: `VehicleEngine.GetCurrentRPM()`, `VehicleTransmission.GetCurrentGear()` / `GetCurrentRatio()` / `GetClutchFriction()` — engine pitch, shift SFX, tachometer
+- [x] Engine torque curve via `LinearCurve` on `VehicleEngineSettings`
+- [x] Surface-dependent grip through `WheeledVehicleControllerCallbacksJS` + `TireMaxImpulseCallbackResult` (tarmac / gravel / ice)
+- [x] `VehicleConstraintCallbacksJS` for slip combining **Amended:** it combines friction, not slip: `combineFriction`, per wheel and direction
 
 ### Destruction & dynamic worlds
 

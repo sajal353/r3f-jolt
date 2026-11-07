@@ -893,7 +893,12 @@ export const categories: Category[] = [
             <code>Shift</code> for full throttle, <code>R</code> to reset. A
             real <code>WheeledVehicleController</code>: engine, transmission,
             differentials, anti-roll bars. Handbrake is rear-only; the service
-            brake splits 80/20 front/rear.
+            brake splits 80/20 front/rear. The gear and rpm above the car come
+            from <code>telemetry()</code> and the engine has a{" "}
+            <code>torqueCurve</code>. Off to the left is ice,{" "}
+            <code>tireGrip</code> cutting the impulse a tire may apply; off to
+            the right is gravel, <code>combineFriction</code> taking more grip
+            sideways than along the tire.
           </>
         ),
       },

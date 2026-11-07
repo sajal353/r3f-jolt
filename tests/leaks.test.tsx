@@ -17,6 +17,7 @@ import {
 } from "three";
 import { useFrame } from "@react-three/fiber";
 import { useCar } from "@/Jolt/useCar";
+import type { TireContact, TireFrictionDirection } from "@/Jolt/internal/vehicle";
 import { useCharacter } from "@/Jolt/useCharacter";
 import { useBox } from "@/Jolt/useBox";
 import { useConveyor } from "@/Jolt/useConveyor";
@@ -329,6 +330,16 @@ const Jelly = () => {
   return null;
 };
 
+const halveGrip = (tire: TireContact) => {
+  tire.lateralImpulse *= 0.5;
+};
+
+const keepTireFriction = (
+  _wheel: number,
+  _direction: TireFrictionDirection,
+  friction: number,
+) => friction;
+
 const Car = () => {
   const [api] = useCar({
     position: [0, 2, 0],
@@ -350,6 +361,40 @@ const Car = () => {
       handbrake: false,
       modifier: true,
     });
+  });
+
+  return null;
+};
+
+const CarWithTireCallbacks = () => {
+  const [api] = useCar({
+    stateId: 7,
+    position: [0, 2, 0],
+    vehicleSize: { length: 4, width: 1.8, height: 1 },
+    wheelSettings: {
+      radius: 0.3,
+      width: 0.2,
+      offsetForward: 1.2,
+      offsetDown: 0.3,
+    },
+    torqueCurve: [
+      [0, 0.5],
+      [1, 1],
+    ],
+    tireGrip: halveGrip,
+    combineFriction: keepTireFriction,
+  });
+
+  useFrame(() => {
+    api?.update({
+      forward: true,
+      backward: false,
+      left: false,
+      right: true,
+      handbrake: false,
+      modifier: true,
+    });
+    api?.telemetry();
   });
 
   return null;
@@ -941,6 +986,12 @@ describe("mount/unmount leak checks", () => {
 
   it("useCar leaves the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<Car />, 30);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useCar with a torque curve and tire callbacks leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<CarWithTireCallbacks />, 30);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });

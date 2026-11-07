@@ -88,6 +88,11 @@ export {
   type CarState,
   type CarWheelState,
 } from "@/Jolt/useCar";
+export type {
+  TireContact,
+  TireFrictionDirection,
+  VehicleTelemetry,
+} from "@/Jolt/internal/vehicle";
 
 export {
   useClosestHitRaycaster,
