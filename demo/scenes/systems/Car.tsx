@@ -1,28 +1,23 @@
-import { useEffect, useRef } from "react";
-import { Group, Vector3 } from "three";
-import { useFrame, useThree } from "@react-three/fiber";
+import { useRef } from "react";
+import { Group } from "three";
+import { useFrame } from "@react-three/fiber";
 import { KeyboardControls, useKeyboardControls } from "@react-three/drei";
 import type Jolt from "jolt-physics";
 import { useBox } from "@/Jolt/useBox";
 import { useSphere } from "@/Jolt/useSphere";
 import { useCylinder } from "@/Jolt/useCylinder";
 import { useTaperedCapsule } from "@/Jolt/useTaperedCapsule";
-import { useCar, type CarApi } from "@/Jolt/useCar";
+import { useCar } from "@/Jolt/useCar";
 import type { TireContact, TireFrictionDirection } from "@/Jolt/internal/vehicle";
-import { useJolt } from "@/Jolt/useJolt";
 import type { Vec3Tuple } from "@/Jolt/types";
-import { Floor, Hud, Ramp, Tag, Wall } from "../../shared/Stage";
+import { Floor, Ramp, Tag, Wall } from "../../shared/Stage";
+import {
+  useDashboard,
+  useFollowCamera,
+  useResetKey,
+  VEHICLE_KEYS,
+} from "../../shared/vehicleHud";
 import { tilt } from "../../shared/helpers";
-
-const controls = [
-  { name: "forward", keys: ["ArrowUp", "KeyW"] },
-  { name: "backward", keys: ["ArrowDown", "KeyS"] },
-  { name: "left", keys: ["ArrowLeft", "KeyA"] },
-  { name: "right", keys: ["ArrowRight", "KeyD"] },
-  { name: "handbrake", keys: ["Space"] },
-  { name: "boost", keys: ["ShiftLeft", "ShiftRight"] },
-  { name: "reset", keys: ["KeyR"] },
-];
 
 const ARENA = 120;
 const SPAWN: Vec3Tuple = [0, 2, 34];
@@ -31,8 +26,6 @@ const SPAWN: Vec3Tuple = [0, 2, 34];
 const FACING = tilt([0, 1, 0], Math.PI);
 
 const CAMERA_OFFSET: Vec3Tuple = [0, 11, 17];
-const FOLLOW_RATE = 4;
-
 const ICE = 900;
 const GRAVEL = 901;
 const SURFACE_NAMES = new Map([
@@ -268,90 +261,7 @@ const Props = () => (
   </>
 );
 
-const gearLabel = (gear: number) => {
-  if (gear === 0) return "N";
-  return gear < 0 ? "R" : String(gear);
-};
-
-/** Written straight to the DOM from the frame loop, so driving renders no React. */
-const useDashboard = () => {
-  const gear = useRef<HTMLElement>(null);
-  const rpm = useRef<HTMLElement>(null);
-  const needle = useRef<HTMLElement>(null);
-  const surface = useRef<HTMLElement>(null);
-
-  const show = (car: CarApi) => {
-    const telemetry = car.telemetry();
-    const rearWheel = car.constraint.GetWheel(2);
-
-    if (gear.current) gear.current.textContent = gearLabel(telemetry.gear);
-    if (rpm.current) {
-      rpm.current.textContent = String(Math.round(telemetry.rpm));
-    }
-    if (needle.current) {
-      needle.current.style.width = `${(telemetry.rpm / MAX_RPM) * 100}%`;
-    }
-    if (surface.current) {
-      surface.current.textContent = rearWheel.HasContact()
-        ? (SURFACE_NAMES.get(
-            rearWheel.GetContactBodyID().GetIndexAndSequenceNumber(),
-          ) ?? "tarmac")
-        : "air";
-    }
-  };
-
-  const dashboard = (
-    <Hud position={[0, 1.9, 0]}>
-      <div className="dashboard">
-        <b ref={gear}>N</b> <span ref={rpm}>0</span> rpm ·{" "}
-        <span ref={surface}>tarmac</span>
-        <div className="tachometer">
-          <i ref={needle} />
-        </div>
-      </div>
-    </Hud>
-  );
-
-  return { show, dashboard };
-};
-
-/** The course is bigger than any one view, and the canvas outlives the scene. */
-const useFollowCamera = () => {
-  const camera = useThree((state) => state.camera);
-  const orbit = useThree((state) => state.controls) as unknown as {
-    target: Vector3;
-  } | null;
-
-  const followed = useRef(new Vector3(...SPAWN));
-  const moved = useRef(new Vector3());
-
-  useEffect(() => {
-    const start = camera.position.clone();
-    const target = orbit?.target.clone();
-
-    followed.current.set(...SPAWN);
-    camera.position.set(...SPAWN).add(new Vector3(...CAMERA_OFFSET));
-    orbit?.target.set(...SPAWN);
-
-    return () => {
-      camera.position.copy(start);
-      if (target) orbit?.target.copy(target);
-    };
-  }, [camera, orbit]);
-
-  return (position: Vector3, delta: number) => {
-    moved.current
-      .subVectors(position, followed.current)
-      .multiplyScalar(1 - Math.exp(-FOLLOW_RATE * delta));
-    followed.current.add(moved.current);
-    camera.position.add(moved.current);
-    orbit?.target.add(moved.current);
-  };
-};
-
 const Vehicle = () => {
-  const { bodyInterface, temps } = useJolt();
-
   const bodyRef = useRef<Group>(null);
   const wheelRefs = useRef<(Group | null)[]>([]);
 
@@ -372,25 +282,16 @@ const Vehicle = () => {
   });
 
   const [, getKeys] = useKeyboardControls();
-  const resetHeld = useRef(false);
-  const { show, dashboard } = useDashboard();
-  const follow = useFollowCamera();
+  const { show, dashboard } = useDashboard(MAX_RPM, 1.9);
+  const follow = useFollowCamera(SPAWN, CAMERA_OFFSET);
+  const reset = useResetKey(SPAWN, FACING);
 
   useFrame((_, delta) => {
     if (!api) return;
 
     const keys = getKeys() as Record<string, boolean>;
 
-    if (keys.reset && !resetHeld.current) {
-      bodyInterface.SetPositionRotationAndVelocity(
-        api.carBody.GetID(),
-        temps.rvec3(SPAWN),
-        temps.quat(FACING),
-        temps.vec3([0, 0, 0]),
-        temps.vec3([0, 0, 0]),
-      );
-    }
-    resetHeld.current = keys.reset;
+    reset(keys.reset, api.carBody);
 
     const state = api.update({
       forward: keys.forward,
@@ -413,7 +314,15 @@ const Vehicle = () => {
       group.quaternion.copy(wheel.rotation);
     });
 
-    show(api);
+    const rearWheel = api.constraint.GetWheel(2);
+    show(
+      api.telemetry(),
+      rearWheel.HasContact()
+        ? (SURFACE_NAMES.get(
+            rearWheel.GetContactBodyID().GetIndexAndSequenceNumber(),
+          ) ?? "tarmac")
+        : "air",
+    );
     follow(state.position, delta);
   });
 
@@ -445,7 +354,7 @@ const Vehicle = () => {
 };
 
 export const Car = () => (
-  <KeyboardControls map={controls}>
+  <KeyboardControls map={VEHICLE_KEYS}>
     <Course />
     <Props />
     <Vehicle />

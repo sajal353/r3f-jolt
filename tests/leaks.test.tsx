@@ -17,6 +17,8 @@ import {
 } from "three";
 import { useFrame } from "@react-three/fiber";
 import { useCar } from "@/Jolt/useCar";
+import { useTank } from "@/Jolt/useTank";
+import { useMotorcycle } from "@/Jolt/useMotorcycle";
 import type { TireContact, TireFrictionDirection } from "@/Jolt/internal/vehicle";
 import { useCharacter } from "@/Jolt/useCharacter";
 import { useBox } from "@/Jolt/useBox";
@@ -381,6 +383,68 @@ const CarWithTireCallbacks = () => {
       [0, 0.5],
       [1, 1],
     ],
+    tireGrip: halveGrip,
+    combineFriction: keepTireFriction,
+  });
+
+  useFrame(() => {
+    api?.update({
+      forward: true,
+      backward: false,
+      left: false,
+      right: true,
+      handbrake: false,
+      modifier: true,
+    });
+    api?.telemetry();
+  });
+
+  return null;
+};
+
+const TankWithCallbacks = () => {
+  const [api] = useTank({
+    stateId: 8,
+    position: [0, 1.5, 0],
+    vehicleSize: { length: 6.4, width: 3.4, height: 1 },
+    wheelSettings: { radius: 0.3, width: 0.3, span: 5.7, offsetDown: 0.3 },
+    torqueCurve: [
+      [0, 0.5],
+      [1, 1],
+    ],
+    combineFriction: keepTireFriction,
+  });
+
+  useFrame(() => {
+    api?.update({
+      forward: true,
+      backward: false,
+      left: true,
+      right: false,
+      brake: false,
+    });
+    api?.telemetry();
+  });
+
+  return null;
+};
+
+const MotorcycleWithCallbacks = () => {
+  const [api] = useMotorcycle({
+    stateId: 9,
+    position: [0, 1.2, 0],
+    vehicleSize: { length: 0.8, width: 0.4, height: 0.6 },
+    wheelSettings: {
+      radius: 0.31,
+      width: 0.05,
+      offsetForward: 0.75,
+      offsetDown: 0.27,
+    },
+    torqueCurve: [
+      [0, 0.5],
+      [1, 1],
+    ],
+    lean: { maxAngle: 30, springConstant: 4000 },
     tireGrip: halveGrip,
     combineFriction: keepTireFriction,
   });
@@ -992,6 +1056,18 @@ describe("mount/unmount leak checks", () => {
 
   it("useCar with a torque curve and tire callbacks leaves the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<CarWithTireCallbacks />, 30);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useTank leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<TankWithCallbacks />, 30);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useMotorcycle leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<MotorcycleWithCallbacks />, 30);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });

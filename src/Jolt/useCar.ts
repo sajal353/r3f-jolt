@@ -3,6 +3,7 @@ import type { RefObject } from "react";
 import type Jolt from "jolt-physics";
 import {
   type BuiltVehicle,
+  createReverseGuard,
   createTelemetry,
   createVehicle,
   installTireCallbacks,
@@ -272,20 +273,7 @@ const buildCar = (
     latest,
   );
 
-  let previousForward = 1;
-
-  const stopKeeping =
-    stateId === undefined
-      ? () => {}
-      : api.snapshots.keep({
-          tag: "car",
-          owner: "constraint",
-          id: stateId,
-          save: () => [previousForward],
-          restore: ([forward]) => {
-            previousForward = forward;
-          },
-        });
+  const reverseGuard = createReverseGuard(api, vehicle, stateId);
 
   const update = (input: CarInput): CarState => {
     if (world.disposed) return carState;
@@ -295,36 +283,10 @@ const buildCar = (
     let brake = 0;
     let handbrake = 0;
 
-    if (previousForward * forward < 0) {
-      const inverseRotation = carBody.GetRotation().Conjugated();
-      const bodyVelocity = carBody.GetLinearVelocity();
-
-      carState.rotation.set(
-        inverseRotation.GetX(),
-        inverseRotation.GetY(),
-        inverseRotation.GetZ(),
-        inverseRotation.GetW(),
-      );
-      carState.velocity.set(
-        bodyVelocity.GetX(),
-        bodyVelocity.GetY(),
-        bodyVelocity.GetZ(),
-      );
-
-      const localVelocity = carState.velocity.applyQuaternion(
-        carState.rotation,
-      ).z;
-
-      if (
-        (forward > 0 && localVelocity < -0.1) ||
-        (forward < 0 && localVelocity > 0.1)
-      ) {
-        forward = 0;
-        brake = 1;
-      }
+    if (reverseGuard.mustBrake(forward)) {
+      forward = 0;
+      brake = 1;
     }
-
-    previousForward = forward !== 0 ? forward : previousForward;
 
     if (input.handbrake) {
       forward = 0;
@@ -357,7 +319,7 @@ const buildCar = (
       geometry: vehicle.geometry,
     },
     release: () => {
-      stopKeeping();
+      reverseGuard.stopKeeping();
       if (world.destroyed) return;
       for (const callbacks of tireCallbacks) jolt.destroy(callbacks);
     },

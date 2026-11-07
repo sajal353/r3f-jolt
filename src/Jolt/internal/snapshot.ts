@@ -40,11 +40,12 @@ export interface SideState {
 
 const SIDE_TAGS = {
   character: 1,
-  car: 2,
+  vehicle: 2,
   swimming: 3,
   sensor: 4,
   load: 5,
   shape: 6,
+  motorcycle: 7,
 };
 
 interface SavedSide {

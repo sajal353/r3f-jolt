@@ -99,6 +99,8 @@ export interface VehicleBuildOptions {
   layer: number;
   castType: VehicleCastType;
   wheelWidth: number;
+  /** A cast cylinder's rounding, as a fraction of the wheel. 1 rounds it fully. */
+  convexRadiusFraction?: number;
   /** Called once the chassis exists, which the core holds until release. */
   buildSettings: () => Jolt.VehicleConstraintSettings;
 }
@@ -178,10 +180,18 @@ const createChassis = (
 
 const createCollisionTester = (
   jolt: JoltApi["Jolt"],
-  { castType, layer, wheelWidth }: VehicleBuildOptions,
+  {
+    castType,
+    layer,
+    wheelWidth,
+    convexRadiusFraction = 0.05,
+  }: VehicleBuildOptions,
 ) => {
   if (castType === "cylinder") {
-    return new jolt.VehicleCollisionTesterCastCylinder(layer, 0.05);
+    return new jolt.VehicleCollisionTesterCastCylinder(
+      layer,
+      convexRadiusFraction,
+    );
   }
 
   return castType === "sphere"
@@ -355,6 +365,64 @@ export const createVehicle = (
   };
 
   return { body, constraint, geometry, debugView, state, sync, release };
+};
+
+/**
+ * Asking for the other direction while still rolling this one means braking
+ * until the vehicle stops. Which way it last went is kept in a snapshot.
+ */
+export const createReverseGuard = (
+  api: JoltApi,
+  { body, state }: Vehicle,
+  stateId: number | undefined,
+) => {
+  let previousForward = 1;
+
+  const stopKeeping =
+    stateId === undefined
+      ? () => {}
+      : api.snapshots.keep({
+          tag: "vehicle",
+          owner: "constraint",
+          id: stateId,
+          save: () => [previousForward],
+          restore: ([forward]) => {
+            previousForward = forward;
+          },
+        });
+
+  const mustBrake = (forward: number) => {
+    if (previousForward * forward < 0) {
+      const inverseRotation = body.GetRotation().Conjugated();
+      const bodyVelocity = body.GetLinearVelocity();
+
+      state.rotation.set(
+        inverseRotation.GetX(),
+        inverseRotation.GetY(),
+        inverseRotation.GetZ(),
+        inverseRotation.GetW(),
+      );
+      state.velocity.set(
+        bodyVelocity.GetX(),
+        bodyVelocity.GetY(),
+        bodyVelocity.GetZ(),
+      );
+
+      const localVelocity = state.velocity.applyQuaternion(state.rotation).z;
+
+      if (
+        (forward > 0 && localVelocity < -0.1) ||
+        (forward < 0 && localVelocity > 0.1)
+      ) {
+        return true;
+      }
+    }
+
+    if (forward !== 0) previousForward = forward;
+    return false;
+  };
+
+  return { mustBrake, stopKeeping };
 };
 
 export const setTorqueCurve = (

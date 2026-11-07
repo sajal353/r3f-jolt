@@ -64,6 +64,8 @@ import { ContactForce } from "./events/ContactForce";
 import { Character } from "./systems/Character";
 import { CharacterContacts } from "./systems/CharacterContacts";
 import { Car } from "./systems/Car";
+import { Tank } from "./systems/Tank";
+import { Motorcycle } from "./systems/Motorcycle";
 import { Water } from "./systems/Water";
 import { Cloth } from "./systems/Cloth";
 import { RagdollScene } from "./systems/Ragdoll";
@@ -899,6 +901,40 @@ export const categories: Category[] = [
             <code>tireGrip</code> cutting the impulse a tire may apply; off to
             the right is gravel, <code>combineFriction</code> taking more grip
             sideways than along the tire.
+          </>
+        ),
+      },
+      {
+        name: "Tank",
+        Component: Tank,
+        hook: "useTank",
+        hint: (
+          <>
+            <code>WASD</code> to drive, <code>Space</code> to brake,{" "}
+            <code>R</code> to reset. Two tracks of nine wheels on a{" "}
+            <code>TrackedVehicleController</code>, each driven at its rear wheel.
+            Standing still, <code>A</code> and <code>D</code> spin it on the spot
+            with the tracks running opposite ways; under way the inside track
+            slows down. Eight tonnes and heavy tracks pull away without
+            spinning them, the cast wheels and the suspension take it over the
+            logs and the step, and the crates are shoved aside.
+          </>
+        ),
+      },
+      {
+        name: "Motorcycle",
+        Component: Motorcycle,
+        hook: "useMotorcycle",
+        hint: (
+          <>
+            <code>WASD</code> to ride, <code>Shift</code> for full throttle,{" "}
+            <code>Space</code> for the rear brake, <code>R</code> to reset. Two
+            wheels and a <code>MotorcycleController</code>, whose lean spring
+            tips it into a turn and stands it back up. Weave the cones to watch
+            the lean above the bike, then switch the lean controller off and
+            nothing holds it up. The spring here is half Jolt's: the default
+            throws the bike over at a <code>1/30</code> step, which{" "}
+            <code>vary</code> falls back to on a slow frame.
           </>
         ),
       },

@@ -1174,6 +1174,77 @@ tireGrip: (tire) => {
 
 Either has to be given at mount for it to run. After that, each render's function is the one called.
 
+## `useTank`
+
+Two tracks on a `TrackedVehicleController`. Wheels are the left track front to back, then the right; each track is driven at its rear wheel, and the first and last wheels ride high with no travel, to carry it over what it meets.
+
+```tsx
+const [api] = useTank({
+  position: [0, 2, 0],
+  vehicleSize: { length: 6.4, width: 3.4, height: 1 },
+  wheelSettings: { radius: 0.3, width: 0.3, span: 5.7, offsetDown: 0.5 },
+});
+
+const state = api?.update({ forward, backward, left, right, brake });
+```
+
+`update` returns `{ position, rotation, velocity, wheels }`, reused between calls. `api` also has `body`, `constraint`, `telemetry()`, `debugGroup` and `geometry`.
+
+Turning with no throttle below `pivotSpeed` spins it on the spot, tracks running opposite ways. Under way, the inside track runs at `turnRatio`.
+
+| Option                               | Default              | Notes |
+| ------------------------------------ | -------------------- | ----- |
+| `wheelSettings.count`                | `9`                  | Wheels per track |
+| `wheelSettings.span`                 | required             | First wheel to last, along Z |
+| `wheelSettings.offsetDown`           | required             | Hull centre to road wheels. Sets the ground clearance |
+| `wheelSettings.endRaise`             | `0.3`                | How far above the road wheels the end wheels ride |
+| `suspension`                         | `0.3`, `0.5`, `1` Hz | `{ minLength, maxLength, frequency }` |
+| `castType`                           | `"cylinder"`         | `"ray"` is cheapest, but catches on the side of a low obstacle and stays there |
+| `turnRatio`                          | `0.6`                | Inside track's speed in a moving turn |
+| `pivotSpeed`                         | `1`                  | m/s, below which turning pivots |
+| `brakeTorque`                        | `15000`              | Per track |
+| `trackFriction`                      | `4`, `2`             | `{ longitudinal, lateral }` |
+| `trackInertia`                       | `100`                | kg m². A lighter track slips at a launch, more so at a longer step. Moving the body leaves the tracks spinning: remount with `key` to reset it |
+| `trackDamping`                       | `0.05`               | Fraction of a track's spin lost per second. Scale it down as `trackInertia` goes up, or the top speed drops |
+| `mass`, `maxTorque`                  | `4000`, `500`        | |
+| `maxPitchRollAngle`                  | `60`                 | |
+
+`stateId`, `rotation`, `torqueCurve`, `combineFriction`, `layer` and `debug` work as on `useCar`. A track has no `tireGrip`: Jolt binds that callback for wheeled controllers only.
+
+## `useMotorcycle`
+
+Two wheels on a `MotorcycleController`, whose lean spring tips the bike into a turn and stands it back up. Wheel 0 is the front.
+
+```tsx
+const [api] = useMotorcycle({
+  position: [0, 1.2, 0],
+  vehicleSize: { length: 0.8, width: 0.4, height: 0.6 },
+  wheelSettings: { radius: 0.31, width: 0.05, offsetForward: 0.75, offsetDown: 0.27 },
+});
+
+const state = api?.update({ forward, backward, left, right, handbrake, modifier });
+```
+
+`update` returns the same reused object as `useCar`. `api` also has `body`, `constraint`, `telemetry()`, `setLeanController(enabled)`, `debugGroup` and `geometry`. With the lean controller off, nothing holds the bike up.
+
+| Option                  | Default         | Notes |
+| ----------------------- | --------------- | ----- |
+| `lean.maxAngle`         | `45`            | Degrees |
+| `lean.springConstant`   | `5000`          | |
+| `lean.springDamping`    | `1000`          | |
+| `lean.integrationCoefficient`, `lean.integrationCoefficientDecay` | `0`, `4` | |
+| `lean.smoothingFactor`  | `0.8`           | |
+| `steerRate`             | `4`             | Full lock per `1 / steerRate` seconds, counted in steps |
+| `maxSteerAngle`, `casterAngle` | `30`, `30` | Degrees |
+| `suspension`            | `0.3`, `0.5`, `1.5` and `2` Hz | `{ minLength, maxLength, frontFrequency, rearFrequency }` |
+| `brakeTorque`, `brakeBias` | `750`, `2/3` | Split front to rear |
+| `handBrakeTorque`       | `1500`          | Rear wheel only |
+| `mass`, `maxTorque`, `clutchStrength` | `240`, `150`, `2` | |
+
+`stateId`, `rotation`, `castType`, `torqueCurve`, `tireGrip`, `combineFriction`, `maxPitchRollAngle`, `layer` and `debug` work as on `useCar`.
+
+**The lean spring limits the step.** With the default spring the bike is stable up to a step of about 1/35 s. Steady steps of 1/30 s or longer throw it over, and it warns once. Use a fixed `timeStep` of 1/60, which holds at any frame rate, or halve the spring: `lean: { springConstant: 2500, springDamping: 500 }` holds at 1/30 s. With `timeStep: "vary"`, a slow frame or two is fine but a low frame rate is not.
+
 ## Queries
 
 Five ways to ask the world a question, none of which move anything or add anything to it.
@@ -1581,7 +1652,7 @@ pnpm install
 pnpm dev
 ```
 
-72 scenes in seven categories, one per hook or feature:
+74 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
@@ -1591,7 +1662,7 @@ pnpm dev
 | **Constraints**  | all 12 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints · coaster and lift · gear train, rack, pulley · crane, turret, drawbridge |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
-| **Systems**      | character · character contacts · water · cloth · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · save & restore · rollback · breakable objects |
+| **Systems**      | character · character contacts · water · cloth · car · tank · motorcycle · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · save & restore · rollback · breakable objects |
 
 Toolbar toggles for `<PhysicsDebug />`, `<Physics debug>`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 

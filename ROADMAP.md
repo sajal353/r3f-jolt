@@ -218,8 +218,8 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 ### Advanced vehicles
 
 - [x] Extract a shared vehicle core from `useCar` (constraint + step listener + collision tester + teardown) so all three vehicle types share one correct lifecycle
-- [ ] `useTank` — `TrackedVehicleControllerSettings`, `WheelSettingsTV`, `VehicleTrackSettings` with left/right tracks and `mDrivenWheel`
-- [ ] `useMotorcycle` — `MotorcycleControllerSettings` including lean angle and lean spring
+- [x] `useTank` — `TrackedVehicleControllerSettings`, `WheelSettingsTV`, `VehicleTrackSettings` with left/right tracks and `mDrivenWheel`
+- [x] `useMotorcycle` — `MotorcycleControllerSettings` including lean angle and lean spring
 - [x] Drivetrain telemetry for audio and UI: `VehicleEngine.GetCurrentRPM()`, `VehicleTransmission.GetCurrentGear()` / `GetCurrentRatio()` / `GetClutchFriction()` — engine pitch, shift SFX, tachometer
 - [x] Engine torque curve via `LinearCurve` on `VehicleEngineSettings`
 - [x] Surface-dependent grip through `WheeledVehicleControllerCallbacksJS` + `TireMaxImpulseCallbackResult` (tarmac / gravel / ice)
@@ -249,7 +249,7 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 
 ### Verification
 
-- [ ] Test tank and motorcycle mount/unmount teardown parity with `useCar`
+- [x] Test tank and motorcycle mount/unmount teardown parity with `useCar`
 - [x] Test `MutableCompoundShape` add/remove/modify keeps mass properties sane after `AdjustCenterOfMass()`
 - [x] Test heightfield `SetHeights` updates both physics and render geometry
 - [x] CI determinism test: identical scene run twice, `StateRecorderImpl.IsEqual` passes. **Amended:** `isSameState` on the bytes

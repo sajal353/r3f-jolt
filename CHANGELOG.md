@@ -47,7 +47,9 @@
 - `api.telemetry()`: `{ rpm, gear, ratio, clutch }`, in a reused object.
 - `tireGrip(tire)`: the impulse limits of a grounded tire, with the body under it and its slip. Once per wheel per solver iteration.
 - `combineFriction(wheel, direction, tireFriction, body)`: replaces Jolt's `√(tire × body)`. Once per wheel per direction per step.
-- `TireContact`, `TireFrictionDirection` and `VehicleTelemetry` are exported.
+- `useTank(options)`: two tracks on a `TrackedVehicleController`, each driven at its rear wheel. `update({ forward, backward, left, right, brake })` pivots on the spot at a standstill and slows the inside track under way. Options: `wheelSettings` (`count`, `span`, `offsetDown`, `endRaise`), `suspension`, `castType`, `turnRatio`, `pivotSpeed`, `brakeTorque`, `trackFriction`, `trackInertia`, `trackDamping`, `mass`, `maxTorque`, `torqueCurve`, `maxPitchRollAngle`, `combineFriction`, `stateId`, `layer`, `debug`.
+- `useMotorcycle(options)`: two wheels on a `MotorcycleController`. `lean` sets `maxAngle`, `springConstant`, `springDamping`, `integrationCoefficient`, `integrationCoefficientDecay` and `smoothingFactor`; `api.setLeanController(enabled)` switches it. Also `steerRate`, `casterAngle`, `maxSteerAngle`, `suspension`, `brakeTorque`, `brakeBias`, `handBrakeTorque`, `torqueCurve`, `tireGrip`, `combineFriction`. Warns once of a step too long for the lean spring, which at the defaults starts at about 1/30 s.
+- `TireContact`, `TireFrictionDirection`, `VehicleTelemetry`, `VehicleState` and `VehicleWheelState` are exported.
 
 ### Fixes
 

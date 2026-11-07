@@ -88,10 +88,24 @@ export {
   type CarState,
   type CarWheelState,
 } from "@/Jolt/useCar";
+export {
+  useTank,
+  type UseTankOptions,
+  type TankApi,
+  type TankInput,
+} from "@/Jolt/useTank";
+export {
+  useMotorcycle,
+  type UseMotorcycleOptions,
+  type MotorcycleApi,
+  type MotorcycleInput,
+} from "@/Jolt/useMotorcycle";
 export type {
   TireContact,
   TireFrictionDirection,
+  VehicleState,
   VehicleTelemetry,
+  VehicleWheelState,
 } from "@/Jolt/internal/vehicle";
 
 export {
