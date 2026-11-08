@@ -74,6 +74,12 @@ interface Header {
 
 export interface Snapshots {
   save: (filter?: StateFilter) => Uint8Array;
+  /**
+   * A full save written into `target`'s memory where it fits, so a ring of
+   * snapshots stops allocating once each slot has grown to the world's size.
+   * The result may be a new array; keep it in place of `target`.
+   */
+  saveInto: (target: Uint8Array | null) => Uint8Array;
   restore: (bytes: Uint8Array) => void;
   saveBody: (body: Jolt.Body) => Uint8Array;
   restoreBody: (body: Jolt.Body, bytes: Uint8Array) => void;
@@ -98,6 +104,19 @@ const describe = (ids: number[]) =>
   ids.length > 6
     ? `${ids.slice(0, 6).join(", ")} and ${ids.length - 6} more`
     : ids.join(", ");
+
+/**
+ * `target`'s memory when it is big enough, else a fresh buffer: with a quarter
+ * to spare when it replaces a target, so a world that grows a little does not
+ * reallocate on every save.
+ */
+const fit = (target: Uint8Array | null, size: number) => {
+  if (!target) return new Uint8Array(size);
+  if (target.buffer.byteLength >= size) {
+    return new Uint8Array(target.buffer, 0, size);
+  }
+  return new Uint8Array(new ArrayBuffer(Math.ceil(size * 1.25)), 0, size);
+};
 
 const missing = (expected: number[], live: Set<number>) =>
   expected.filter((id) => !live.has(id));
@@ -191,7 +210,11 @@ export const createSnapshots = (
       .filter((entry) => entry.stateId !== undefined)
       .sort((a, b) => (a.stateId ?? 0) - (b.stateId ?? 0));
 
-  const encode = (header: Omit<Header, "offset">, segments: Uint8Array[]) => {
+  const encode = (
+    header: Omit<Header, "offset">,
+    segments: Uint8Array[],
+    target: Uint8Array | null,
+  ) => {
     const words =
       4 +
       2 +
@@ -207,8 +230,8 @@ export const createSnapshots = (
       ) +
       segments.reduce((total, segment) => total + 4 + segment.length, 0);
 
-    const bytes = new Uint8Array(size);
-    const view = new DataView(bytes.buffer);
+    const bytes = fit(target, size);
+    const view = new DataView(bytes.buffer, 0, size);
     let at = 0;
 
     const u32 = (value: number) => {
@@ -318,10 +341,11 @@ export const createSnapshots = (
     }
   };
 
-  const saveWith = (selection: Selection) => {
+  const saveWith = (selection: Selection, target: Uint8Array | null = null) => {
     // Events still queued are ones the JS state saved below has not heard yet.
     flushEvents();
     constraints.order();
+    writer.clear();
 
     const bodies = liveBodies();
     const constraintEntries = selection.partial
@@ -371,21 +395,28 @@ export const createSnapshots = (
       physicsSystem.SaveState(writer.recorder, FULL as Jolt.EStateRecorderState);
     }
 
-    const segments = [writer.take()];
+    // Segments are cut from the writer's buffer once everything is written,
+    // since a write that outgrows it moves it.
+    const ends = [writer.written().length];
     const sortedConstraints = [...constraintEntries].sort(
       (a, b) => (a.stateId ?? 0) - (b.stateId ?? 0),
     );
     for (const entry of sortedConstraints) {
       entry.constraint.SaveState(writer.recorder);
-      segments.push(writer.take());
+      ends.push(writer.written().length);
     }
     const sortedCharacters = [...characterEntries].sort(
       (a, b) => (a.stateId ?? 0) - (b.stateId ?? 0),
     );
     for (const entry of sortedCharacters) {
       entry.character.SaveState(writer.recorder);
-      segments.push(writer.take());
+      ends.push(writer.written().length);
     }
+
+    const stream = writer.written();
+    const segments = ends.map((end, index) =>
+      stream.subarray(index === 0 ? 0 : ends[index - 1], end),
+    );
 
     const constraintIds = sortedConstraints.map((entry) => entry.stateId ?? 0);
     const characterIds = sortedCharacters.map((entry) => entry.stateId ?? 0);
@@ -406,6 +437,7 @@ export const createSnapshots = (
         sides: savedSides((side) => owners[side.owner].has(side.id)),
       },
       segments,
+      target,
     );
   };
 
@@ -562,6 +594,17 @@ export const createSnapshots = (
     timing.restores += 1;
   };
 
+  const saveInto = (target: Uint8Array | null) =>
+    saveWith(
+      {
+        partial: false,
+        body: () => true,
+        constraint: () => true,
+        character: () => true,
+      },
+      target,
+    );
+
   const saveBody = (body: Jolt.Body) => {
     const value = body.GetID().GetIndexAndSequenceNumber();
     return saveWith({
@@ -577,8 +620,9 @@ export const createSnapshots = (
     object: Jolt.Constraint | Jolt.CharacterVirtual,
     side?: SideState,
   ) => {
+    writer.clear();
     object.SaveState(writer.recorder);
-    const stream = writer.take();
+    const stream = writer.written();
     const values = side?.save() ?? [];
 
     const bytes = new Uint8Array(4 + values.length * 8 + stream.length);
@@ -626,6 +670,7 @@ export const createSnapshots = (
 
   return {
     save,
+    saveInto,
     restore: (bytes) => restore(bytes),
     saveBody,
     restoreBody: (body, bytes) =>

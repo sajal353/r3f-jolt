@@ -140,13 +140,14 @@ describe("useRollback", () => {
 
     inputs.set(10, 600);
     stepTo(api, 40);
-    const straight = rollback.snapshotAt(39);
+    const straight = rollback.snapshotAt(39)?.slice();
     const before = api.saveState();
+    // Wiped, so only a re-recording during the replay can bring it back.
+    rollback.snapshotAt(39)?.fill(0);
 
     expect(rollback.rewind(12)).toBe(true);
 
     expect(isSameState(api.saveState(), before)).toBe(true);
-    expect(rollback.snapshotAt(39)).not.toBe(straight);
     expect(isSameState(rollback.snapshotAt(39) as Uint8Array, straight as Uint8Array)).toBe(true);
 
     await unmount(renderer);
@@ -204,6 +205,31 @@ describe("useRollback", () => {
     expect(api.timing.stepCount).toBe(1);
     expect(rollback.snapshotAt(0)).not.toBeNull();
     expect(rollback.snapshotAt(20)).toBeNull();
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("writes each step over the slot of the step that left the history", async () => {
+    const renderer = await renderPhysics(
+      <>
+        <Floor />
+        <Ball />
+        <Rollback capacity={10} />
+      </>,
+      fixed,
+    );
+    const api = getApi();
+
+    stepTo(api, 15);
+    const early = rollback.snapshotAt(14);
+    const kept = early?.slice();
+    stepTo(api, 25);
+    const late = rollback.snapshotAt(24);
+
+    expect(rollback.snapshotAt(14)).toBeNull();
+    expect(late?.buffer).toBe(early?.buffer);
+    expect(isSameState(late as Uint8Array, kept as Uint8Array)).toBe(false);
 
     await unmount(renderer);
     expectNoAsserts();
@@ -430,7 +456,7 @@ describe("JS state a replay depends on", () => {
     const straight = api.saveState();
     const from = until - span;
     const history = Array.from({ length: span }, (_, index) =>
-      rollback.snapshotAt(from + index),
+      rollback.snapshotAt(from + index)?.slice(),
     );
 
     expect(rollback.rewind(from)).toBe(true);

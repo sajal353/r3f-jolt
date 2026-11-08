@@ -1129,7 +1129,7 @@ describe("replay", () => {
     const straight = getApi().saveState();
     const rollback = need("rollback");
     const history = Array.from({ length: 60 }, (_, index) =>
-      rollback.snapshotAt(40 + index),
+      rollback.snapshotAt(40 + index)?.slice(),
     );
 
     expect(rollback.rewind(40)).toBe(true);

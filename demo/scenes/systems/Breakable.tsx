@@ -63,9 +63,6 @@ const SEAM_LEAN = 0.18;
 const SEAM_JITTER = 0.25;
 const CUT_ATTEMPTS = 8;
 
-/** Temporary, to try chunks as bodies, each on the hull it had in the compound. */
-const CHUNKS_COLLIDE = true;
-
 /**
  * Bricks share a pool of cuts, made once. Cutting all 110 stalls the first render
  * for over a second, and nobody spots a repeat in a wall.
@@ -369,7 +366,11 @@ const spinAxis = new Vector3();
  * body: no hull to build as it breaks, and no pair to solve once it is loose. It
  * falls in plain JS and stops at the floor. One draw call however many there are.
  */
-const createChunks = (bricks: Brick[]) => {
+/**
+ * With `collide`, each chunk is a body on the hull it had in the compound;
+ * without, chunks are only drawn, falling in one `BatchedMesh` to the floor.
+ */
+const createChunks = (bricks: Brick[], collide: boolean) => {
   const shared = new Set(bricks.flatMap(({ cells }) => cells));
   const vertexCount = [...shared].reduce(
     (total, { geometry }) => total + geometry.getAttribute("position").count,
@@ -457,7 +458,7 @@ const createChunks = (bricks: Brick[]) => {
       velocity: Vector3,
       spin: Vector3,
     ) => {
-      if (CHUNKS_COLLIDE) {
+      if (collide) {
         // Held, since its brick may let go of it before the body is mounted.
         shape.AddRef();
         heldShapes.push(shape);
@@ -776,9 +777,9 @@ const Readout = () => {
   );
 };
 
-const buildScene = (startID: number) => {
+const buildScene = (startID: number, collide: boolean) => {
   const bricks = buildWall(startID);
-  return { bricks, chunks: createChunks(bricks) };
+  return { bricks, collide, chunks: createChunks(bricks, collide) };
 };
 
 export const Breakable = () => {
@@ -792,7 +793,9 @@ export const Breakable = () => {
     return nextID.current;
   }, []);
 
-  const [{ bricks, chunks }, setScene] = useState(() => buildScene(0));
+  const [{ bricks, collide, chunks }, setScene] = useState(() =>
+    buildScene(0, true),
+  );
   const [shots, setShots] = useState<Shot[]>([]);
 
   const chunkHolder = useRef<Group>(null);
@@ -875,10 +878,13 @@ export const Breakable = () => {
     };
   }, [canvas, fire]);
 
-  const reset = useCallback(() => {
-    setScene(buildScene(takeID() * 100));
-    setShots([]);
-  }, [takeID]);
+  const rebuild = useCallback(
+    (chunksCollide: boolean) => {
+      setScene(buildScene(takeID() * 100, chunksCollide));
+      setShots([]);
+    },
+    [takeID],
+  );
 
   return (
     <>
@@ -897,7 +903,7 @@ export const Breakable = () => {
 
       <group ref={chunkHolder} />
 
-      {CHUNKS_COLLIDE && <ChunkBodies key={bricks[0].id} chunks={chunks} />}
+      {collide && <ChunkBodies key={bricks[0].id} chunks={chunks} />}
 
       {shots.map((shot) => (
         <Cannonball key={shot.id} shot={shot} />
@@ -906,7 +912,10 @@ export const Breakable = () => {
       <Readout />
 
       <Controls position={[0, 6.8, 0]}>
-        <button onClick={reset}>rebuild wall</button>
+        <button onClick={() => rebuild(collide)}>rebuild wall</button>
+        <button aria-pressed={collide} onClick={() => rebuild(!collide)}>
+          chunks collide {collide ? "on" : "off"}
+        </button>
       </Controls>
     </>
   );

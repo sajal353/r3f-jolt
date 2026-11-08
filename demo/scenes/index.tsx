@@ -1114,7 +1114,8 @@ export const categories: Category[] = [
             it with <code>removeShape</code> and <code>adjustCenterOfMass</code>{" "}
             lets what is left tip; a cannonball shatters it. A chunk flies on the
             hull it had in the compound, so a break builds nothing, and chunks
-            ignore each other. A brick goes when the estimated impulse would change{" "}
+            ignore each other; switch them off to only draw them falling. A
+            brick goes when the estimated impulse would change{" "}
             <i>its own</i> velocity by 0.8 m/s: <code>impulse</code> is momentum,
             so only a mass-relative threshold breaks a whole brick and a piece
             of one alike. It runs from <code>useBodyContacts</code>, whose

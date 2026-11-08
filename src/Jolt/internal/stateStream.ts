@@ -3,8 +3,13 @@ import type { JoltModule } from "../types";
 
 export interface StateWriter {
   recorder: Jolt.StateRecorderJS;
-  /** Bytes written since the last `take`, copied out; the writer starts over. */
-  take: () => Uint8Array;
+  /** Starts over at the beginning of the writer's buffer. */
+  clear: () => void;
+  /**
+   * Bytes written since the last `clear`, as a view of the writer's own buffer:
+   * read it before the next write, which may move it.
+   */
+  written: () => Uint8Array;
   destroy: () => void;
 }
 
@@ -22,7 +27,8 @@ export interface StateReader {
  * `StateRecorderImpl` binds no accessor for its bytes, so a snapshot that has
  * to leave WASM goes through `StateRecorderJS`: Jolt hands over a pointer and a
  * length per value, and they are copied through `HEAPU8` — re-read on every
- * call, since the heap is replaced when it grows.
+ * call, since the heap is replaced when it grows. A save makes a call for
+ * every value, so the copy is a loop rather than a `subarray` view per call.
  */
 export const createStateWriter = (jolt: JoltModule): StateWriter => {
   let buffer = new Uint8Array(4096);
@@ -37,7 +43,10 @@ export const createStateWriter = (jolt: JoltModule): StateWriter => {
       buffer = grown;
     }
 
-    buffer.set(jolt.HEAPU8.subarray(data, data + count), length);
+    const heap = jolt.HEAPU8;
+    for (let index = 0; index < count; index += 1) {
+      buffer[length + index] = heap[data + index];
+    }
     length += count;
   };
   recorder.ReadBytes = function readBytes() {};
@@ -50,11 +59,10 @@ export const createStateWriter = (jolt: JoltModule): StateWriter => {
 
   return {
     recorder,
-    take: () => {
-      const bytes = buffer.slice(0, length);
+    clear: () => {
       length = 0;
-      return bytes;
     },
+    written: () => buffer.subarray(0, length),
     destroy: () => jolt.destroy(recorder),
   };
 };
@@ -74,7 +82,10 @@ export const createStateReader = (jolt: JoltModule): StateReader => {
       return;
     }
 
-    jolt.HEAPU8.set(source.subarray(cursor, cursor + count), data);
+    const heap = jolt.HEAPU8;
+    for (let index = 0; index < count; index += 1) {
+      heap[data + index] = source[cursor + index];
+    }
     cursor += count;
   };
   recorder.IsEOF = function isEOF() {

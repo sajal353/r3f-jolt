@@ -18,7 +18,11 @@ export interface RollbackApi {
    * untouched, when `toStep` is older than the history holds.
    */
   rewind: (toStep: number) => boolean;
-  /** The world as `step` began, or null if it has left the history. */
+  /**
+   * The world as `step` began, or null if it has left the history. The bytes
+   * are the history's own and are written over once `step` leaves it: `slice()`
+   * them to keep them longer.
+   */
   snapshotAt: (step: number) => Uint8Array | null;
 }
 
@@ -34,8 +38,8 @@ const createRollback = (api: JoltApi, capacity: number) => {
   const stepOf = new Array<number>(capacity).fill(-1);
   let seenRestores = timing.restores;
 
+  /** Slots keep their bytes, so the next pass through the ring reuses them. */
   const clear = () => {
-    snapshots.fill(null);
     stepOf.fill(-1);
   };
 
@@ -51,8 +55,9 @@ const createRollback = (api: JoltApi, capacity: number) => {
     if (!timing.resimulating && timing.restores !== seenRestores) clear();
     seenRestores = timing.restores;
 
-    snapshots[index % capacity] = api.saveState();
-    stepOf[index % capacity] = index;
+    const slot = index % capacity;
+    snapshots[slot] = api.snapshots.saveInto(snapshots[slot]);
+    stepOf[slot] = index;
   };
 
   const rollback: RollbackApi = {
@@ -68,7 +73,12 @@ const createRollback = (api: JoltApi, capacity: number) => {
     snapshotAt,
   };
 
-  return { rollback, record, clear };
+  const release = () => {
+    clear();
+    snapshots.fill(null);
+  };
+
+  return { rollback, record, release };
 };
 
 /**
@@ -81,7 +91,7 @@ const createRollback = (api: JoltApi, capacity: number) => {
  */
 export const useRollback = ({ capacity }: UseRollbackOptions): RollbackApi => {
   const api = useJolt();
-  const [{ rollback, record, clear }] = useState(() =>
+  const [{ rollback, record, release }] = useState(() =>
     createRollback(api, capacity),
   );
 
@@ -90,9 +100,9 @@ export const useRollback = ({ capacity }: UseRollbackOptions): RollbackApi => {
 
     return () => {
       stop();
-      clear();
+      release();
     };
-  }, [api, record, clear]);
+  }, [api, record, release]);
 
   return rollback;
 };

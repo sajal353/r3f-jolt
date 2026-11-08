@@ -240,10 +240,10 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 - [x] `StateRecorderImpl.IsEqual` as a determinism assertion, wired into a CI test that runs a scene twice and compares. **Amended:** `isSameState(a, b)` compares the bytes, since snapshots are not held in a `StateRecorderImpl`
 - [x] `StateRecorderJS` for custom streams (network transport). **Amended:** `saveState` is built on it and returns plain bytes, which any transport carries
 - [x] **Per-object** `SaveState` / `RestoreState` on `Body`, `Constraint` and `CharacterBase` (jolt 0.30.0) — snapshot only what changed instead of the whole world, which is what makes rollback affordable. **Amended:** a body's goes through `PhysicsSystem.SaveState` with a filter, so its broadphase bounds and sleep state are restored with it
-- [ ] `StateRecorderFilter` plus multi-part save/restore (jolt 0.27.0), so a snapshot can be split across frames or across a network MTU. **Amended:** the filter is `saveState({ body, constraint, character })`. A snapshot is plain bytes, so splitting one across packets needs nothing from Jolt; restoring in parts across frames is not wrapped
+- [x] `StateRecorderFilter` plus multi-part save/restore (jolt 0.27.0), so a snapshot can be split across frames or across a network MTU. **Amended:** the filter is `saveState({ body, constraint, character })`. A snapshot is plain bytes, so splitting one across packets needs nothing from Jolt. Restoring in parts across frames moves to 0.6.0
 - [x] Deterministic character identity — `CharacterID` and `CharacterVirtual`'s `mInnerBodyIDOverride`, both added upstream specifically for client/server setups. **Amended:** `CharacterID` cannot be built with a chosen value, so a character is named by its `stateId`, which also sets `mInnerBodyIDOverride`
 - [x] Rollback support — a ring buffer of snapshots plus re-simulation on late input, with a documented worked example. **Amended:** `useRollback({ capacity })` on `api.replay`. Step callbacks already carried the step's index, so no `stepIndex` was added. A ragdoll driven by animation and skinned cloth read the animation at frame rate and do not replay. Marked experimental: it has not run over a real network
-- [x] Strictly fixed-step loop decoupled from rendering, building on 0.3.0's `updateLoop: "independent"`. **Amended:** `updateLoop: "fixed"`, on a timer and the wall clock; it still runs on the page's main thread. Marked experimental
+- [x] Strictly fixed-step loop decoupled from rendering, building on 0.3.0's `updateLoop: "independent"`. **Amended:** `updateLoop: "fixed"`, on a timer and the wall clock; it still runs on the page's main thread, and a worker moves to 0.6.0. Marked experimental
 - [x] **Creation-order stability** — snapshots only restore correctly if bodies are created in the same order, which React's mount order does **not** guarantee. Needs an explicit stable-id mechanism; the hardest correctness problem in this phase, and it should fail loudly rather than silently scrambling bodies. **Amended:** `stateId` on every hook, created with `CreateBodyWithID`. `CreateRagdoll` takes no ids, so `useRagdoll` frees its range just before so Jolt allocates onto it in order. Constraints with a `stateId` are kept in `stateId` order, since Jolt solves an island's constraints in the order they were added
 - [x] Document the honest limits: determinism holds for the same build and platform; cross-browser float determinism is not guaranteed, and soft bodies/ragdolls must be constructed identically
 
@@ -260,6 +260,11 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 ## 0.6.0 — Hair, rope and cables (Cosserat rods)
 
 **Agreed scope:** hair with guide strands · rope and cables · oriented strand rendering. Cosserat rods carry an orientation per segment, so unlike a distance chain they resist twisting and expose a material frame for rendering. Same primitive serves hair, rope, cables, chains, tails and vines.
+
+### Carried over from 0.5.0
+
+- [ ] Restore a snapshot in parts across frames, with Jolt's `SetIsLastPart`, for a world too large to restore in one
+- [ ] Physics in a worker. Hooks hand out live Jolt objects and run step callbacks inside the step, so a worker needs a message-based API of its own
 
 ### Rod primitive
 

@@ -193,7 +193,7 @@ const { step, timing } = useJolt();
 
 `step(delta)` feeds `delta` through the accumulator, so it runs as many fixed steps as fit and keeps the remainder — `step()` with no argument is exactly one. It does nothing while `paused`.
 
-`updateLoop: "fixed"` (experimental) runs the world off a timer and the wall clock, as well as on each frame. It keeps time in a background tab, where frames stop, and it never drops a step: time past `maxSubSteps` is what `"follow"` throws away, whereas `"fixed"` ignores that cap and catches up, spending at most 50 ms per tick and leaving the rest for the next. Use it when the step count has to follow real time, as with a [peer](#rollback). It needs a numeric `timeStep`, and `paused` stops its clock.
+`updateLoop: "fixed"` (experimental) runs the world off a timer and the wall clock, as well as on each frame. It keeps time in a background tab, where frames stop, and it never drops a step: time past `maxSubSteps` is what `"follow"` throws away, whereas `"fixed"` ignores that cap and catches up, spending at most 50 ms per tick and leaving the rest for the next. Use it when the step count has to follow real time, as with a [peer](#rollback). It needs a numeric `timeStep`, and `paused` stops its clock. It runs on the page's main thread, so a long task there holds it up until the task ends, and a hidden tab's throttled timer ticks it less often.
 
 **`frameloop="demand"` works out of the box.** On demand, R3F draws a frame only when something asks for one, so a physics world would otherwise freeze mid-fall. `<Physics>` asks for the next frame while any body is awake, and stops asking once they have all gone to sleep — which is the point of demand rather than a workaround for it.
 
@@ -1535,7 +1535,7 @@ const Player = ({ socket }) => {
 | `useRollback` returns | |
 | --- | --- |
 | `rewind(step)` | Re-simulates from the start of `step`. True if the world now reflects it, which includes a step not yet reached. False, with the world untouched, if `step` has left the history |
-| `snapshotAt(step)` | The world as `step` began, or `null`. Compare two peers' with `isSameState` to detect a desync |
+| `snapshotAt(step)` | The world as `step` began, or `null`. Compare two peers' with `isSameState` to detect a desync. The bytes are written over once `step` leaves the history: `slice()` them to keep them |
 
 `api.replay(bytes, untilStep)` is the primitive underneath, for your own history: restore a snapshot and run forward to a step.
 

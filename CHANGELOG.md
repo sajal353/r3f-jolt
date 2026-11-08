@@ -19,7 +19,7 @@
 
 `useRollback`, `api.replay`, `timing.resimulating` and `updateLoop: "fixed"` may change in a minor release.
 
-- `useRollback({ capacity })`: a snapshot of each of the last `capacity` steps. `rewind(step)` goes back to a late input's step and re-simulates to the present; `snapshotAt(step)` hands over a step's snapshot, for desync checks.
+- `useRollback({ capacity })`: a snapshot of each of the last `capacity` steps. `rewind(step)` goes back to a late input's step and re-simulates to the present; `snapshotAt(step)` hands over a step's snapshot, for desync checks. Each slot's memory is reused, so `slice()` a snapshot to keep it past `capacity` steps.
 - `api.replay(bytes, untilStep)`: restore a snapshot and run fixed steps to a given one, leaving the accumulator alone.
 - `PhysicsTiming.resimulating`: true during a re-run and for the events it delivers, so a side effect can happen once.
 - `updateLoop: "fixed"`: runs off a timer and the wall clock, so a world keeps time in a background tab and never drops a step.
