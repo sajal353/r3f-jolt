@@ -17,8 +17,8 @@ export interface UseSensorOptions {
   contactForce?: boolean;
   /**
    * Jolt only keeps a sensor contact while the other body is **awake**, so a
-   * crate that settles inside a trigger fires an exit without moving — measured,
-   * one step after it falls asleep, and an enter again the moment it wakes.
+   * crate that settles inside a trigger fires an exit without moving, one step
+   * after it falls asleep, and an enter again the moment it wakes.
    *
    * Left on, a body that goes to sleep inside the volume stays in `inside` and
    * its exit is held back until it genuinely leaves or is destroyed. Turn it off

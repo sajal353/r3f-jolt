@@ -323,8 +323,8 @@ export const shapeFromResult = <S extends Jolt.Shape>(
 };
 
 /**
- * `ShapeResult.Get()` hands back a base-`Shape` wrapper whatever it built —
- * measured, and the generated types do not admit it: a `PlaneShape` from
+ * `ShapeResult.Get()` hands back a base-`Shape` wrapper whatever it built, and
+ * the generated types do not admit it: a `PlaneShape` from
  * `Get()` has no `GetHalfExtent` and a `HeightFieldShape` no `IsNoCollision`.
  * Anything needing a subclass's own methods has to `castObject` first, which
  * wraps the same pointer, so ownership is unaffected.
@@ -341,7 +341,7 @@ export const shapeFromResultAs = <
 
 /**
  * Jolt copies the group into whatever takes it and refs the filter on the way,
- * so the one built here is a temporary — measured: assigning it to a
+ * so the one built here is a temporary: assigning it to a
  * `BodyCreationSettings` takes the filter's refcount up by one and destroying
  * this brings it back down, leaving the settings' own copy holding a reference.
  */

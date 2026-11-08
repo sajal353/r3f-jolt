@@ -143,7 +143,7 @@ const validate = (sampleCount: number, blockSize: number, bits: number) => {
 /**
  * Jolt reads and writes heights a block at a time and only asserts on a
  * misaligned region in a debug build. A release build walks off the end of the
- * heap instead — measured. Refusing here is the cheap version of that.
+ * heap instead, so refusing here is the cheap version of that check.
  */
 const checkRegion = (
   x: number,

@@ -36,8 +36,8 @@ const ROWS = 13;
  * How much velocity the estimated impulse would give this piece, in m/s.
  * Mass-relative on purpose: `impulse` is momentum, so one collision reads 3000
  * against a 246 kg brick and 119 against a 40 kg chunk off it, and no absolute
- * number breaks both. Measured — settling peaks at 0.23, a cannonball gives
- * what it hits 4 to 25.
+ * number breaks both. Settling peaks at 0.23; a cannonball gives what it hits
+ * 4 to 25.
  */
 const BREAK_DELTA_V = 0.8;
 

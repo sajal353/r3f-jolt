@@ -109,7 +109,7 @@ export const usePlane = (options: UsePlaneOptions) => {
 
       const settings = new jolt.PlaneShapeSettings(plane);
       // The constructor's `inHalfExtent` argument is silently dropped when no
-      // material is passed — measured. Only the field takes.
+      // material is passed; only the field takes.
       settings.mHalfExtent = halfExtent;
 
       const result = settings.Create();

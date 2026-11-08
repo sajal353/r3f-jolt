@@ -7,12 +7,11 @@
 - `saveState(filter?)` and `restoreState(bytes)` on `useJolt()`: the whole world as a `Uint8Array` — bodies, contacts, constraints, characters and the step clock. `restoreState` puts `timing.stepCount` back too.
 - `stateId` on every body hook, `useSoftBody`, `useInstancedBodies` (instance `i` is `stateId + i`), `useRagdoll` (part `i` is `stateId + i`), `useCar`, `useCharacter` and the constraint hooks. Bodies are created on that Jolt id, so a world mounted in a different order takes the same snapshot. `saveState` throws, naming the hooks, if anything lacks one; a clash throws at mount, naming the holder; `restoreState` throws, listing the ids that differ, for a snapshot of another world.
 - Constraints with a `stateId` are solved in `stateId` order, so two worlds mounted differently simulate a snapshot alike.
-- A `filter` (`{ body, constraint, character }`, each by `stateId`) saves part of the world, without contacts or the clock.
+- A `filter` (`StateFilter`: `{ body, constraint, character }`, each by `stateId`) saves part of the world, without contacts or the clock.
 - `saveState()` / `restoreState(bytes)` on the body, soft-body, constraint and character apis, for one object alone.
 - `isSameState(a, b)`: byte-for-byte comparison, the determinism check.
 - `PhysicsTiming.restores` counts restores; interpolation, sleeping bodies' held poses and instanced meshes re-read after one.
 - `useRagdoll` adds its bodies and joints itself rather than through `Ragdoll.AddToPhysicsSystem`; behaviour is unchanged.
-
 - What hooks keep in JS to run the world is saved with it: a character's inertia and posture, a car's reverse logic, `useSwimming`, a joint's load towards `breakForce`, a sensor's `inside`.
 
 ### Rollback (experimental)
@@ -22,14 +21,14 @@
 - `useRollback({ capacity })`: a snapshot of each of the last `capacity` steps. `rewind(step)` goes back to a late input's step and re-simulates to the present; `snapshotAt(step)` hands over a step's snapshot, for desync checks. Each slot's memory is reused, so `slice()` a snapshot to keep it past `capacity` steps.
 - `api.replay(bytes, untilStep)`: restore a snapshot and run fixed steps to a given one, leaving the accumulator alone.
 - `PhysicsTiming.resimulating`: true during a re-run and for the events it delivers, so a side effect can happen once.
-- `updateLoop: "fixed"`: runs off a timer and the wall clock, so a world keeps time in a background tab and never drops a step.
+- `updateLoop: "fixed"`: runs off a timer and the wall clock, so a world keeps time in a background tab and never drops a step. It runs on the page's main thread.
 - A `"start"` phase on `api.steps`, ahead of every `"before"` callback.
 - Saving a snapshot delivers queued contact, activation and water events first, so with `useRollback` they arrive once per step.
 
 ### Machinery constraints
 
 - `usePathConstraint`: body 2 held to a curve on body 1 or the world. `points` (`{ position, tangent?, normal? }`) or a computed `path`; `looping`, `pathPosition`, `pathRotation`, `pathFraction`, `rotation`, `maxFrictionForce`, and a `motor` driven in metres per second or to a fraction. A `points` path searches near the last fraction, so it holds its track where it crosses itself.
-- `samplePath({ points, looping }, perFraction?)`: the curve as `Vector3[]`, for drawing it.
+- `samplePath({ points, looping }, perFraction?)`: the curve as `Vector3[]`, for drawing it. `CustomPath`, `PathPoint` and `PathSample` are exported.
 - `useGearConstraint`: two rotations in a ratio, by `teeth` or `ratio`. `hinges` corrects drift.
 - `useRackAndPinionConstraint`: a rotation and a travel in a ratio, by `teeth` or `ratio`. `hinge` and `slider` correct drift.
 - `usePulleyConstraint`: two bodies on one rope over two fixed points, with `ratio`, `minLength`, `maxLength`, `setLength` and `getCurrentLength`.
@@ -63,6 +62,11 @@
 - Constraints › Path: a coaster on a banked circuit and a three-floor lift.
 - Constraints › Machinery: a gear train, a rack and pinion, a pulley.
 - Constraints › Motorised: a crane, a turret tracking a target, a drawbridge.
+- Shapes › Craters: shells dig a heightfield with `getHeights` and `setHeights`, and sleeping balls wake as the ground goes.
+- Systems › Breakable objects: rebuilt on `useMutableCompound`. A knock chips a brick and a cannonball shatters it; its chunks collide, or a button only draws them.
+- Systems › Car: gear and rpm from `telemetry()`, a `torqueCurve`, ice through `tireGrip` and gravel through `combineFriction`.
+- Systems › Tank: logs, a step, a crate wall and a ramp.
+- Systems › Motorcycle: cones and ramps, with the lean controller switchable.
 
 ## 0.4.0
 

@@ -1150,7 +1150,7 @@ Each axle's share is split evenly between its two wheels, so the defaults give 2
 
 `telemetry()` returns `{ rpm, gear, ratio, clutch }`, in an object reused between calls. `gear` is 0 in neutral and negative in reverse; `clutch` runs from 0, disengaged, to 1.
 
-`torqueCurve` is the fraction of `maxTorque` by fraction of the engine's maximum RPM, as `[rpmFraction, torque]` points. Jolt holds the engine at its minimum RPM through the clutch, so a car on a curve of zeros still creeps in first gear.
+`torqueCurve` is the fraction of `maxTorque` by fraction of the engine's maximum RPM, as `[rpmFraction, torque]` points. Jolt holds the engine at its minimum RPM through the clutch, so a car on a curve of zeros still creeps in first gear under throttle.
 
 ```tsx
 torqueCurve: [[0, 0.5], [0.7, 1], [1, 0.65]],

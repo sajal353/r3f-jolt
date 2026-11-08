@@ -6,8 +6,8 @@ import type { JoltApi, JoltModule } from "../types";
  * batch path walks it once for the whole set, which is the difference between a
  * thousand-body swarm mounting in a frame and mounting in several.
  *
- * **`AddBodiesPrepare` sorts `ioBodies` in place** — measured: twelve ids pushed
- * in descending order came back ascending, and stayed so through `Finalize`. So
+ * **`AddBodiesPrepare` sorts `ioBodies` in place**: ids pushed in descending
+ * order come back ascending, and stay so through `Finalize`. So
  * the array handed to Jolt is a transient built per call and never the source of
  * truth for "which body is instance 7"; the caller keeps its own list in
  * creation order.
