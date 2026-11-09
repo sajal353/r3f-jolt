@@ -267,7 +267,9 @@ export const buildRagdoll = (
 
   const ids = ragdoll.GetBodyIDs();
   const bodyIDs = rig.names.map((_, index) => ids.at(index));
-  for (const id of bodyIDs) stateIds.track(id, "useRagdoll");
+  for (const id of bodyIDs) {
+    stateIds.track(id, "useRagdoll", stateId !== undefined);
+  }
 
   if (stateId !== undefined) {
     try {

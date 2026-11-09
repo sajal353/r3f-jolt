@@ -5,7 +5,7 @@
 ### Save and restore
 
 - `saveState(filter?)` and `restoreState(bytes)` on `useJolt()`: the whole world as a `Uint8Array` — bodies, contacts, constraints, characters and the step clock. `restoreState` puts `timing.stepCount` back too.
-- `stateId` on every body hook, `useSoftBody`, `useInstancedBodies` (instance `i` is `stateId + i`), `useRagdoll` (part `i` is `stateId + i`), `useCar`, `useCharacter` and the constraint hooks. Bodies are created on that Jolt id, so a world mounted in a different order takes the same snapshot. `saveState` throws, naming the hooks, if anything lacks one; a clash throws at mount, naming the holder; `restoreState` throws, listing the ids that differ, for a snapshot of another world.
+- `stateId` on every body hook, `useSoftBody`, `useInstancedBodies` (instance `i` is `stateId + i`), `useRagdoll` (part `i` is `stateId + i`), `useCar`, `useTank` and `useMotorcycle` (the chassis, and the vehicle constraint among constraints), `useCharacter` and the constraint hooks. Bodies are created on that Jolt id, so a world mounted in a different order takes the same snapshot. `saveState` throws, naming the hooks, if anything lacks one; a clash throws at mount, naming the holder; `restoreState` throws, listing the ids that differ, for a snapshot of another world, and throws inside a step callback.
 - Constraints with a `stateId` are solved in `stateId` order, so two worlds mounted differently simulate a snapshot alike.
 - A `filter` (`StateFilter`: `{ body, constraint, character }`, each by `stateId`) saves part of the world, without contacts or the clock.
 - `saveState()` / `restoreState(bytes)` on the body, soft-body, constraint and character apis, for one object alone.

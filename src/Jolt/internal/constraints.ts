@@ -1,4 +1,5 @@
 import type Jolt from "jolt-physics";
+import { requireWholeStateId } from "./stateIds";
 import type {
   AttachedConstraint,
   ConstraintEntry,
@@ -39,27 +40,25 @@ export const createConstraintRegistry = (
     for (const entry of entries) visit(entry);
   };
 
+  const check = (stateId: number, hook: string) => {
+    requireWholeStateId(stateId, hook);
+
+    const holder = attached.find((other) => other.stateId === stateId);
+    if (holder) {
+      throw new Error(
+        `r3f-jolt: ${hook} constraint stateId ${stateId} is taken by ` +
+          `${holder.hook}. Constraint stateIds are numbered apart from ` +
+          "bodies, but each one names a single constraint.",
+      );
+    }
+  };
+
   const attach = (
     constraint: Jolt.Constraint,
     stateId: number | undefined,
     hook: string,
   ) => {
-    if (stateId !== undefined) {
-      if (!Number.isInteger(stateId) || stateId < 0) {
-        throw new Error(
-          `r3f-jolt: ${hook} stateId ${stateId} must be a whole number, 0 or more.`,
-        );
-      }
-
-      const holder = attached.find((other) => other.stateId === stateId);
-      if (holder) {
-        throw new Error(
-          `r3f-jolt: ${hook} constraint stateId ${stateId} is taken by ` +
-            `${holder.hook}. Constraint stateIds are numbered apart from ` +
-            "bodies, but each one names a single constraint.",
-        );
-      }
-    }
+    if (stateId !== undefined) check(stateId, hook);
 
     const entry: AttachedConstraint = { constraint, stateId, hook };
     physicsSystem.AddConstraint(constraint);
@@ -106,6 +105,7 @@ export const createConstraintRegistry = (
     add,
     forEach,
     size: () => entries.size,
+    check,
     attach,
     order,
     attached: () => attached,

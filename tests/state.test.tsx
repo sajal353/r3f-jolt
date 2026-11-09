@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { describe, expect, it } from "vitest";
+import { useEffect, type ReactNode } from "react";
+import { describe, expect, it, vi } from "vitest";
 import {
   PlaneGeometry,
   Quaternion,
@@ -28,6 +28,7 @@ import type { ConstraintApi } from "@/Jolt/internal/useConstraint";
 import {
   expectNoAsserts,
   getApi,
+  Refused,
   renderPhysics,
   step,
   unmount,
@@ -418,9 +419,9 @@ const held: {
   softBody?: { saveState: () => Uint8Array; body: Jolt.Body };
 } = {};
 
-const Car = () => {
+const Car = ({ stateId = 20 }: { stateId?: number }) => {
   const [api] = useCar({
-    stateId: 20,
+    stateId,
     position: [0, 2, 0],
     vehicleSize: { length: 4, width: 1.8, height: 1 },
     wheelSettings: { radius: 0.35, width: 0.28, offsetForward: 1.4, offsetDown: 0.3 },
@@ -498,9 +499,15 @@ const Walker = () => {
   return null;
 };
 
-const Mannequin = ({ scene }: { scene: Object3D }) => {
+const Mannequin = ({
+  scene,
+  stateId = 100,
+}: {
+  scene: Object3D;
+  stateId?: number;
+}) => {
   const model = useCharacterModel(scene);
-  const [ragdoll] = useRagdoll(model, { stateId: 100 });
+  const [ragdoll] = useRagdoll(model, { stateId });
 
   useEffect(() => {
     held.ragdoll = ragdoll;
@@ -570,5 +577,193 @@ describe("stateId on every hook", () => {
         </>,
       ),
     ).rejects.toThrow(/useRagdoll stateId 105 is taken by useBox \(stateId 105\)/);
+  });
+});
+
+/** A crouching capsule of no radius, which Jolt refuses after the standing one is built. */
+const Squashed = () => {
+  useCharacter({
+    position: [4, 1, -4],
+    options: {
+      height: { standing: 1.8, crouching: 0.9 },
+      radius: { standing: 0.35, crouching: 0 },
+    },
+  });
+  return null;
+};
+
+const Ghost = ({ stateId }: { stateId: number }) => {
+  useCharacter({
+    stateId,
+    position: [4, 1, -4],
+    options: {
+      height: { standing: 1.8, crouching: 0.9 },
+      radius: { standing: 0.35, crouching: 0.35 },
+    },
+  });
+  return null;
+};
+
+describe("a refused stateId leaves nothing behind", () => {
+  const refusals: unknown[] = [];
+  const caught = (error: unknown) => {
+    refusals.push(error);
+  };
+
+  /**
+   * Mounts `refused` beside the jointed pile, whose hinge is constraint
+   * stateId 7, and reports what it left behind.
+   */
+  const mountBeside = async (refused: ReactNode) => {
+    refusals.length = 0;
+    const renderer = await mountPile();
+
+    const api = getApi();
+    const bodies = api.physicsSystem.GetNumBodies();
+    const constraints = api.constraints.attached().length;
+    const free = api.Jolt.JoltInterface.prototype.sGetFreeMemory();
+
+    await updatePhysics(
+      renderer,
+      <>
+        <Pile />
+        <Joints />
+        <Refused onError={caught}>{refused}</Refused>
+      </>,
+    );
+
+    return {
+      renderer,
+      api,
+      refusal: String(refusals[0]),
+      bodiesLeft: api.physicsSystem.GetNumBodies() - bodies,
+      constraintsLeft: api.constraints.attached().length - constraints,
+      heapLost: free - api.Jolt.JoltInterface.prototype.sGetFreeMemory(),
+    };
+  };
+
+  it("a car whose constraint stateId a joint holds", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await mountBeside(<Car stateId={7} />);
+
+    expect(result.refusal).toContain("constraint stateId 7 is taken by useHingeConstraint");
+    expect(result.bodiesLeft).toBe(0);
+    expect(result.constraintsLeft).toBe(0);
+    expect(() => result.api.saveState()).not.toThrow();
+
+    error.mockRestore();
+    await unmount(result.renderer);
+    expectNoAsserts();
+  });
+
+  it("a ragdoll whose joint stateId a joint holds", async () => {
+    const { scene } = await loadMannequin();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await mountBeside(<Mannequin scene={scene} stateId={5} />);
+
+    expect(result.refusal).toContain("constraint stateId 7 is taken by useHingeConstraint");
+    expect(result.bodiesLeft).toBe(0);
+    expect(result.constraintsLeft).toBe(0);
+    expect(() => result.api.saveState()).not.toThrow();
+
+    error.mockRestore();
+    await unmount(result.renderer);
+    expectNoAsserts();
+  });
+
+  it("a character whose stateId another character holds", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await mountBeside(
+      <>
+        <Ghost stateId={7} />
+        <Refused onError={caught}>
+          <Ghost stateId={7} />
+        </Refused>
+      </>,
+    );
+
+    expect(result.refusal).toContain("character stateId 7 is taken by useCharacter");
+    expect(result.api.stateIds.characters()).toHaveLength(1);
+
+    error.mockRestore();
+    await unmount(result.renderer);
+    expectNoAsserts();
+  });
+
+  it("a character whose inner body stateId a body holds frees what it built", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await mountBeside(<Walker />);
+
+    expect(result.refusal).toContain("useCharacter stateId 2 is taken by useBox");
+    expect(result.bodiesLeft).toBe(0);
+    expect(result.heapLost).toBeLessThanOrEqual(0);
+
+    error.mockRestore();
+    await unmount(result.renderer);
+    expectNoAsserts();
+  });
+
+  it("a character stateId that a snapshot could not carry", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const stateId of [-1, 1.5]) {
+      const result = await mountBeside(<Ghost stateId={stateId} />);
+      expect(result.refusal).toContain(`stateId ${stateId} must be a whole number`);
+      expect(result.api.stateIds.characters()).toHaveLength(0);
+      await unmount(result.renderer);
+    }
+    error.mockRestore();
+    expectNoAsserts();
+  });
+
+  it("a character whose shape cannot be built frees what it built", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await mountBeside(<Squashed />);
+
+    expect(result.refusal).toContain("Invalid radius");
+    expect(result.heapLost).toBeLessThanOrEqual(0);
+
+    error.mockRestore();
+    await unmount(result.renderer);
+    expectNoAsserts();
+  });
+
+  it("names an unstated body even once its slot's sequence wraps to 0", async () => {
+    const renderer = await renderPhysics(<Floor stateId={0} />);
+    const api = getApi();
+    const { Jolt: jolt, bodyInterface, stateIds } = api;
+
+    const shape = new jolt.SphereShape(0.5);
+    shape.AddRef();
+    const position = new jolt.RVec3(0, 5, 0);
+    const rotation = new jolt.Quat(0, 0, 0, 1);
+    const settings = new jolt.BodyCreationSettings(
+      shape,
+      position,
+      rotation,
+      jolt.EMotionType_Dynamic,
+      1,
+    );
+
+    // A pooled bullet without a stateId, spawned and despawned in one slot
+    // until Jolt's 8-bit sequence number has gone all the way round.
+    const claimedStated: number[] = [];
+    for (let shot = 0; shot < 300; shot += 1) {
+      const id = stateIds.createBody(settings, undefined, "a pooled bullet").GetID();
+      bodyInterface.AddBody(id, jolt.EActivation_Activate);
+      if (stateIds.isStated(id)) claimedStated.push(shot);
+      if (shot < 299) {
+        bodyInterface.RemoveBody(id);
+        bodyInterface.DestroyBody(id);
+      }
+    }
+    expect(claimedStated).toEqual([]);
+    expect(() => api.saveState()).toThrow(/a body from a pooled bullet/);
+
+    jolt.destroy(settings);
+    jolt.destroy(position);
+    jolt.destroy(rotation);
+    shape.Release();
+    await unmount(renderer);
+    expectNoAsserts();
   });
 });

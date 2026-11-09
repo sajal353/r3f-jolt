@@ -21,6 +21,7 @@ import { isSameState } from "@/Jolt/internal/snapshot";
 import {
   expectNoAsserts,
   getApi,
+  Refused,
   renderPhysics,
   step,
   unmount,
@@ -488,22 +489,32 @@ describe("useTank", () => {
     }
   });
 
-  it("refuses a track of one wheel", async () => {
+  it("refuses a track of one wheel, leaving no chassis behind", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    await expect(
-      renderPhysics(
-        <Tank
-          wheelSettings={{
-            radius: 0.3,
-            width: 0.3,
-            span: 5,
-            offsetDown: 0.3,
-            count: 1,
-          }}
-        />,
-      ),
-    ).rejects.toThrow("at least 2 wheels");
+    const refusals: unknown[] = [];
+    const renderer = await renderPhysics(
+      <>
+        <Ground />
+        <Refused onError={(refusal) => refusals.push(refusal)}>
+          <Tank
+            wheelSettings={{
+              radius: 0.3,
+              width: 0.3,
+              span: 5,
+              offsetDown: 0.3,
+              count: 1,
+            }}
+          />
+        </Refused>
+      </>,
+    );
+
+    expect(String(refusals[0])).toContain("at least 2 wheels");
+    expect(getApi().physicsSystem.GetNumBodies()).toBe(1);
+
     error.mockRestore();
+    await unmount(renderer);
+    expectNoAsserts();
   });
 
   it("replays the same from a snapshot", async () => {

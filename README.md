@@ -1479,7 +1479,8 @@ restoreState(checkpoint);
 
 | Hook | What its `stateId` names |
 | --- | --- |
-| Body hooks, `useSoftBody`, `useCar` | The body; `useCar`'s vehicle constraint too |
+| Body hooks, `useSoftBody` | The body |
+| `useCar`, `useTank`, `useMotorcycle` | The chassis body, and the vehicle constraint in the constraint numbering |
 | `useInstancedBodies` | Instance `i` is body `stateId + i` |
 | `useRagdoll` | Part `i` is body `stateId + i`; the joint into part `i` is constraint `stateId + i` |
 | Constraint hooks | The constraint. Numbered apart from bodies |
@@ -1542,7 +1543,7 @@ const Player = ({ socket }) => {
 - **Everything that changes the world belongs in a step callback, keyed by step.** A force applied from a `useFrame` or a click is not in the re-run.
 - **Check `timing.resimulating` before a side effect.** Re-run steps fire step callbacks, contact events and `onBreak` again, with it true. A sound belongs behind it.
 - **The bodies must stay the same across the history.** A `rewind` past a body that mounted or unmounted throws, naming it, so keep a pool rather than spawning.
-- **`rewind` throws inside a step callback.** Call it where the input arrives.
+- **`rewind` and `restoreState` throw inside a step callback.** The step under way would carry on with the old clock. Call them where the input or snapshot arrives.
 - **Each step saves the whole world**, at about 6 µs and 135 bytes a body: comfortable at a few hundred bodies, a third of a 60 Hz frame at a thousand.
 - A rewind costs one restore plus every step it re-runs, within a single frame, so long rewinds in a busy world will show. A corrected body jumps to its new place; smoothing that is the game's call.
 - A restore from anywhere else empties the history. `timeStep` must be numeric.

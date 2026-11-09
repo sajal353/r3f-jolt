@@ -10,7 +10,12 @@ import {
   type PathConstraintApi,
   type UsePathConstraintOptions,
 } from "@/Jolt/usePathConstraint";
-import { samplePath, type PathPoint } from "@/Jolt/internal/constraintPath";
+import {
+  resolvePathSource,
+  samplePath,
+  type PathPoint,
+  type PathSample,
+} from "@/Jolt/internal/constraintPath";
 import { useGearConstraint, type GearConstraintApi } from "@/Jolt/useGearConstraint";
 import { useRackAndPinionConstraint } from "@/Jolt/useRackAndPinionConstraint";
 import {
@@ -271,6 +276,49 @@ describe("usePathConstraint", () => {
 
     await unmount(renderer);
     expectNoAsserts();
+  });
+
+  it("reads a loop the same either side of its seam", () => {
+    const sample: PathSample = {
+      position: new Vector3(),
+      tangent: new Vector3(),
+      normal: new Vector3(),
+    };
+    const ring = resolvePathSource(RING, true, undefined, "test");
+    const end = ring.maxFraction;
+
+    ring.at(end - 0.25, sample);
+    const before = sample.position.clone();
+    ring.at(-0.25, sample);
+    expect(sample.position.distanceTo(before)).toBeLessThan(1e-9);
+
+    // Searched from just past fraction 0, which looks back across the seam.
+    for (const truth of [end - 0.5, end - 0.05, 0.05]) {
+      ring.at(truth, sample);
+      expect(ring.closest(sample.position.clone(), 0.1)).toBeCloseTo(truth, 3);
+    }
+
+    const asked: number[] = [];
+    const circle = resolvePathSource(
+      undefined,
+      false,
+      {
+        maxFraction: 1,
+        looping: true,
+        at: (fraction, out) => {
+          asked.push(fraction);
+          const angle = fraction * Math.PI * 2;
+          out.position.set(Math.cos(angle), 0, Math.sin(angle));
+          out.tangent.set(-Math.sin(angle), 0, Math.cos(angle));
+          out.normal.set(0, 1, 0);
+        },
+      },
+      "test",
+    );
+    asked.length = 0;
+    circle.closest(new Vector3(1, 0, 0), 0.5);
+    expect(Math.min(...asked)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...asked)).toBeLessThan(1);
   });
 
   it("stays on its own track where a path crosses itself", async () => {

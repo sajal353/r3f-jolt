@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, type ReactNode } from "react";
+import { Component, StrictMode, useEffect, type ReactNode } from "react";
 import ReactThreeTestRenderer from "@react-three/test-renderer";
 import initDebugJolt from "jolt-physics/debug-wasm-compat";
 import type Jolt from "jolt-physics";
@@ -60,6 +60,26 @@ const CaptureApi = () => {
 
   return null;
 };
+
+/** Catches a hook's refusal, so the rest of the world stays mounted to inspect. */
+export class Refused extends Component<
+  { children: ReactNode; onError: (error: unknown) => void },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    this.props.onError(error);
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
 
 export const getApi = () => {
   if (!capture.api) throw new Error("physics api was not captured");

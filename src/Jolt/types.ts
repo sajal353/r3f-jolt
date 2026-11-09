@@ -328,6 +328,8 @@ export interface ConstraintRegistry {
   add: (entry: ConstraintEntry) => () => void;
   forEach: (visit: (entry: ConstraintEntry) => void) => void;
   size: () => number;
+  /** Throws if `stateId` is not a whole number or another constraint holds it. */
+  check: (stateId: number, hook: string) => void;
   /** Adds the constraint to the world; the returned function takes it out. */
   attach: (
     constraint: Jolt.Constraint,

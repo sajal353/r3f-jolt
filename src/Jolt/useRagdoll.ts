@@ -179,6 +179,24 @@ export const useRagdoll = (
     const constraints = joints.map((joint) =>
       jolt.castObject(joint, jolt.SwingTwistConstraint),
     );
+
+    // The joint into part `i` is constraint `stateId + i`. Every one is checked
+    // before the bodies go in, so a refusal leaves nothing in the world.
+    const jointIds = joints.map((joint) => {
+      if (options.stateId === undefined) return undefined;
+      const part = byBody.get(joint.GetBody2().GetID().GetIndexAndSequenceNumber());
+      return options.stateId + (part ?? 0);
+    });
+    try {
+      for (const id of jointIds) {
+        if (id !== undefined) api.constraints.check(id, "useRagdoll");
+      }
+    } catch (error) {
+      jolt.destroy(ragdoll);
+      rig.dispose();
+      throw error;
+    }
+
     const unregister = joints.map((joint) =>
       api.constraints.add({
         constraint: joint,
@@ -188,14 +206,9 @@ export const useRagdoll = (
     );
 
     const ids = addBodies(api, bodies, true);
-    const detach = joints.map((joint) => {
-      const part = byBody.get(joint.GetBody2().GetID().GetIndexAndSequenceNumber());
-      return api.constraints.attach(
-        joint,
-        options.stateId === undefined ? undefined : options.stateId + (part ?? 0),
-        "useRagdoll",
-      );
-    });
+    const detach = joints.map((joint, index) =>
+      api.constraints.attach(joint, jointIds[index], "useRagdoll"),
+    );
 
     mixerRef.current?.update(0);
 

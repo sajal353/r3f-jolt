@@ -475,6 +475,14 @@ export const Physics = ({
           if (state.disposed) {
             throw new Error("r3f-jolt: restoreState on a world that is gone.");
           }
+          // The step under way would carry on from the restored world on the
+          // clock it started with.
+          if (steppingRef.current) {
+            throw new Error(
+              "r3f-jolt: restoreState from inside a step callback. Call it " +
+                "between steps, where the snapshot arrives.",
+            );
+          }
           snapshots.restore(bytes);
         },
         replay: (bytes: Uint8Array, untilStep: number) =>

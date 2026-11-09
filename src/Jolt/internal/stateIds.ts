@@ -1,10 +1,18 @@
 import type Jolt from "jolt-physics";
 import type { JoltModule } from "../types";
 
-/** The sequence number Jolt gives a body created with a chosen id. */
-const STATED_SEQUENCE = 0;
+/** Where the sequence number starts in a `BodyID`'s value, above the index. */
 const SEQUENCE_SHIFT = 23;
 const INDEX_MASK = 0x7fffff;
+
+/** A snapshot carries every kind of `stateId` as an unsigned 32-bit number. */
+export const requireWholeStateId = (stateId: number, hook: string) => {
+  if (!Number.isInteger(stateId) || stateId < 0 || stateId > 0xffffffff) {
+    throw new Error(
+      `r3f-jolt: ${hook} stateId ${stateId} must be a whole number, 0 or more.`,
+    );
+  }
+};
 
 export interface CharacterEntry {
   stateId: number | undefined;
@@ -39,10 +47,16 @@ export interface StateIdRegistry {
   reserve: (base: number, count: number, hook: string) => void;
   /** Throws unless `stateId` is in range and no body holds it. */
   check: (stateId: number, hook: string) => void;
+  /** Throws if another character holds `stateId`. */
+  checkCharacter: (stateId: number, hook: string) => void;
   /** Throws if Jolt did not put `ids` on `base…` after a `reserve`. */
   verify: (ids: Jolt.BodyID[], base: number, hook: string) => void;
-  /** Records who made a body, for the error that names it. */
-  track: (id: Jolt.BodyID, hook: string) => void;
+  /**
+   * Records who made a body, for the error that names it, and whether it was
+   * placed on a `stateId`. Its sequence number cannot say: Jolt's wraps to 0,
+   * the number a `stateId` body has, on every 256th reuse of a slot.
+   */
+  track: (id: Jolt.BodyID, hook: string, stated: boolean) => void;
   hookOf: (id: Jolt.BodyID) => string | undefined;
   isStated: (id: Jolt.BodyID) => boolean;
   addCharacter: (entry: CharacterEntry) => () => void;
@@ -59,12 +73,19 @@ export const createStateIdRegistry = (
 ): StateIdRegistry => {
   const bodyInterface = physicsSystem.GetBodyInterface();
   const lock = physicsSystem.GetBodyLockInterfaceNoLock();
-  const owners = new Map<number, { sequence: number; hook: string }>();
+  const owners = new Map<
+    number,
+    { sequence: number; hook: string; stated: boolean }
+  >();
   let characters: CharacterEntry[] = [];
 
-  const track = (id: Jolt.BodyID, hook: string) => {
+  const track = (id: Jolt.BodyID, hook: string, stated: boolean) => {
     const value = id.GetIndexAndSequenceNumber();
-    owners.set(bodyIndex(value), { sequence: value >>> SEQUENCE_SHIFT, hook });
+    owners.set(bodyIndex(value), {
+      sequence: value >>> SEQUENCE_SHIFT,
+      hook,
+      stated,
+    });
   };
 
   const occupant = (index: number) => {
@@ -76,7 +97,7 @@ export const createStateIdRegistry = (
     jolt.destroy(id);
 
     if (!live) return "a body created outside the hooks";
-    return owner.sequence === STATED_SEQUENCE
+    return owner.stated
       ? `${owner.hook} (stateId ${index})`
       : `${owner.hook} without a stateId`;
   };
@@ -113,8 +134,8 @@ export const createStateIdRegistry = (
     return body;
   };
 
-  const finish = (body: Jolt.Body, hook: string) => {
-    if (jolt.getPointer(body) !== 0) track(body.GetID(), hook);
+  const finish = (body: Jolt.Body, hook: string, stated: boolean) => {
+    if (jolt.getPointer(body) !== 0) track(body.GetID(), hook, stated);
     return body;
   };
 
@@ -127,6 +148,7 @@ export const createStateIdRegistry = (
               bodyInterface.CreateBodyWithID(id, settings),
             ),
         hook,
+        stateId !== undefined,
       ),
 
     createSoftBody: (settings, stateId, hook) =>
@@ -137,6 +159,7 @@ export const createStateIdRegistry = (
               bodyInterface.CreateSoftBodyWithID(id, settings),
             ),
         hook,
+        stateId !== undefined,
       ),
 
     reserve: (base, count, hook) => {
@@ -196,6 +219,18 @@ export const createStateIdRegistry = (
       if (held) throw taken(stateId, hook);
     },
 
+    checkCharacter: (stateId, hook) => {
+      requireWholeStateId(stateId, hook);
+      const holder = characters.find((entry) => entry.stateId === stateId);
+      if (holder) {
+        throw new Error(
+          `r3f-jolt: ${hook} character stateId ${stateId} is taken by ` +
+            `${holder.hook}. Character stateIds are numbered apart from ` +
+            "bodies, but each one names a single character.",
+        );
+      }
+    },
+
     verify: (ids, base, hook) => {
       ids.forEach((id, offset) => {
         if (id.GetIndexAndSequenceNumber() !== base + offset) {
@@ -212,10 +247,7 @@ export const createStateIdRegistry = (
     isStated: (id) => {
       const value = id.GetIndexAndSequenceNumber();
       const owner = owners.get(bodyIndex(value));
-      return (
-        value >>> SEQUENCE_SHIFT === STATED_SEQUENCE &&
-        owner?.sequence === STATED_SEQUENCE
-      );
+      return owner?.stated === true && owner.sequence === value >>> SEQUENCE_SHIFT;
     },
 
     addCharacter: (entry) => {

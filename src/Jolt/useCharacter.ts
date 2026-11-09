@@ -261,6 +261,19 @@ const buildChildren = (
   return { shape, geometry: shapeToGeometry(jolt, shape) };
 };
 
+/** Lets `standing` go if building `crouching` throws. */
+const withCrouching = (
+  standing: BuiltShape,
+  buildCrouching: () => BuiltShape,
+): ShapeSet => {
+  try {
+    return { standing, crouching: buildCrouching() };
+  } catch (error) {
+    standing.shape.Release();
+    throw error;
+  }
+};
+
 const buildShapes = (
   jolt: JoltModule,
   shapes: CharacterShapes | undefined,
@@ -268,19 +281,17 @@ const buildShapes = (
 ): ShapeSet => {
   if (!shapes) {
     const { height, radius } = options;
-    return {
-      standing: buildCapsule(jolt, height.standing, radius.standing),
-      crouching: buildCapsule(jolt, height.crouching, radius.crouching),
-    };
+    return withCrouching(
+      buildCapsule(jolt, height.standing, radius.standing),
+      () => buildCapsule(jolt, height.crouching, radius.crouching),
+    );
   }
 
   const standing = buildChildren(jolt, shapes.standing);
-  return {
-    standing,
-    crouching: shapes.crouching
-      ? buildChildren(jolt, shapes.crouching)
-      : standing,
-  };
+  const { crouching } = shapes;
+  return crouching
+    ? withCrouching(standing, () => buildChildren(jolt, crouching))
+    : { standing, crouching: standing };
 };
 
 /** Without `crouching` both postures share one shape, which is freed once. */
@@ -414,6 +425,28 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     stateRef.current.posture = "standing";
     stateRef.current.custom = false;
 
+    // The ids are checked and the shapes built, the two things that can throw,
+    // before anything else, so a refusal leaves nothing behind.
+    const innerID = innerBody ? (innerBodyIDOverride ?? stateId) : undefined;
+    if (stateId !== undefined) {
+      api.stateIds.checkCharacter(stateId, "useCharacter");
+    }
+    if (innerID !== undefined && innerBodyIDOverride === undefined) {
+      api.stateIds.check(innerID, "useCharacter");
+    }
+
+    const shapes = buildShapes(jolt, shape, options);
+    const innerShapes = (() => {
+      if (innerBody === true) return shapes;
+      if (!innerBody) return null;
+      try {
+        return buildShapes(jolt, innerBody, options);
+      } catch (error) {
+        releaseShapes(shapes);
+        throw error;
+      }
+    })();
+
     const broadPhaseFilter = new jolt.DefaultBroadPhaseLayerFilter(
       joltInterface.GetObjectVsBroadPhaseLayerFilter(),
       layer,
@@ -426,14 +459,6 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       ? new jolt.BodyFilter()
       : skipSoftBodies(jolt);
     const shapeFilter = new jolt.ShapeFilter();
-
-    const shapes = buildShapes(jolt, shape, options);
-    const innerShapes =
-      innerBody === true
-        ? shapes
-        : innerBody
-          ? buildShapes(jolt, innerBody, options)
-          : null;
 
     const settings = new jolt.CharacterVirtualSettings();
     settings.mMass = mass;
@@ -449,11 +474,7 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     if (innerShapes) {
       settings.mInnerBodyShape = innerShapes.standing.shape;
       settings.mInnerBodyLayer = innerBodyLayer;
-      const innerID = innerBodyIDOverride ?? stateId;
       if (innerID !== undefined) {
-        if (innerBodyIDOverride === undefined) {
-          api.stateIds.check(innerID, "useCharacter");
-        }
         const override = new jolt.BodyID(innerID);
         settings.mInnerBodyIDOverride = override;
         jolt.destroy(override);
@@ -497,7 +518,9 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     const innerBodyID = innerShapes
       ? new jolt.BodyID(character.GetInnerBodyID().GetIndexAndSequenceNumber())
       : null;
-    if (innerBodyID) api.stateIds.track(innerBodyID, "useCharacter");
+    if (innerBodyID) {
+      api.stateIds.track(innerBodyID, "useCharacter", innerID !== undefined);
+    }
     const removeState = api.stateIds.addCharacter({
       stateId,
       character,

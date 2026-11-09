@@ -210,8 +210,20 @@ export const createVehicle = (
 ): Vehicle => {
   const { Jolt: jolt, bodyInterface, physicsSystem, state: world } = api;
 
-  const body = createChassis(api, options);
+  // Everything that can refuse runs before the chassis is in the world, so a
+  // refusal leaves nothing behind.
+  if (options.stateId !== undefined) {
+    api.constraints.check(options.stateId, options.hook);
+  }
   const settings = options.buildSettings();
+  const body = (() => {
+    try {
+      return createChassis(api, options);
+    } catch (error) {
+      jolt.destroy(settings);
+      throw error;
+    }
+  })();
   const wheelCount = settings.mWheels.size();
 
   const constraint = new jolt.VehicleConstraint(body, settings);

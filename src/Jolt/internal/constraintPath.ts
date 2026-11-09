@@ -104,7 +104,7 @@ const hermiteAt = (knots: readonly Knot[], looping: boolean) => {
   const count = knots.length;
 
   return (fraction: number, out: PathSample) => {
-    let index = Math.trunc(fraction);
+    let index = Math.floor(fraction);
     let t = fraction - index;
 
     if (looping) {
@@ -168,14 +168,18 @@ const createNearest = (
   reach: number,
 ) => {
   const sample = createSample();
+  const wrap = (fraction: number) =>
+    ((fraction % maxFraction) + maxFraction) % maxFraction;
 
   return (position: Vector3, hint: number) => {
     const low = looping ? hint - reach : Math.max(hint - reach, 0);
     const high = looping ? hint + reach : Math.min(hint + reach, maxFraction);
     const spacing = (high - low) / SEARCH_SAMPLES;
 
+    // A looping search runs past both ends; the path itself only ever sees
+    // fractions on it.
     const distanceAt = (fraction: number) => {
-      at(fraction, sample);
+      at(looping ? wrap(fraction) : fraction, sample);
       return sample.position.distanceToSquared(position);
     };
 
@@ -214,7 +218,7 @@ const createNearest = (
     }
 
     const found = (left + right) / 2;
-    if (looping) return ((found % maxFraction) + maxFraction) % maxFraction;
+    if (looping) return wrap(found);
 
     // Jolt stops a body at the end of a path only when the fraction is exactly
     // there, and narrowing lands just short of it, so a body past the end has

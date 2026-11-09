@@ -373,6 +373,40 @@ describe("useRollback", () => {
     expectNoAsserts();
   });
 
+  it("refuses restoreState inside a step callback, which would keep the old clock", async () => {
+    let thrown: unknown = null;
+    let start: Uint8Array | null = null;
+    const Caller = () => {
+      const api = useJolt();
+      useBeforePhysicsStep(function restoreHere(_, index) {
+        if (index === 0) start = api.saveState();
+        if (index !== 5 || !start) return;
+        try {
+          api.restoreState(start);
+        } catch (error) {
+          thrown = error;
+        }
+      });
+      return null;
+    };
+
+    const renderer = await renderPhysics(
+      <>
+        <Pile />
+        <Caller />
+      </>,
+      fixed,
+    );
+    const api = getApi();
+    stepTo(api, 8);
+
+    expect(String(thrown)).toContain("inside a step callback");
+    expect(api.timing.stepCount).toBe(8);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
   it('refuses timeStep="vary"', async () => {
     const renderer = await renderPhysics(<Pile />, {
       updateLoop: "independent",
