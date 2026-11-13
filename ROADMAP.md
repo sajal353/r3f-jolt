@@ -113,7 +113,7 @@ The shared foundation for ragdolls _and_ skinned cloth. Its own module because b
 - [x] Derive a **low-detail ragdoll skeleton** from a bone subset — production ragdolls use ~15 bodies for a 100+ bone rig. Fewer bodies is both faster and more stable, and twist/IK/helper bones must never become bodies
 - [x] Two-way mapper between the full animation skeleton and the ragdoll skeleton. Upstream C++ has `SkeletonMapper`; **it is not bound in JS**, so this is ours to write
 - [x] Map both directions every frame: animation → ragdoll to drive it, ragdoll → animation to render the simulated result on the full-detail rig
-- [ ] `PhysicsSystem.SetSimShapeFilter` — lets one body carry a cheap simulation shape and a detailed query shape, filtering collisions between sub-shapes of the same body. Same problem the low-detail ragdoll solves, so design the two together rather than having them fight **Amended:** not wrapped. Measured with 8 piled ragdolls on the release build: a no-op `SimShapeFilterJS` runs 373 times a step at about 0.45 µs each, +4–7% on a 2.6 ms step — affordable, but the low-detail ragdoll already keeps simulation shapes cheap, so nothing here needs it. Reachable through `useJolt().physicsSystem`
+- [ ] `PhysicsSystem.SetSimShapeFilter` — lets one body carry a cheap simulation shape and a detailed query shape, filtering collisions between sub-shapes of the same body. Same problem the low-detail ragdoll solves, so design the two together rather than having them fight **Amended:** not wrapped. With 8 piled ragdolls on the release build, a no-op `SimShapeFilterJS` runs 373 times a step at about 0.45 µs each, +4–7% on a 2.6 ms step — affordable, but the low-detail ragdoll already keeps simulation shapes cheap, so nothing here needs it. Reachable through `useJolt().physicsSystem`
 - [ ] `SkeletalAnimation.SetIsLooping` / `IsLooping` for the driving animation. **Amended:** the driving animation is a three.js `AnimationMixer` and the bridge reads the posed bones, so no Jolt animation is sampled; looping is the `AnimationAction`'s `loop`
 - [x] `SkeletonPose` setup: `SetSkeleton`, `SetRootOffset`, per-joint `GetJoint(i)` → `SkeletalAnimationJointState` write of translation + rotation, then `CalculateJointMatrices()`. **Amended:** `SetSkeleton` and `SetRootOffset` are in place; the bridge writes joint matrices and derives the states with `CalculateJointStates()`, and the get-up blends in world space, so no local-state write is needed
 - [x] **Jolt pose → three.js bones**: `GetJointMatrices()` yields _model-space_ `Mat44`; three.js bones need local matrices. Convert by composing with the parent's inverse, accounting for `skeleton.boneInverses` (bind pose). **This is the riskiest code in the phase** — get it subtly wrong and characters look _almost_ right, the worst failure mode. Unit-test the round-trip against a known rig before building anything on it
@@ -217,49 +217,54 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 
 ### Advanced vehicles
 
-- [ ] Extract a shared vehicle core from `useCar` (constraint + step listener + collision tester + teardown) so all three vehicle types share one correct lifecycle
-- [ ] `useTank` — `TrackedVehicleControllerSettings`, `WheelSettingsTV`, `VehicleTrackSettings` with left/right tracks and `mDrivenWheel`
-- [ ] `useMotorcycle` — `MotorcycleControllerSettings` including lean angle and lean spring
-- [ ] Drivetrain telemetry for audio and UI: `VehicleEngine.GetCurrentRPM()`, `VehicleTransmission.GetCurrentGear()` / `GetCurrentRatio()` / `GetClutchFriction()` — engine pitch, shift SFX, tachometer
-- [ ] Engine torque curve via `LinearCurve` on `VehicleEngineSettings`
-- [ ] Surface-dependent grip through `WheeledVehicleControllerCallbacksJS` + `TireMaxImpulseCallbackResult` (tarmac / gravel / ice)
-- [ ] `VehicleConstraintCallbacksJS` for slip combining
+- [x] Extract a shared vehicle core from `useCar` (constraint + step listener + collision tester + teardown) so all three vehicle types share one correct lifecycle
+- [x] `useTank` — `TrackedVehicleControllerSettings`, `WheelSettingsTV`, `VehicleTrackSettings` with left/right tracks and `mDrivenWheel`
+- [x] `useMotorcycle` — `MotorcycleControllerSettings` including lean angle and lean spring
+- [x] Drivetrain telemetry for audio and UI: `VehicleEngine.GetCurrentRPM()`, `VehicleTransmission.GetCurrentGear()` / `GetCurrentRatio()` / `GetClutchFriction()` — engine pitch, shift SFX, tachometer
+- [x] Engine torque curve via `LinearCurve` on `VehicleEngineSettings`
+- [x] Surface-dependent grip through `WheeledVehicleControllerCallbacksJS` + `TireMaxImpulseCallbackResult` (tarmac / gravel / ice)
+- [x] `VehicleConstraintCallbacksJS` for slip combining **Amended:** it combines friction, not slip: `combineFriction`, per wheel and direction
 
 ### Destruction & dynamic worlds
 
-- [ ] `useMutableCompound` — `MutableCompoundShape.AddShape` / `RemoveShape` / `ModifyShape` / `ModifyShapes` at runtime plus `AdjustCenterOfMass()`: the breakable-crate primitive
-- [ ] Deformable terrain — `HeightFieldShape.SetHeights(x, y, sx, sy, heights, stride, tempAllocator)` for craters and digging, `GetHeights` for readback, with matching three.js geometry updates
-- [ ] Rails and platforms — `PathConstraint` + `PathConstraintPathHermite.AddPoint(position, tangent, normal)` for elevators, moving platforms and coasters; `PathConstraintPathJS` for procedural paths; `SetIsLooping`
-- [ ] Machinery — `GearConstraint`, `RackAndPinionConstraint`, `PulleyConstraint`
-- [ ] Motorised constraints — doors, cranes, turrets, drawbridges via `MotorSettings` + `SetMotorState`
-- [ ] Trigger volumes built on 0.2.1 sensors + the contact registry
+- [x] `useMutableCompound` — `MutableCompoundShape.AddShape` / `RemoveShape` / `ModifyShape` / `ModifyShapes` at runtime plus `AdjustCenterOfMass()`: the breakable-crate primitive. **Amended:** the bindings have no `Constraint::NotifyShapeChanged`, so `adjustCenterOfMass` warns about joints on the body rather than carrying them across
+- [x] Deformable terrain — `HeightFieldShape.SetHeights(x, y, sx, sy, heights, stride, tempAllocator)` for craters and digging, `GetHeights` for readback, with matching three.js geometry updates. **Amended:** the api shipped in 0.3.0 without notifying the body, which 0.5.0 fixes; this is Shapes › Craters
+- [x] Rails and platforms — `PathConstraint` + `PathConstraintPathHermite.AddPoint(position, tangent, normal)` for elevators, moving platforms and coasters; `PathConstraintPathJS` for procedural paths; `SetIsLooping`. **Amended:** `usePathConstraint`. The bindings give `PathConstraintPathHermite` no constructor, so `points` runs its spline through `PathConstraintPathJS`, searching near the last fraction where Jolt searches the whole path
+- [x] Machinery — `GearConstraint`, `RackAndPinionConstraint`, `PulleyConstraint`. **Amended:** `useGearConstraint`, `useRackAndPinionConstraint`, `usePulleyConstraint`
+- [x] Motorised constraints — doors, cranes, turrets, drawbridges via `MotorSettings` + `SetMotorState`. **Amended:** the motors shipped in 0.3.0; this is Constraints › Motorised, with the door in Constraints › Motors
+- [x] Trigger volumes built on 0.2.1 sensors + the contact registry. **Amended:** shipped in 0.3.0 as `useSensor`
 
 ### Determinism, save/load, netcode
 
-- [ ] Snapshot / restore — `StateRecorderImpl` + `PhysicsSystem.SaveState` / `RestoreState`, exposed as `api.saveState()` / `api.restoreState(bytes)`
-- [ ] `StateRecorderImpl.IsEqual` as a determinism assertion, wired into a CI test that runs a scene twice and compares
-- [ ] `StateRecorderJS` for custom streams (network transport)
-- [ ] **Per-object** `SaveState` / `RestoreState` on `Body`, `Constraint` and `CharacterBase` (jolt 0.30.0) — snapshot only what changed instead of the whole world, which is what makes rollback affordable
-- [ ] `StateRecorderFilter` plus multi-part save/restore (jolt 0.27.0), so a snapshot can be split across frames or across a network MTU
-- [ ] Deterministic character identity — `CharacterID` and `CharacterVirtual`'s `mInnerBodyIDOverride`, both added upstream specifically for client/server setups
-- [ ] Rollback support — a ring buffer of snapshots plus re-simulation on late input, with a documented worked example
-- [ ] Strictly fixed-step loop decoupled from rendering, building on 0.3.0's `updateLoop: "independent"`
-- [ ] **Creation-order stability** — snapshots only restore correctly if bodies are created in the same order, which React's mount order does **not** guarantee. Needs an explicit stable-id mechanism; the hardest correctness problem in this phase, and it should fail loudly rather than silently scrambling bodies
-- [ ] Document the honest limits: determinism holds for the same build and platform; cross-browser float determinism is not guaranteed, and soft bodies/ragdolls must be constructed identically
+- [x] Snapshot / restore — `StateRecorderImpl` + `PhysicsSystem.SaveState` / `RestoreState`, exposed as `api.saveState()` / `api.restoreState(bytes)`. **Amended:** `StateRecorderImpl` binds no accessor for its bytes, so snapshots go through `StateRecorderJS`. Constraints and characters are saved one at a time by `stateId` after Jolt's stream, since Jolt saves constraints by their slot in the world
+- [x] `StateRecorderImpl.IsEqual` as a determinism assertion, wired into a CI test that runs a scene twice and compares. **Amended:** `isSameState(a, b)` compares the bytes, since snapshots are not held in a `StateRecorderImpl`
+- [x] `StateRecorderJS` for custom streams (network transport). **Amended:** `saveState` is built on it and returns plain bytes, which any transport carries
+- [x] **Per-object** `SaveState` / `RestoreState` on `Body`, `Constraint` and `CharacterBase` (jolt 0.30.0) — snapshot only what changed instead of the whole world, which is what makes rollback affordable. **Amended:** a body's goes through `PhysicsSystem.SaveState` with a filter, so its broadphase bounds and sleep state are restored with it
+- [x] `StateRecorderFilter` plus multi-part save/restore (jolt 0.27.0), so a snapshot can be split across frames or across a network MTU. **Amended:** the filter is `saveState({ body, constraint, character })`. A snapshot is plain bytes, so splitting one across packets needs nothing from Jolt. Restoring in parts across frames moves to 0.6.0
+- [x] Deterministic character identity — `CharacterID` and `CharacterVirtual`'s `mInnerBodyIDOverride`, both added upstream specifically for client/server setups. **Amended:** `CharacterID` cannot be built with a chosen value, so a character is named by its `stateId`, which also sets `mInnerBodyIDOverride`
+- [x] Rollback support — a ring buffer of snapshots plus re-simulation on late input, with a documented worked example. **Amended:** `useRollback({ capacity })` on `api.replay`. Step callbacks already carried the step's index, so no `stepIndex` was added. A ragdoll driven by animation and skinned cloth read the animation at frame rate and do not replay. Marked experimental: it has not run over a real network
+- [x] Strictly fixed-step loop decoupled from rendering, building on 0.3.0's `updateLoop: "independent"`. **Amended:** `updateLoop: "fixed"`, on a timer and the wall clock; it still runs on the page's main thread, and a worker moves to 0.6.0. Marked experimental
+- [x] **Creation-order stability** — snapshots only restore correctly if bodies are created in the same order, which React's mount order does **not** guarantee. Needs an explicit stable-id mechanism; the hardest correctness problem in this phase, and it should fail loudly rather than silently scrambling bodies. **Amended:** `stateId` on every hook, created with `CreateBodyWithID`. `CreateRagdoll` takes no ids, so `useRagdoll` frees its range just before so Jolt allocates onto it in order. Constraints with a `stateId` are kept in `stateId` order, since Jolt solves an island's constraints in the order they were added
+- [x] Document the honest limits: determinism holds for the same build and platform; cross-browser float determinism is not guaranteed, and soft bodies/ragdolls must be constructed identically
 
 ### Verification
 
-- [ ] Test tank and motorcycle mount/unmount teardown parity with `useCar`
-- [ ] Test `MutableCompoundShape` add/remove/modify keeps mass properties sane after `AdjustCenterOfMass()`
-- [ ] Test heightfield `SetHeights` updates both physics and render geometry
-- [ ] CI determinism test: identical scene run twice, `StateRecorderImpl.IsEqual` passes
-- [ ] Test snapshot restore with bodies created in a different mount order fails loudly
+- [x] Test tank and motorcycle mount/unmount teardown parity with `useCar`
+- [x] Test `MutableCompoundShape` add/remove/modify keeps mass properties sane after `AdjustCenterOfMass()`
+- [x] Test heightfield `SetHeights` updates both physics and render geometry
+- [x] CI determinism test: identical scene run twice, `StateRecorderImpl.IsEqual` passes. **Amended:** `isSameState` on the bytes
+- [x] Test snapshot restore with bodies created in a different mount order fails loudly. **Amended:** with `stateId`s it restores exactly and simulates alike; without them `saveState` refuses, and a snapshot of a different set of ids is refused with the differences listed
 
 ---
 
 ## 0.6.0 — Hair, rope and cables (Cosserat rods)
 
 **Agreed scope:** hair with guide strands · rope and cables · oriented strand rendering. Cosserat rods carry an orientation per segment, so unlike a distance chain they resist twisting and expose a material frame for rendering. Same primitive serves hair, rope, cables, chains, tails and vines.
+
+### Carried over from 0.5.0
+
+- [ ] Restore a snapshot in parts across frames, with Jolt's `SetIsLastPart`, for a world too large to restore in one
+- [ ] Physics in a worker. Hooks hand out live Jolt objects and run step callbacks inside the step, so a worker needs a message-based API of its own
 
 ### Rod primitive
 
@@ -340,7 +345,7 @@ From the 336 classes in `jolt-physics@1.1.0`. Useful for spotting future opportu
 | `AssertFailedHandlerJS` + debug build, for the test suite | 0.2.0 |
 | Any/all raycasts | 0.2.1 |
 | Kinematic, sensors, damping, DOF locks, sleep | 0.2.1 |
-| All 12 constraint types + motors | 0.3.0 |
+| All 12 constraint types + motors | 0.3.0 for 8 hooks and motors; 0.5.0 for path, gear, rack-and-pinion and pulley |
 | Batch body add/remove · per-triangle mesh user data · heightfield materials | 0.3.0 |
 | Heightfield, tapered cylinder, scaled shapes | 0.3.0 |
 | Instancing, auto-colliders | 0.3.0 |
@@ -353,7 +358,7 @@ From the 336 classes in `jolt-physics@1.1.0`. Useful for spotting future opportu
 | `SimShapeFilter` — cheap sim shape + detailed query shape in one body | 0.4.0 |
 | `MutableCompoundShape`, terrain deformation | 0.5.0 |
 | `PathConstraint`, gear/rack/pulley | 0.5.0 |
-| `StateRecorder`, save/load, determinism | 0.5.0 |
+| `StateRecorder`, save/load, determinism | 0.5.0 — `saveState`, `restoreState`, `stateId`, `useRollback` |
 | `TrackedVehicleController`, `MotorcycleController` | 0.5.0 |
 | Cosserat rods (`RodStretchShear` / `RodBendTwist`) — hair, rope, cables | 0.6.0 |
 | **Deliberately not scheduled** | `GroupFilterJS` — a JS callback per potential collision pair, inside the step. One WASM→JS crossing per pair would dominate the frame; `GroupFilterTable` covers ragdoll self-collision declaratively · custom `BroadPhaseLayerInterface` / `ObjectVsBroadPhaseLayerFilter` from JS — same cost profile, and the mask and table variants cover every realistic scheme · `PhysicsStepListenerJS` — **not needed**: with the accumulator calling `Step(fixedDt, 1)` in a JS loop, each iteration already *is* a sub-step, so `useBeforePhysicsStep` is pure JS and cheaper. Only required if a caller passes `numCollisionSteps > 1` |

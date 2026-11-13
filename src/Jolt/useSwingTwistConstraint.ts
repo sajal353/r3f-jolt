@@ -216,6 +216,7 @@ export const useSwingTwistConstraint = (
     body2,
     options,
     {
+      hook: "useSwingTwistConstraint",
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castSwingTwist,
       load: readSwingTwistLoad,

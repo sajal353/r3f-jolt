@@ -56,6 +56,8 @@ export type { SoftBodySkinOptions } from "./internal/softBodySkin";
 export interface UseSoftBodyOptions
   extends SoftBodyConstraintOptions,
     WaterBodyOptions {
+  /** The body's Jolt id, for `saveState`; see `BodyOptions.stateId`. */
+  stateId?: number;
   position?: Vec3Tuple;
   /** Baked into the vertices: a soft body's own rotation stays identity. */
   rotation?: QuatTuple;
@@ -157,6 +159,9 @@ export interface SoftBodyApi {
    * did not come from this body.
    */
   faceOf: (subShapeID: number) => number;
+  /** This body alone, every vertex included; see `BodyApi.saveState`. */
+  saveState: () => Uint8Array;
+  restoreState: (bytes: Uint8Array) => void;
 }
 
 const writeRender = (
@@ -506,7 +511,19 @@ export const useSoftBody = (
 
     settingsOverride?.(shared, creation);
 
-    const body = bodyInterface.CreateSoftBody(creation);
+    const body = (() => {
+      try {
+        return api.stateIds.createSoftBody(
+          creation,
+          options.stateId,
+          "useSoftBody",
+        );
+      } catch (error) {
+        jolt.destroy(creation);
+        shared.Release();
+        throw error;
+      }
+    })();
     jolt.destroy(creation);
     // The body holds its own reference now.
     shared.Release();
@@ -712,6 +729,14 @@ export const useSoftBody = (
         const face = softShape.GetFaceIndex(subShape);
         return topology.triangleOf[face] ?? -1;
       },
+
+      saveState: () =>
+        usable() ? api.snapshots.saveBody(body) : new Uint8Array(0),
+
+      restoreState: (bytes) => {
+        if (!usable() || bytes.length === 0) return;
+        api.snapshots.restoreBody(body, bytes);
+      },
     };
 
     const result = published as SoftBodyApi;
@@ -852,7 +877,7 @@ export const useSoftBody = (
 
     let changed = active
       ? tracker.update(api.Jolt, body, layout, timing)
-      : tracker.rest(api.Jolt, body, layout);
+      : tracker.rest(api.Jolt, body, layout, timing);
 
     let positions = tracker.local;
     let bounds = tracker.bounds;

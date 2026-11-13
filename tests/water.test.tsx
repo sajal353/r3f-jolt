@@ -510,6 +510,32 @@ describe("useSwimming", () => {
     expectNoAsserts();
   });
 
+  it("keeps swimming down to a float deeper than where it started", async () => {
+    reset();
+    const renderer = await renderPhysics(
+      <>
+        <Floor />
+        <WaterVolume {...POOL} />
+        <Swimmer />
+      </>,
+    );
+    await step(renderer, 300);
+    expect(held.swim!.swimming).toBe(true);
+
+    held.swim!.setFloatDepth(2);
+    let dryFrames = 0;
+    for (let frame = 0; frame < 240; frame += 1) {
+      await step(renderer, 1);
+      if (!held.swim!.swimming) dryFrames += 1;
+    }
+
+    expect(dryFrames).toBe(0);
+    expect(Math.abs(feet().GetY() + 2)).toBeLessThan(0.1);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
   it("wades out up a ramp", async () => {
     reset();
     const renderer = await renderPhysics(

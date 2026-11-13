@@ -15,16 +15,22 @@ import type { StepCallback, StepPhase, StepRegistry } from "../types";
  */
 export const createStepRegistry = (): StepRegistry => {
   const subscribers: Record<StepPhase, Set<StepCallback>> = {
+    start: new Set(),
     before: new Set(),
     after: new Set(),
   };
 
   const snapshots: Record<StepPhase, StepCallback[]> = {
+    start: [],
     before: [],
     after: [],
   };
 
-  const stale: Record<StepPhase, boolean> = { before: false, after: false };
+  const stale: Record<StepPhase, boolean> = {
+    start: false,
+    before: false,
+    after: false,
+  };
 
   let destroyed = false;
 
@@ -58,10 +64,10 @@ export const createStepRegistry = (): StepRegistry => {
 
     destroy: () => {
       destroyed = true;
-      subscribers.before.clear();
-      subscribers.after.clear();
-      snapshots.before = [];
-      snapshots.after = [];
+      for (const phase of ["start", "before", "after"] as const) {
+        subscribers[phase].clear();
+        snapshots[phase] = [];
+      }
     },
   };
 };

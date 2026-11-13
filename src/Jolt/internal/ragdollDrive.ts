@@ -436,7 +436,7 @@ export const createRagdollDrive = (
       const tracker = trackers[index];
       const body = bodies[index];
       if (body.IsActive()) tracker.update(body, timing);
-      else tracker.rest(body);
+      else tracker.rest(body, timing);
 
       position.copy(tracker.position);
       rotation.copy(tracker.rotation);

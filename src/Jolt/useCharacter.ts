@@ -31,6 +31,7 @@ import {
 import { shapeToGeometry } from "./internal/shapeToGeometry";
 import { shapeFromResult } from "./internal/useBody";
 import { useHandlerRef } from "./internal/useHandlerRef";
+import type { SideState } from "./internal/snapshot";
 import type { JoltModule, QuatTuple, Vec3Tuple } from "./types";
 
 const degreesToRadians = (degrees: number) => degrees * (Math.PI / 180);
@@ -52,6 +53,11 @@ export interface CharacterShapeOptions {
   predictiveContactDistance: number;
   /** Stops the character catching on the inner edges of a triangle mesh. Costs more per contact. */
   enhancedInternalEdgeRemoval: boolean;
+  /**
+   * How fast the character turns its feet towards a new gravity, in radians a
+   * second. `Infinity` turns it at once.
+   */
+  uprightSpeed: number;
 }
 
 export const defaultCharacterOptions: CharacterShapeOptions = {
@@ -70,6 +76,7 @@ export const defaultCharacterOptions: CharacterShapeOptions = {
   penetrationRecoverySpeed: 1,
   predictiveContactDistance: 0.1,
   enhancedInternalEdgeRemoval: false,
+  uprightSpeed: Math.PI * 2,
 };
 
 export interface CharacterUpdateOptions {
@@ -94,8 +101,11 @@ export interface CharacterShapes {
 
 export interface UseCharacterOptions extends CharacterContactHandlers {
   position: Vec3Tuple;
+  /**
+   * Facing at mount. The character is always turned so its feet point along
+   * the world's gravity, and turned again when gravity changes direction.
+   */
   rotation?: QuatTuple;
-  up?: Vec3Tuple;
   debug?: boolean;
   mass?: number;
   layer?: number;
@@ -113,6 +123,12 @@ export interface UseCharacterOptions extends CharacterContactHandlers {
   innerBodyLayer?: number;
   /** A fixed `GetIndexAndSequenceNumber()` for the inner body, so a client and a server agree on it. */
   innerBodyIDOverride?: number;
+  /**
+   * Names the character in `saveState`, which needs one on every character,
+   * and is the inner body's `stateId` too unless `innerBodyIDOverride` says
+   * otherwise. Characters are numbered apart from bodies and constraints.
+   */
+  stateId?: number;
   /** Blocks and is blocked by every other character that has it on. On by default. */
   collideWithCharacters?: boolean;
   /**
@@ -150,6 +166,7 @@ export interface CharacterActiveContact {
 
 export interface CharacterApi {
   character: Jolt.CharacterVirtual;
+  stateId: number | undefined;
   /** `GetID().GetValue()`: what other characters' contacts report it as. */
   characterID: number;
   /** Null without `innerBody`. */
@@ -188,6 +205,12 @@ export interface CharacterApi {
   debugMeshCrouching: Mesh | null;
   /** The shape last given to `setShape`. */
   debugMeshCustom: Mesh | null;
+  /**
+   * This character alone: position, rotation, velocity, ground contacts. Not
+   * its inner body, which is a body of its own.
+   */
+  saveState: () => Uint8Array;
+  restoreState: (bytes: Uint8Array) => void;
 }
 
 type Posture = "standing" | "crouching";
@@ -247,6 +270,19 @@ const buildChildren = (
   return { shape, geometry: shapeToGeometry(jolt, shape) };
 };
 
+/** Lets `standing` go if building `crouching` throws. */
+const withCrouching = (
+  standing: BuiltShape,
+  buildCrouching: () => BuiltShape,
+): ShapeSet => {
+  try {
+    return { standing, crouching: buildCrouching() };
+  } catch (error) {
+    standing.shape.Release();
+    throw error;
+  }
+};
+
 const buildShapes = (
   jolt: JoltModule,
   shapes: CharacterShapes | undefined,
@@ -254,19 +290,17 @@ const buildShapes = (
 ): ShapeSet => {
   if (!shapes) {
     const { height, radius } = options;
-    return {
-      standing: buildCapsule(jolt, height.standing, radius.standing),
-      crouching: buildCapsule(jolt, height.crouching, radius.crouching),
-    };
+    return withCrouching(
+      buildCapsule(jolt, height.standing, radius.standing),
+      () => buildCapsule(jolt, height.crouching, radius.crouching),
+    );
   }
 
   const standing = buildChildren(jolt, shapes.standing);
-  return {
-    standing,
-    crouching: shapes.crouching
-      ? buildChildren(jolt, shapes.crouching)
-      : standing,
-  };
+  const { crouching } = shapes;
+  return crouching
+    ? withCrouching(standing, () => buildChildren(jolt, crouching))
+    : { standing, crouching: standing };
 };
 
 /** Without `crouching` both postures share one shape, which is freed once. */
@@ -279,6 +313,9 @@ const disposeGeometries = (set: ShapeSet) => {
 };
 
 const INVALID_ID = 0xffffffff;
+const LOCAL_UP = new Vector3(0, 1, 0);
+/** Within about a tenth of a degree, an up is left as it is. */
+const ALIGNED = 1 - 1e-6;
 
 const activeContact = (): CharacterActiveContact => ({
   bodyID: null,
@@ -383,7 +420,6 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     const {
       position,
       rotation = [0, 0, 0, 1],
-      up = [0, 1, 0],
       mass = 1000,
       layer = layers.LAYER_MOVING,
       userData,
@@ -391,6 +427,7 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       innerBody = false,
       innerBodyLayer = layer,
       innerBodyIDOverride,
+      stateId,
       collideWithCharacters = true,
       collideWithSoftBodies = false,
     } = mount;
@@ -398,6 +435,28 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     const options = mergeOptions(mount.options);
     stateRef.current.posture = "standing";
     stateRef.current.custom = false;
+
+    // The ids are checked and the shapes built, the two things that can throw,
+    // before anything else, so a refusal leaves nothing behind.
+    const innerID = innerBody ? (innerBodyIDOverride ?? stateId) : undefined;
+    if (stateId !== undefined) {
+      api.stateIds.checkCharacter(stateId, "useCharacter");
+    }
+    if (innerID !== undefined && innerBodyIDOverride === undefined) {
+      api.stateIds.check(innerID, "useCharacter");
+    }
+
+    const shapes = buildShapes(jolt, shape, options);
+    const innerShapes = (() => {
+      if (innerBody === true) return shapes;
+      if (!innerBody) return null;
+      try {
+        return buildShapes(jolt, innerBody, options);
+      } catch (error) {
+        releaseShapes(shapes);
+        throw error;
+      }
+    })();
 
     const broadPhaseFilter = new jolt.DefaultBroadPhaseLayerFilter(
       joltInterface.GetObjectVsBroadPhaseLayerFilter(),
@@ -411,14 +470,6 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       ? new jolt.BodyFilter()
       : skipSoftBodies(jolt);
     const shapeFilter = new jolt.ShapeFilter();
-
-    const shapes = buildShapes(jolt, shape, options);
-    const innerShapes =
-      innerBody === true
-        ? shapes
-        : innerBody
-          ? buildShapes(jolt, innerBody, options)
-          : null;
 
     const settings = new jolt.CharacterVirtualSettings();
     settings.mMass = mass;
@@ -434,14 +485,27 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     if (innerShapes) {
       settings.mInnerBodyShape = innerShapes.standing.shape;
       settings.mInnerBodyLayer = innerBodyLayer;
-      if (innerBodyIDOverride !== undefined) {
-        const override = new jolt.BodyID(innerBodyIDOverride);
+      if (innerID !== undefined) {
+        const override = new jolt.BodyID(innerID);
         settings.mInnerBodyIDOverride = override;
         jolt.destroy(override);
       }
     }
 
-    const supportingPlaneNormal = new jolt.Vec3(up[0], up[1], up[2]);
+    // The feet point along gravity, so up is the other way. With no gravity
+    // there is no down, and the last up stands.
+    const characterUp = new Vector3(0, 1, 0);
+    const gravityUp = new Vector3();
+    const upFromGravity = () => {
+      const pull = physicsSystem.GetGravity();
+      gravityUp.set(-pull.GetX(), -pull.GetY(), -pull.GetZ());
+      if (gravityUp.lengthSq() < 1e-12) return characterUp;
+      return gravityUp.normalize();
+    };
+    characterUp.copy(upFromGravity());
+
+    // In the character's own space, where up is +Y.
+    const supportingPlaneNormal = new jolt.Vec3(0, 1, 0);
     const supportingVolume = new jolt.Plane(
       supportingPlaneNormal,
       -options.radius.standing,
@@ -451,11 +515,14 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     jolt.destroy(supportingPlaneNormal);
 
     const startPosition = new jolt.RVec3(position[0], position[1], position[2]);
+    const upright = new Quaternion()
+      .setFromUnitVectors(LOCAL_UP, characterUp)
+      .multiply(new Quaternion(rotation[0], rotation[1], rotation[2], rotation[3]));
     const startRotation = new jolt.Quat(
-      rotation[0],
-      rotation[1],
-      rotation[2],
-      rotation[3],
+      upright.x,
+      upright.y,
+      upright.z,
+      upright.w,
     );
 
     const character = new jolt.CharacterVirtual(
@@ -465,7 +532,7 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       physicsSystem,
     );
 
-    const upVector = new jolt.Vec3(up[0], up[1], up[2]);
+    const upVector = new jolt.Vec3(characterUp.x, characterUp.y, characterUp.z);
     character.SetUp(upVector);
     if (userData !== undefined) character.SetUserData(userData);
 
@@ -478,6 +545,14 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     const innerBodyID = innerShapes
       ? new jolt.BodyID(character.GetInnerBodyID().GetIndexAndSequenceNumber())
       : null;
+    if (innerBodyID) {
+      api.stateIds.track(innerBodyID, "useCharacter", innerID !== undefined);
+    }
+    const removeState = api.stateIds.addCharacter({
+      stateId,
+      character,
+      hook: "useCharacter",
+    });
 
     const contactListener = createCharacterListener(jolt, {
       handlers: () => handlersRef.current,
@@ -487,12 +562,6 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     });
 
     character.SetListener(contactListener);
-
-    const characterUp = new Vector3(up[0], up[1], up[2]).normalize();
-    const upRotation = new Quaternion().setFromUnitVectors(
-      new Vector3(0, 1, 0),
-      characterUp,
-    );
 
     const updateSettings = new jolt.ExtendedUpdateSettings();
 
@@ -508,15 +577,20 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       );
     };
 
-    if (options.enableStickToFloor) {
-      alignToUp(updateSettings.mStickToFloorStepDown, -1);
-    } else {
+    const alignSteps = () => {
+      if (options.enableStickToFloor) {
+        alignToUp(updateSettings.mStickToFloorStepDown, -1);
+      }
+      if (options.enableStairStep) {
+        alignToUp(updateSettings.mWalkStairsStepUp, 1);
+      }
+    };
+
+    alignSteps();
+    if (!options.enableStickToFloor) {
       updateSettings.mStickToFloorStepDown = jolt.Vec3.prototype.sZero();
     }
-
-    if (options.enableStairStep) {
-      alignToUp(updateSettings.mWalkStairsStepUp, 1);
-    } else {
+    if (!options.enableStairStep) {
       updateSettings.mWalkStairsStepUp = jolt.Vec3.prototype.sZero();
     }
 
@@ -594,10 +668,13 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       }
     };
 
-    const applyShape = (next: Jolt.Shape) =>
+    const applyShape = (
+      next: Jolt.Shape,
+      maxPenetration = 1.5 * physicsSystem.GetPhysicsSettings().mPenetrationSlop,
+    ) =>
       character.SetShape(
         next,
-        1.5 * physicsSystem.GetPhysicsSettings().mPenetrationSlop,
+        maxPenetration,
         broadPhaseFilter,
         layerFilter,
         bodyFilter,
@@ -606,8 +683,8 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       );
 
     /** Left as it was when the new shape has no room, and tried again next update. */
-    const takePosture = (posture: Posture) => {
-      if (!applyShape(shapes[posture].shape)) return;
+    const takePosture = (posture: Posture, maxPenetration?: number) => {
+      if (!applyShape(shapes[posture].shape, maxPenetration)) return;
 
       stateRef.current.posture = posture;
       if (innerShapes) character.SetInnerBodyShape(innerShapes[posture].shape);
@@ -659,12 +736,106 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     const debugView = createDebugView(buildDebugMeshes, releaseDebugMeshes);
     debugViewRef.current = debugView;
 
+    /**
+     * Inertia and posture live out here, not in the character. A shape given to
+     * `setShape` is the caller's, and stays as it is. A restored posture was
+     * already in place then, so it goes back without testing for room.
+     */
+    const sideState: SideState = {
+      tag: "character",
+      owner: "character",
+      id: stateId ?? 0,
+      save: () => {
+        const { desiredVelocity, shouldSlide, posture } = stateRef.current;
+        return [
+          desiredVelocity.x,
+          desiredVelocity.y,
+          desiredVelocity.z,
+          shouldSlide ? 1 : 0,
+          posture === "crouching" ? 1 : 0,
+        ];
+      },
+      restore: ([x, y, z, slide, crouching]) => {
+        const current = stateRef.current;
+        current.desiredVelocity.set(x, y, z);
+        current.shouldSlide = slide === 1;
+
+        const posture: Posture = crouching === 1 ? "crouching" : "standing";
+        if (!current.custom && posture !== current.posture) {
+          takePosture(posture, Infinity);
+        }
+      },
+    };
+    const stopKeeping =
+      stateId === undefined ? () => {} : api.snapshots.keep(sideState);
+
     const linearVelocity = new Vector3();
     const verticalVelocity = new Vector3();
     const groundVelocity = new Vector3();
     const gravity = new Vector3();
     const newVelocity = new Vector3();
     const scratch = new Vector3();
+    const facing = new Quaternion();
+    const turn = new Quaternion();
+    const target = new Quaternion();
+    const feetUp = new Vector3();
+    const sideways = new Vector3();
+    const middle = new Vector3();
+    const pivot = new Vector3();
+
+    /**
+     * Turns the character's feet towards gravity, at `uprightSpeed`. Up for
+     * the ground and the steps follows gravity at once; only the shape turns
+     * over time. Read from its rotation rather than remembered, so a restored
+     * snapshot carries a turn half done.
+     */
+    const followGravity = (deltaTime: number) => {
+      const wanted = upFromGravity();
+
+      if (characterUp.dot(wanted) < ALIGNED) {
+        characterUp.copy(wanted);
+        upVector.Set(characterUp.x, characterUp.y, characterUp.z);
+        character.SetUp(upVector);
+        alignSteps();
+      }
+
+      const now = character.GetRotation();
+      facing.set(now.GetX(), now.GetY(), now.GetZ(), now.GetW());
+      feetUp.copy(LOCAL_UP).applyQuaternion(facing);
+      if (feetUp.dot(wanted) < ALIGNED) {
+        // About the shape's middle: turned about the feet, the shape would
+        // swing down into whatever they stand on.
+        // Jolt measures local bounds from the centre of mass, not the feet.
+        const shape = character.GetShape();
+        const massCentre = shape.GetCenterOfMass();
+        middle.set(massCentre.GetX(), massCentre.GetY(), massCentre.GetZ());
+        const boundsCentre = shape.GetLocalBounds().GetCenter();
+        middle.x += boundsCentre.GetX();
+        middle.y += boundsCentre.GetY();
+        middle.z += boundsCentre.GetZ();
+        const at = character.GetPosition();
+        pivot
+          .set(at.GetX(), at.GetY(), at.GetZ())
+          .add(scratch.copy(middle).applyQuaternion(facing));
+
+        // Gravity turned right round goes head over heels, about the
+        // character's own sideways axis, rather than about any axis at all.
+        if (feetUp.dot(wanted) < -ALIGNED) {
+          sideways.set(1, 0, 0).applyQuaternion(facing);
+          turn.setFromAxisAngle(sideways, Math.PI);
+        } else {
+          turn.setFromUnitVectors(feetUp, wanted);
+        }
+        target.copy(facing).premultiply(turn);
+        facing.rotateTowards(target, options.uprightSpeed * deltaTime);
+        pivot.sub(scratch.copy(middle).applyQuaternion(facing));
+
+        character.SetRotation(
+          api.temps.quat([facing.x, facing.y, facing.z, facing.w]),
+        );
+        character.SetPosition(api.temps.rvec3([pivot.x, pivot.y, pivot.z]));
+      }
+    };
 
     const update = (
       direction: Vector3,
@@ -674,6 +845,8 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       updateOptions: CharacterUpdateOptions = {},
     ) => {
       if (state.destroyed) return;
+
+      followGravity(deltaTime);
 
       const {
         ignoreHorizontalMovementLock = false,
@@ -729,7 +902,8 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         worldGravity.GetZ(),
       );
 
-      const movingTowardsGround = verticalVelocity.y - groundVelocity.y < 0.1;
+      const movingTowardsGround =
+        verticalVelocity.dot(characterUp) - groundVelocity.dot(characterUp) < 0.1;
       const onGround =
         character.GetGroundState() === jolt.EGroundState_OnGround &&
         (options.enableInertia
@@ -747,14 +921,9 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         newVelocity.copy(verticalVelocity);
       }
 
-      scratch.copy(gravity).applyQuaternion(upRotation);
-      weight.copy(scratch);
-      newVelocity.addScaledVector(scratch, deltaTime);
-
-      scratch
-        .copy(stateRef.current.desiredVelocity)
-        .applyQuaternion(upRotation);
-      newVelocity.add(scratch);
+      weight.copy(gravity);
+      newVelocity.addScaledVector(gravity, deltaTime);
+      newVelocity.add(stateRef.current.desiredVelocity);
 
       if (addToVelocity) {
         newVelocity.add(addToVelocity);
@@ -817,6 +986,7 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
 
     setCharacterApi({
       character,
+      stateId,
       characterID,
       innerBodyID,
       hasCollidedWith: (body) => character.HasCollidedWith(body),
@@ -833,9 +1003,19 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         return debugView.current?.custom ?? null;
       },
       setShape,
+      saveState: () =>
+        state.disposed
+          ? new Uint8Array(0)
+          : api.snapshots.saveObject(character, sideState),
+      restoreState: (bytes) => {
+        if (state.disposed || bytes.length === 0) return;
+        api.snapshots.restoreObject(character, bytes, sideState);
+      },
     });
 
     return () => {
+      removeState();
+      stopKeeping();
       setCharacterApi(undefined);
       debugView.hide();
       debugViewRef.current = null;

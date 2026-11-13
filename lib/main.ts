@@ -21,6 +21,11 @@ export {
   type CompoundChild,
 } from "@/Jolt/useCompound";
 export {
+  useMutableCompound,
+  type UseMutableCompoundOptions,
+  type MutableCompoundExtras,
+} from "@/Jolt/useMutableCompound";
+export {
   useTrimesh,
   type UseTrimeshOptions,
   type TrimeshSource,
@@ -83,6 +88,25 @@ export {
   type CarState,
   type CarWheelState,
 } from "@/Jolt/useCar";
+export {
+  useTank,
+  type UseTankOptions,
+  type TankApi,
+  type TankInput,
+} from "@/Jolt/useTank";
+export {
+  useMotorcycle,
+  type UseMotorcycleOptions,
+  type MotorcycleApi,
+  type MotorcycleInput,
+} from "@/Jolt/useMotorcycle";
+export type {
+  TireContact,
+  TireFrictionDirection,
+  VehicleState,
+  VehicleTelemetry,
+  VehicleWheelState,
+} from "@/Jolt/internal/vehicle";
 
 export {
   useClosestHitRaycaster,
@@ -134,6 +158,8 @@ export {
   type OrientedBoxInput,
 } from "@/Jolt/boxOverlap";
 
+export { isSameState } from "@/Jolt/internal/snapshot";
+
 export type {
   QueryBody,
   QueryMode,
@@ -164,6 +190,36 @@ export {
   type SliderConstraintApi,
   type SliderConstraintExtras,
 } from "@/Jolt/useSliderConstraint";
+export {
+  usePathConstraint,
+  type UsePathConstraintOptions,
+  type PathConstraintApi,
+  type PathConstraintExtras,
+  type PathMotorOptions,
+  type PathRotation,
+} from "@/Jolt/usePathConstraint";
+export {
+  samplePath,
+  type CustomPath,
+  type PathPoint,
+  type PathSample,
+} from "@/Jolt/internal/constraintPath";
+export {
+  useGearConstraint,
+  type UseGearConstraintOptions,
+  type GearConstraintApi,
+} from "@/Jolt/useGearConstraint";
+export {
+  useRackAndPinionConstraint,
+  type UseRackAndPinionConstraintOptions,
+  type RackAndPinionConstraintApi,
+} from "@/Jolt/useRackAndPinionConstraint";
+export {
+  usePulleyConstraint,
+  type UsePulleyConstraintOptions,
+  type PulleyConstraintApi,
+  type PulleyConstraintExtras,
+} from "@/Jolt/usePulleyConstraint";
 export {
   useDistanceConstraint,
   type UseDistanceConstraintOptions,
@@ -237,6 +293,11 @@ export {
 } from "@/Jolt/internal/skeleton";
 
 export { useBeforePhysicsStep } from "@/Jolt/useBeforePhysicsStep";
+export {
+  useRollback,
+  type RollbackApi,
+  type UseRollbackOptions,
+} from "@/Jolt/useRollback";
 export { useAfterPhysicsStep } from "@/Jolt/useAfterPhysicsStep";
 export type { PhysicsSettingsOptions } from "@/Jolt/internal/physicsSettings";
 
@@ -315,6 +376,7 @@ export type {
   Temps,
   MotionType,
   PhysicsTiming,
+  StateFilter,
   BodyMaterial,
   BroadPhaseLayerConfig,
   LayerConfig,

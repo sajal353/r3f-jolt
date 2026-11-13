@@ -234,7 +234,7 @@ export const PhysicsDebug = ({
         const { layout, vertices } = entry.soft;
         const changed = body.IsActive()
           ? vertices.update(jolt, body, layout, api.timing)
-          : vertices.rest(jolt, body, layout);
+          : vertices.rest(jolt, body, layout, api.timing);
 
         if (changed) {
           const position = entry.mesh.geometry.getAttribute(

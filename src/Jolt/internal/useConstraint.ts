@@ -15,6 +15,7 @@ import {
 import { createLoadWindow } from "./constraintLoad";
 import { useHandlerRef } from "./useHandlerRef";
 import type { BodyApi } from "./useBody";
+import type { Snapshots } from "./snapshot";
 import type { ConstraintEntry, JoltApi, JoltModule, Temps } from "../types";
 
 /**
@@ -25,6 +26,13 @@ import type { ConstraintEntry, JoltApi, JoltModule, Temps } from "../types";
 export type ConstraintBody = BodyApi<Jolt.Shape> | Jolt.Body | null;
 
 export interface ConstraintOptions {
+  /**
+   * Names the constraint in `saveState`, which needs one on every constraint.
+   * Numbered apart from bodies, unique per world. Constraints with one are
+   * also solved in `stateId` order, so two worlds mounted in a different order
+   * still simulate alike.
+   */
+  stateId?: number;
   enabled?: boolean;
   /**
    * Constraints are solved low priority first, so raise it for a joint the
@@ -69,6 +77,9 @@ export interface ConstraintApi<C extends Jolt.Constraint> {
   resetWarmStart: () => void;
   /** Wakes both bodies. The runtime setters already do this for you. */
   activate: () => void;
+  /** This constraint alone: accumulated impulses and motor state. */
+  saveState: () => Uint8Array;
+  restoreState: (bytes: Uint8Array) => void;
 }
 
 /** What a hook needs to build its own runtime methods on top of the shared ones. */
@@ -96,11 +107,15 @@ export interface ConstraintLoad {
 }
 
 export interface ConstraintBuild<C extends Jolt.Constraint, E extends object> {
+  /** Names the hook in errors. */
+  hook: string;
   settings: (jolt: JoltModule, temps: Temps) => Jolt.TwoBodyConstraintSettings;
   cast: (constraint: Jolt.TwoBodyConstraint, jolt: JoltModule) => C;
   api?: (context: ConstraintApiContext<C>) => E;
   /** Absent where Jolt binds no `GetTotalLambda*` for the type. */
   load?: (constraint: C, out: ConstraintLoad) => void;
+  /** Frees what `settings` made for the joint, once the joint has gone. */
+  release?: () => void;
 }
 
 const resolveBody = (api: JoltApi, value: ConstraintBody): Jolt.Body => {
@@ -139,6 +154,7 @@ const createSharedApi = <C extends Jolt.Constraint>(
   body2: Jolt.Body,
   usable: () => boolean,
   activate: () => void,
+  snapshots: Snapshots,
 ): ConstraintApi<C> => {
   const setEnabled = (enabled: boolean) => {
     if (!usable()) return;
@@ -170,6 +186,12 @@ const createSharedApi = <C extends Jolt.Constraint>(
     setPriority,
     resetWarmStart,
     activate,
+    saveState: () =>
+      usable() ? snapshots.saveObject(constraint) : new Uint8Array(0),
+    restoreState: (bytes) => {
+      if (!usable() || bytes.length === 0) return;
+      snapshots.restoreObject(constraint, bytes);
+    },
   };
 };
 
@@ -194,6 +216,7 @@ const watchLoad = <C extends Jolt.Constraint>(
   breakTorque: number | undefined,
   activate: () => void,
   onBreak: (load: ConstraintLoad) => void,
+  stateId: number | undefined,
 ) => {
   if (breakForce === undefined && breakTorque === undefined) {
     return () => {};
@@ -211,6 +234,16 @@ const watchLoad = <C extends Jolt.Constraint>(
   const impulses: ConstraintLoad = { force: 0, torque: 0 };
   const load: ConstraintLoad = { force: 0, torque: 0 };
   const recent = createLoadWindow(BREAK_SPAN);
+  const stopKeeping =
+    stateId === undefined
+      ? () => {}
+      : api.snapshots.keep({
+          tag: "load",
+          owner: "constraint",
+          id: stateId,
+          save: recent.save,
+          restore: recent.restore,
+        });
 
   const checkLoad = (delta: number) => {
     if (api.state.disposed) return;
@@ -237,7 +270,12 @@ const watchLoad = <C extends Jolt.Constraint>(
     onBreak({ ...load });
   };
 
-  return api.steps.add("after", checkLoad);
+  const stopChecking = api.steps.add("after", checkLoad);
+
+  return () => {
+    stopKeeping();
+    stopChecking();
+  };
 };
 
 /**
@@ -271,19 +309,18 @@ export const useConstraint = <
   useEffect(() => {
     if (body1 === undefined || body2 === undefined) return;
 
-    const {
-      Jolt: jolt,
-      physicsSystem,
-      bodyInterface,
-      temps,
-      state,
-    } = api;
+    const { Jolt: jolt, bodyInterface, temps, state } = api;
 
     const { options, build } = mount;
     const { priority, breakForce, breakTorque, settingsOverride } = options;
 
     const first = resolveBody(api, body1);
     const second = resolveBody(api, body2);
+
+    // Refused before `build.settings`, which may hold Jolt objects of its own.
+    if (options.stateId !== undefined) {
+      api.constraints.check(options.stateId, build.hook);
+    }
 
     const settings = build.settings(jolt, temps);
     applySharedOptions(settings, options);
@@ -299,7 +336,15 @@ export const useConstraint = <
     jolt.destroy(settings);
 
     constraint.AddRef();
-    physicsSystem.AddConstraint(constraint);
+
+    let detach: () => void;
+    try {
+      detach = api.constraints.attach(constraint, options.stateId, build.hook);
+    } catch (error) {
+      constraint.Release();
+      build.release?.();
+      throw error;
+    }
 
     if (priority !== undefined) constraint.SetConstraintPriority(priority);
 
@@ -343,6 +388,7 @@ export const useConstraint = <
       second,
       usable,
       activate,
+      api.snapshots,
     );
     const extras = build.api?.({
       constraint: typed,
@@ -360,6 +406,7 @@ export const useConstraint = <
       breakTorque,
       activate,
       (broke) => breakHandler.current?.(broke),
+      options.stateId,
     );
 
     setConstraintApi({ ...shared, ...extras } as ConstraintApi<C> & E);
@@ -376,8 +423,9 @@ export const useConstraint = <
 
       if (state.destroyed) return;
 
-      physicsSystem.RemoveConstraint(constraint);
+      detach();
       constraint.Release();
+      build.release?.();
     };
   }, [api, body1, body2, mount, scene, breakHandler]);
 

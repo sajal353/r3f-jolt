@@ -1,6 +1,6 @@
 {
   "name": "r3f-jolt",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "Jolt Physics Hooks for React-Three-Fiber",
   "keywords": [

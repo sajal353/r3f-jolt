@@ -5,6 +5,7 @@ import { createChildShape } from "./colliderShape";
 import { applyMassProperties } from "./massProperties";
 import { createSkeletonRig, MATRIX_FLOATS, type SkeletonRig } from "./skeleton";
 import type { RagdollBoneConfig, RagdollConfig } from "./ragdollFit";
+import type { StateIdRegistry } from "./stateIds";
 import type { JoltModule } from "../types";
 
 export interface RagdollPartOptions {
@@ -192,8 +193,9 @@ export interface BuiltRagdoll {
 }
 
 /**
- * Builds the ragdoll in the bind pose, at wherever the mesh stands, and adds it
- * to the world. Ownership runs ragdoll → settings → skeleton, all by reference
+ * Builds the ragdoll in the bind pose, at wherever the mesh stands, out of the
+ * world: the caller adds it, so its joints go in through the constraint
+ * registry. With a `stateId` its parts land on `stateId…`. Ownership runs ragdoll → settings → skeleton, all by reference
  * count, so destroying the ragdoll frees the settings and `rig.dispose()` then
  * frees the skeleton.
  */
@@ -205,6 +207,8 @@ export const buildRagdoll = (
   groupID: number,
   userData: number,
   options: RagdollPartOptions,
+  stateIds: StateIdRegistry,
+  stateId: number | undefined,
 ): BuiltRagdoll => {
   const byName = new Map(config.bones.map((bone) => [bone.name, bone]));
   const rig = createSkeletonRig(jolt, mesh, (bone) => byName.has(bone.name));
@@ -239,6 +243,16 @@ export const buildRagdoll = (
   settings.CalculateConstraintIndexToBodyIdxPair();
   settings.CalculateConstraintPriorities();
 
+  if (stateId !== undefined) {
+    try {
+      stateIds.reserve(stateId, rig.bones.length, "useRagdoll");
+    } catch (error) {
+      jolt.destroy(settings);
+      rig.dispose();
+      throw error;
+    }
+  }
+
   const ragdoll = settings.CreateRagdoll(groupID, userData, physicsSystem);
 
   if (jolt.getPointer(ragdoll) === 0) {
@@ -251,7 +265,21 @@ export const buildRagdoll = (
     );
   }
 
-  ragdoll.AddToPhysicsSystem(jolt.EActivation_Activate);
+  const ids = ragdoll.GetBodyIDs();
+  const bodyIDs = rig.names.map((_, index) => ids.at(index));
+  for (const id of bodyIDs) {
+    stateIds.track(id, "useRagdoll", stateId !== undefined);
+  }
+
+  if (stateId !== undefined) {
+    try {
+      stateIds.verify(bodyIDs, stateId, "useRagdoll");
+    } catch (error) {
+      jolt.destroy(ragdoll);
+      rig.dispose();
+      throw error;
+    }
+  }
 
   return { ragdoll, rig };
 };

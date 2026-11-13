@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Vector3 } from "three";
 import { useJolt } from "./useJolt";
 import { useHandlerRef } from "./internal/useHandlerRef";
@@ -53,7 +53,7 @@ const createSwimming = (
   water: JoltApi["water"],
   character: CharacterApi | undefined,
   optionsRef: { readonly current: UseSwimmingOptions },
-): SwimmingApi => {
+) => {
   const sample: WaterSample = { depth: 0, surfaceLevel: 0, flow: new Vector3() };
   const result = new Vector3();
   const feet = new Vector3();
@@ -75,8 +75,10 @@ const createSwimming = (
 
     const wet = water.sample(feet, sample);
     depth = wet ? wet.depth : 0;
+    // Out at the shallower of the two, or a float set deeper than `depth`
+    // would let a swimmer out just after letting it in.
     swimming = swimming
-      ? depth >= floatDepth - EXIT_MARGIN
+      ? depth >= Math.min(floatDepth, options.depth) - EXIT_MARGIN
       : depth >= options.depth;
 
     if (!swimming) {
@@ -110,7 +112,24 @@ const createSwimming = (
     return result;
   };
 
-  return {
+  const sideState = {
+    save: () => [
+      swimming ? 1 : 0,
+      moving ? 1 : 0,
+      depth,
+      vertical,
+      floatOverride ?? NaN,
+    ],
+    restore: ([wasSwimming, wasMoving, wasDepth, wasVertical, wasFloat]: number[]) => {
+      swimming = wasSwimming === 1;
+      moving = wasMoving === 1;
+      depth = wasDepth;
+      vertical = wasVertical;
+      floatOverride = Number.isNaN(wasFloat) ? null : wasFloat;
+    },
+  };
+
+  const swimmingApi: SwimmingApi = {
     overrideUpdate,
     setVertical: (value) => {
       vertical = Math.sign(value);
@@ -128,6 +147,8 @@ const createSwimming = (
       return depth;
     },
   };
+
+  return { swimmingApi, sideState };
 };
 
 /**
@@ -146,8 +167,23 @@ export const useSwimming = (
   const api = useJolt();
   const optionsRef = useHandlerRef(options);
 
-  return useMemo(
+  const { swimmingApi, sideState } = useMemo(
     () => createSwimming(api.water, character, optionsRef),
     [api, character, optionsRef],
   );
+
+  const stateId = character?.stateId;
+
+  useEffect(() => {
+    if (stateId === undefined) return;
+
+    return api.snapshots.keep({
+      tag: "swimming",
+      owner: "character",
+      id: stateId,
+      ...sideState,
+    });
+  }, [api, stateId, sideState]);
+
+  return swimmingApi;
 };

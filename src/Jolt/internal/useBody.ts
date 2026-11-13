@@ -67,6 +67,13 @@ export interface CollisionGroupOptions {
 }
 
 export interface BodyOptions {
+  /**
+   * The body's Jolt id, for `saveState`. A snapshot names bodies by id, and
+   * without one Jolt picks it from whatever mounted before, so a world mounted
+   * in a different order cannot take the snapshot. Unique per world, from 0
+   * up to `maxBodies`.
+   */
+  stateId?: number;
   position: Vec3Tuple;
   rotation?: QuatTuple;
   motionType: MotionType;
@@ -243,6 +250,13 @@ export interface BodyApi<S extends Jolt.Shape> {
    * warning rather than silently corrected.
    */
   setScale: (scale: Vec3Input, updateMassProperties?: boolean) => void;
+  /**
+   * This body alone: position, rotation, velocities and whether it sleeps.
+   * Empty while the body is out of the world.
+   */
+  saveState: () => Uint8Array;
+  /** Puts this body back as its own `saveState` found it. */
+  restoreState: (bytes: Uint8Array) => void;
 }
 
 /**
@@ -278,6 +292,8 @@ export interface BodyApiContext<S extends Jolt.Shape> {
   usable: () => boolean;
   /** Wake the body after a change that should have a visible effect. */
   activate: () => void;
+  /** Runs as the body goes, ahead of the body itself. */
+  onDispose: (release: () => void) => void;
 }
 
 export const finishShape = <S extends Jolt.Shape>(shape: S): S => {
@@ -307,8 +323,8 @@ export const shapeFromResult = <S extends Jolt.Shape>(
 };
 
 /**
- * `ShapeResult.Get()` hands back a base-`Shape` wrapper whatever it built —
- * measured, and the generated types do not admit it: a `PlaneShape` from
+ * `ShapeResult.Get()` hands back a base-`Shape` wrapper whatever it built, and
+ * the generated types do not admit it: a `PlaneShape` from
  * `Get()` has no `GetHalfExtent` and a `HeightFieldShape` no `IsNoCollision`.
  * Anything needing a subclass's own methods has to `castObject` first, which
  * wraps the same pointer, so ownership is unaffected.
@@ -325,7 +341,7 @@ export const shapeFromResultAs = <
 
 /**
  * Jolt copies the group into whatever takes it and refs the filter on the way,
- * so the one built here is a temporary — measured: assigning it to a
+ * so the one built here is a temporary: assigning it to a
  * `BodyCreationSettings` takes the filter's refcount up by one and destroying
  * this brings it back down, leaving the settings' own copy holding a reference.
  */
@@ -469,6 +485,7 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
     const { options, createShape, debugKind, extras } = mount;
 
     const {
+      stateId,
       position,
       rotation = [0, 0, 0, 1],
       motionType,
@@ -665,18 +682,36 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
       bodySettings.mAllowedDOFs = resolvedDOFs;
     }
 
-    if (massProperties || overrideMassProperties) {
-      applyMassProperties(
-        jolt,
-        bodySettings,
-        massProperties ?? {},
-        overrideMassProperties,
-      );
-    }
+    // Mass properties can be refused, and an override can throw: inside the
+    // try, so either lets go of the shape and settings.
+    const body = (() => {
+      try {
+        if (massProperties || overrideMassProperties) {
+          applyMassProperties(
+            jolt,
+            bodySettings,
+            massProperties ?? {},
+            overrideMassProperties,
+          );
+        }
 
-    bodySettingsOverride?.(bodySettings);
+        bodySettingsOverride?.(bodySettings);
 
-    const body = bodyInterface.CreateBody(bodySettings);
+        return api.stateIds.createBody(
+          bodySettings,
+          stateId,
+          `use${debugKind[0].toUpperCase()}${debugKind.slice(1)}`,
+        );
+      } catch (error) {
+        jolt.destroy(bodySettings);
+        jolt.destroy(settingsPosition);
+        jolt.destroy(settingsRotation);
+        scaledShape?.Release();
+        shape.Release();
+        geometry.dispose();
+        throw error;
+      }
+    })();
 
     jolt.destroy(bodySettings);
     jolt.destroy(settingsPosition);
@@ -1041,7 +1076,17 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
         debugScale.set(target.GetX(), target.GetY(), target.GetZ());
         debugView.current?.scale.copy(debugScale);
       },
+
+      saveState: () =>
+        usable() ? api.snapshots.saveBody(body) : new Uint8Array(0),
+
+      restoreState: (bytes: Uint8Array) => {
+        if (!usable() || bytes.length === 0) return;
+        api.snapshots.restoreBody(body, bytes);
+      },
     };
+
+    const disposers: (() => void)[] = [];
 
     const published = {
       ...bodyApiBase,
@@ -1053,6 +1098,7 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
         geometry,
         usable,
         activate: () => bodyInterface.ActivateBody(id),
+        onDispose: (release: () => void) => disposers.push(release),
       }),
     };
 
@@ -1068,6 +1114,8 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
     return () => {
       aliveRef.current = false;
       setBodyApi(undefined);
+
+      for (const release of disposers) release();
 
       debugView.hide();
       debugViewRef.current = null;
@@ -1146,7 +1194,7 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
     if (bodyApi.body.IsActive()) {
       tracker.update(bodyApi.body, api.timing);
     } else {
-      tracker.rest(bodyApi.body);
+      tracker.rest(bodyApi.body, api.timing);
     }
 
     if (ref.current) tracker.applyTo(ref.current);

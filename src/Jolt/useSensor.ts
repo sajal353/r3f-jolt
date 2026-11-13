@@ -17,8 +17,8 @@ export interface UseSensorOptions {
   contactForce?: boolean;
   /**
    * Jolt only keeps a sensor contact while the other body is **awake**, so a
-   * crate that settles inside a trigger fires an exit without moving — measured,
-   * one step after it falls asleep, and an enter again the moment it wakes.
+   * crate that settles inside a trigger fires an exit without moving, one step
+   * after it falls asleep, and an enter again the moment it wakes.
    *
    * Left on, a body that goes to sleep inside the volume stays in `inside` and
    * its exit is held back until it genuinely leaves or is destroyed. Turn it off
@@ -30,6 +30,19 @@ export interface UseSensorOptions {
    */
   keepSleeping?: boolean;
 }
+
+/** Exit events carry no contact point, so a restored one has nothing to lose. */
+const emptyContact = (): ContactInfo => ({
+  bodyID: 0,
+  userData: 0,
+  shapeUserData: 0,
+  point: new Vector3(),
+  normal: new Vector3(),
+  penetrationDepth: 0,
+  impactSpeed: 0,
+  impulse: 0,
+  frictionImpulse: 0,
+});
 
 const copyContact = (contact: ContactInfo): ContactInfo => ({
   ...contact,
@@ -128,7 +141,37 @@ export const useSensor = (
       contactForce: mount.contactForce,
     });
 
+    /** id, whether it is held, and what its held exit reports. Three per body. */
+    const saveInside = () =>
+      [...state.inside].sort((a, b) => a - b).flatMap((otherID) => {
+        const held = state.held.get(otherID);
+        return [otherID, held ? 1 : 0, held?.userData ?? 0];
+      });
+
+    const restoreInside = (values: number[]) => {
+      state.inside.clear();
+      state.held.clear();
+
+      for (let at = 0; at < values.length; at += 3) {
+        const [otherID, held, userData] = values.slice(at, at + 3);
+        state.inside.add(otherID);
+        if (held !== 1) continue;
+        state.held.set(otherID, { ...emptyContact(), bodyID: otherID, userData });
+      }
+
+      publish();
+    };
+
+    const stopKeeping = api.snapshots.keep({
+      tag: "sensor",
+      owner: "body",
+      id: bodyID,
+      save: saveInside,
+      restore: restoreInside,
+    });
+
     return () => {
+      stopKeeping();
       unsubscribe();
       state.inside.clear();
       state.held.clear();

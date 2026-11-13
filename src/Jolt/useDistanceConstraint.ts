@@ -106,6 +106,7 @@ export const useDistanceConstraint = (
     body2,
     options,
     {
+      hook: "useDistanceConstraint",
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castDistance,
       load: readDistanceLoad,

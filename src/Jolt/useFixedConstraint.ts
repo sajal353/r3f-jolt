@@ -78,6 +78,7 @@ export const useFixedConstraint = (
   options: UseFixedConstraintOptions = {},
 ) =>
   useConstraint<Jolt.TwoBodyConstraint>(body1, body2, options, {
+    hook: "useFixedConstraint",
     settings: (jolt, temps) => buildSettings(jolt, temps, options),
     cast: castFixed,
   });

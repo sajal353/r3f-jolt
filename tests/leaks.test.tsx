@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { describe, expect, it } from "vitest";
 import type Jolt from "jolt-physics";
 import {
@@ -17,10 +17,19 @@ import {
 } from "three";
 import { useFrame } from "@react-three/fiber";
 import { useCar } from "@/Jolt/useCar";
+import { useTank } from "@/Jolt/useTank";
+import { useMotorcycle } from "@/Jolt/useMotorcycle";
+import type { TireContact, TireFrictionDirection } from "@/Jolt/internal/vehicle";
 import { useCharacter } from "@/Jolt/useCharacter";
 import { useBox } from "@/Jolt/useBox";
 import { useConveyor } from "@/Jolt/useConveyor";
 import { useSphere } from "@/Jolt/useSphere";
+import { useRollback } from "@/Jolt/useRollback";
+import { usePathConstraint } from "@/Jolt/usePathConstraint";
+import { useGearConstraint } from "@/Jolt/useGearConstraint";
+import { useRackAndPinionConstraint } from "@/Jolt/useRackAndPinionConstraint";
+import { usePulleyConstraint } from "@/Jolt/usePulleyConstraint";
+import { useJolt } from "@/Jolt/useJolt";
 import { useShapeCaster } from "@/Jolt/useShapeCaster";
 import { useShapeOverlap } from "@/Jolt/useShapeOverlap";
 import { usePointQuery } from "@/Jolt/usePointQuery";
@@ -42,6 +51,8 @@ import { useCharacterModel } from "@/Jolt/useCharacterModel";
 import { useRagdoll, type RagdollMode } from "@/Jolt/useRagdoll";
 import { useSwimming } from "@/Jolt/useSwimming";
 import type { CompoundChild } from "@/Jolt/useCompound";
+import { useMutableCompound } from "@/Jolt/useMutableCompound";
+import { useHeightField } from "@/Jolt/useHeightField";
 import { WaterVolume } from "@/Jolt/WaterVolume";
 import { useSoftBody } from "@/Jolt/useSoftBody";
 import { useSoftBodyContactListener } from "@/Jolt/useSoftBodyContactListener";
@@ -65,7 +76,13 @@ import {
 import { loadMannequin, playAt } from "./mannequin";
 
 const Ground = () => {
-  useBox({ size: [50, 1, 50], position: [0, -0.5, 0], motionType: "static" });
+  // Stated so `useRollback`'s world can be saved; nothing else here needs it.
+  useBox({
+    stateId: 900,
+    size: [50, 1, 50],
+    position: [0, -0.5, 0],
+    motionType: "static",
+  });
   return null;
 };
 
@@ -315,6 +332,16 @@ const Jelly = () => {
   return null;
 };
 
+const halveGrip = (tire: TireContact) => {
+  tire.lateralImpulse *= 0.5;
+};
+
+const keepTireFriction = (
+  _wheel: number,
+  _direction: TireFrictionDirection,
+  friction: number,
+) => friction;
+
 const Car = () => {
   const [api] = useCar({
     position: [0, 2, 0],
@@ -336,6 +363,102 @@ const Car = () => {
       handbrake: false,
       modifier: true,
     });
+  });
+
+  return null;
+};
+
+const CarWithTireCallbacks = () => {
+  const [api] = useCar({
+    stateId: 7,
+    position: [0, 2, 0],
+    vehicleSize: { length: 4, width: 1.8, height: 1 },
+    wheelSettings: {
+      radius: 0.3,
+      width: 0.2,
+      offsetForward: 1.2,
+      offsetDown: 0.3,
+    },
+    torqueCurve: [
+      [0, 0.5],
+      [1, 1],
+    ],
+    tireGrip: halveGrip,
+    combineFriction: keepTireFriction,
+  });
+
+  useFrame(() => {
+    api?.update({
+      forward: true,
+      backward: false,
+      left: false,
+      right: true,
+      handbrake: false,
+      modifier: true,
+    });
+    api?.telemetry();
+  });
+
+  return null;
+};
+
+const TankWithCallbacks = () => {
+  const [api] = useTank({
+    stateId: 8,
+    position: [0, 1.5, 0],
+    vehicleSize: { length: 6.4, width: 3.4, height: 1 },
+    wheelSettings: { radius: 0.3, width: 0.3, span: 5.7, offsetDown: 0.3 },
+    torqueCurve: [
+      [0, 0.5],
+      [1, 1],
+    ],
+    combineFriction: keepTireFriction,
+  });
+
+  useFrame(() => {
+    api?.update({
+      forward: true,
+      backward: false,
+      left: true,
+      right: false,
+      brake: false,
+    });
+    api?.telemetry();
+  });
+
+  return null;
+};
+
+const MotorcycleWithCallbacks = () => {
+  const [api] = useMotorcycle({
+    stateId: 9,
+    position: [0, 1.2, 0],
+    vehicleSize: { length: 0.8, width: 0.4, height: 0.6 },
+    wheelSettings: {
+      radius: 0.31,
+      width: 0.05,
+      offsetForward: 0.75,
+      offsetDown: 0.27,
+    },
+    torqueCurve: [
+      [0, 0.5],
+      [1, 1],
+    ],
+    lean: { maxAngle: 30, springConstant: 4000 },
+    tireGrip: halveGrip,
+    combineFriction: keepTireFriction,
+  });
+
+  useFrame(() => {
+    api?.update({
+      forward: true,
+      backward: false,
+      left: false,
+      right: true,
+      handbrake: false,
+      modifier: true,
+    });
+    api?.telemetry();
   });
 
   return null;
@@ -667,9 +790,21 @@ const RAGDOLL_MODES: RagdollMode[] = [
  * own scratch on the Jolt side, so a mode that forgot to free one would show
  * here.
  */
-const Ragdoll = ({ scene, mixer }: { scene: Object3D; mixer: AnimationMixer }) => {
+const Ragdoll = ({
+  scene,
+  mixer,
+  stateId,
+}: {
+  scene: Object3D;
+  mixer: AnimationMixer;
+  stateId?: number;
+}) => {
   const model = useCharacterModel(scene, { debug: true });
-  const [ragdoll] = useRagdoll(model, { mixer, kinematicBones: ["pelvis"] });
+  const [ragdoll] = useRagdoll(model, {
+    mixer,
+    kinematicBones: ["pelvis"],
+    stateId,
+  });
   const frame = useRef(0);
 
   useFrame(function cycleModes() {
@@ -679,6 +814,179 @@ const Ragdoll = ({ scene, mixer }: { scene: Object3D; mixer: AnimationMixer }) =
     const turn = frame.current / 10;
     if (turn === RAGDOLL_MODES.length + 1) ragdoll.blendToAnimation(0.1);
     else ragdoll.setMode(RAGDOLL_MODES[turn % RAGDOLL_MODES.length]);
+  });
+
+  return null;
+};
+
+/**
+ * Bodies and joints on `stateId`s, saved and restored one at a time: the
+ * registries, the recorders and the hinge's re-adding into order.
+ */
+const Machinery = () => {
+  const axle: { hingeAxis: Vec3Tuple; normalAxis: Vec3Tuple } = {
+    hingeAxis: [0, 0, 1],
+    normalAxis: [1, 0, 0],
+  };
+  const box = {
+    size: [0.6, 0.6, 0.6] as Vec3Tuple,
+    motionType: "dynamic" as const,
+  };
+
+  const [, cart] = useBox({ ...box, position: [-4, 5, 0] });
+  usePathConstraint(null, cart, {
+    points: [
+      { position: [-4, 5, 0] },
+      { position: [0, 6, 0] },
+      { position: [4, 5, 0] },
+    ],
+    motor: { state: "velocity", targetVelocity: 1 },
+  });
+
+  const [, gear1] = useBox({ ...box, position: [0, 8, 0] });
+  const [, gear2] = useBox({ ...box, position: [2, 8, 0] });
+  const [hinge1] = useHingeConstraint(null, gear1, { ...axle, point: [0, 8, 0] });
+  const [hinge2] = useHingeConstraint(null, gear2, { ...axle, point: [2, 8, 0] });
+  useGearConstraint(gear1, gear2, {
+    hingeAxis: [0, 0, 1],
+    teeth: [10, 20],
+    hinges: [hinge1, hinge2],
+  });
+
+  const [, pinion] = useBox({ ...box, position: [0, 11, 0] });
+  const [, rack] = useBox({ ...box, position: [0, 10, 2] });
+  const [hinge] = useHingeConstraint(null, pinion, { ...axle, point: [0, 11, 0] });
+  const [slider] = useSliderConstraint(null, rack, {
+    point: [0, 10, 2],
+    sliderAxis: [1, 0, 0],
+    normalAxis: [0, 1, 0],
+  });
+  useRackAndPinionConstraint(pinion, rack, {
+    hingeAxis: [0, 0, 1],
+    sliderAxis: [1, 0, 0],
+    teeth: { pinion: 10, rack: 10, length: 1 },
+    hinge,
+    slider,
+  });
+
+  const [, left] = useBox({ ...box, position: [-3, 3, 3] });
+  const [, right] = useBox({ ...box, position: [3, 3, 3] });
+  usePulleyConstraint(left, right, {
+    bodyPoint1: [-3, 3, 3],
+    bodyPoint2: [3, 3, 3],
+    fixedPoint1: [-3, 9, 3],
+    fixedPoint2: [3, 9, 3],
+  });
+
+  return null;
+};
+
+const CHANGING_CHILD: CompoundChild = {
+  type: "box",
+  position: [2, 0, 0],
+  size: [1, 1, 1],
+};
+
+/** Every edit, on one with a `stateId` that keeps the children and one that does not. */
+const ChangingCompound = ({ stateId }: { stateId?: number }) => {
+  const [, compound] = useMutableCompound({
+    stateId,
+    shapes: [
+      { type: "box", position: [-1, 0, 0], size: [1, 1, 1] },
+      { type: "sphere", position: [1, 0, 0], radius: 0.5 },
+    ],
+    position: [0, 5, 0],
+    motionType: "dynamic",
+  });
+
+  useEffect(() => {
+    if (!compound) return;
+
+    const added = compound.addShape(CHANGING_CHILD);
+    compound.modifyShape(added, [2, 1, 0], [0, 0, 0, 1], CHANGING_CHILD);
+    compound.modifyShapes(0, [[-1, 1, 0]], [[0, 0, 0, 1]]);
+    compound.removeShape(1);
+    compound.adjustCenterOfMass();
+    if (stateId !== undefined) compound.restoreState(compound.saveState());
+  }, [compound, stateId]);
+
+  return null;
+};
+
+const DiggingTerrain = ({ stateId }: { stateId?: number }) => {
+  const [, terrain] = useHeightField({
+    stateId,
+    heights: () => 0,
+    sampleCount: 16,
+    blockSize: 4,
+    range: [-8, 8],
+    position: [0, 0, 0],
+  });
+
+  useEffect(() => {
+    if (!terrain) return;
+
+    terrain.setHeights(4, 4, 4, 4, new Float32Array(16).fill(-2));
+    if (stateId !== undefined) terrain.restoreState(terrain.saveState());
+  }, [terrain, stateId]);
+
+  return null;
+};
+
+const RolledBack = () => {
+  const { timing } = useJolt();
+  const rollback = useRollback({ capacity: 8 });
+
+  useSphere({
+    stateId: 1,
+    radius: 0.5,
+    position: [0, 2, 0],
+    motionType: "dynamic",
+  });
+  useCharacter({ stateId: 1, position: [3, 0, 0] });
+
+  useFrame(function rewindEachFrame() {
+    if (timing.stepCount > 4) rollback.rewind(timing.stepCount - 3);
+  });
+
+  return null;
+};
+
+const Stated = () => {
+  const [, first] = useBox({
+    stateId: 10,
+    size: [1, 1, 1],
+    position: [0, 2, 0],
+    motionType: "dynamic",
+  });
+  const [, second] = useBox({
+    stateId: 11,
+    size: [1, 1, 1],
+    position: [1.2, 2, 0],
+    motionType: "dynamic",
+  });
+  const [hinge] = useHingeConstraint(first, second, {
+    stateId: 5,
+    point: [0.6, 2, 0],
+    hingeAxis: [0, 0, 1],
+    normalAxis: [1, 0, 0],
+  });
+  useDistanceConstraint(second, null, { stateId: 2, point2: [1.2, 4, 0] });
+  useInstancedBodies({
+    stateId: 20,
+    count: 4,
+    collider: { type: "sphere", radius: 0.2 },
+    transforms: (index) => ({ position: [-2, 1 + index, 0] }),
+  });
+  const [, cloth] = useSoftBody(clothGeometry, { stateId: 30, position: [3, 2, 0] });
+  const frame = useRef(0);
+
+  useFrame(function saveAndRestore() {
+    frame.current += 1;
+    if (frame.current % 10 !== 0) return;
+    first?.restoreState(first.saveState());
+    hinge?.restoreState(hinge.saveState());
+    cloth?.restoreState(cloth.saveState());
   });
 
   return null;
@@ -746,6 +1054,24 @@ describe("mount/unmount leak checks", () => {
     expectNoAsserts();
   });
 
+  it("useCar with a torque curve and tire callbacks leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<CarWithTireCallbacks />, 30);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useTank leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<TankWithCallbacks />, 30);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useMotorcycle leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<MotorcycleWithCallbacks />, 30);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
   it("useConveyor leaves the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<Conveyor />, 60);
     expect(after).toBe(baseline);
@@ -786,6 +1112,59 @@ describe("mount/unmount leak checks", () => {
       <Ragdoll scene={scene} mixer={mixer} />,
       80,
     );
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useRagdoll on a stateId leaves the heap flat across cycles", async () => {
+    const { scene, animations } = await loadMannequin();
+    const mixer = playAt(scene, animations, "Walk_Loop", 0);
+    const { baseline, after } = await cycles(
+      <Ragdoll scene={scene} mixer={mixer} stateId={200} />,
+      40,
+    );
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("stateIds and per-object snapshots leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<Stated />, 60);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useMutableCompound leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(
+      <>
+        <ChangingCompound />
+        <ChangingCompound stateId={7} />
+      </>,
+      30,
+    );
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("a deformed heightfield leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(
+      <>
+        <DiggingTerrain />
+        <DiggingTerrain stateId={8} />
+      </>,
+      30,
+    );
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("path, gear, rack-and-pinion and pulley joints leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<Machinery />, 30);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useRollback leaves the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<RolledBack />, 60);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });

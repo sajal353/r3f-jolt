@@ -107,7 +107,7 @@ Once it exists, every method on it is also safe to call after the body has been 
 
 ### `<Physics>` renders nothing until the WASM module resolves
 
-Loading Jolt is asynchronous. `<Physics>` returns `null` until the module is ready, so its children never mount early and no hook inside it runs against a missing world. It does not suspend, so it needs no `<Suspense>` boundary — but anything of yours that *does* suspend (`useGLTF`) still needs its own.
+Loading Jolt is asynchronous. `<Physics>` returns `null` until the module is ready, so its children never mount early and no hook inside it runs against a missing world. It does not suspend, so it needs no `<Suspense>` boundary — but anything of yours that *does* suspend (`useGLTF`) still needs its own. If the module fails to load, or `settingsOverride` throws, `<Physics>` throws to the nearest error boundary, and the next mount loads again.
 
 ### Stepping happens before syncing
 
@@ -157,7 +157,7 @@ Jolt is tuned for metres, kilograms and seconds. A 1-unit cube weighing 20 is a 
 | `maxWorkerThreads`  | Jolt's default    | Only a `…-multithread` build has threads to create |
 | `physicsSettings`   | —                 | Solver and sleep settings, [below](#solver-settings). Live |
 | `updatePriority`    | `-1`              | Where the step sits in R3F's frame. Must stay negative     |
-| `updateLoop`        | `"follow"`        | `"independent"` takes the world off the frame loop, [below](#stepping-it-yourself) |
+| `updateLoop`        | `"follow"`        | `"independent"` takes the world off the frame loop; `"fixed"` (experimental) puts it on a timer. [Below](#stepping-it-yourself) |
 | `module`            | —                 | An already-initialised Jolt module                |
 | `init`              | `wasm-compat`     | A custom module initialiser                       |
 | `settingsOverride`  | —                 | `(settings, jolt) => void`, applied last          |
@@ -192,6 +192,8 @@ const { step, timing } = useJolt();
 ```
 
 `step(delta)` feeds `delta` through the accumulator, so it runs as many fixed steps as fit and keeps the remainder — `step()` with no argument is exactly one. It does nothing while `paused`.
+
+`updateLoop: "fixed"` (experimental) runs the world off a timer and the wall clock, as well as on each frame. It keeps time in a background tab, where frames stop, and it never drops a step: time past `maxSubSteps` is what `"follow"` throws away, whereas `"fixed"` ignores that cap and catches up, spending at most 50 ms per tick and leaving the rest for the next. Use it when the step count has to follow real time, as with a [peer](#rollback). It needs a numeric `timeStep`, and `paused` stops its clock. It runs on the page's main thread, so a long task there holds it up until the task ends, and a hidden tab's throttled timer ticks it less often.
 
 **`frameloop="demand"` works out of the box.** On demand, R3F draws a frame only when something asks for one, so a physics world would otherwise freeze mid-fall. `<Physics>` asks for the next frame while any body is awake, and stops asking once they have all gone to sleep — which is the point of demand rather than a workaround for it.
 
@@ -293,7 +295,7 @@ Modules are cached per initialiser, so mounting several `<Physics>` trees instan
 
 ## Body hooks
 
-`useBox` · `useSphere` · `useCapsule` · `useCylinder` · `useTaperedCapsule` · `useTaperedCylinder` · `useConvex` · `useCompound` · `useTrimesh` · `usePlane` · `useHeightField` · `useEmpty` · `useAutoCollider`
+`useBox` · `useSphere` · `useCapsule` · `useCylinder` · `useTaperedCapsule` · `useTaperedCylinder` · `useConvex` · `useCompound` · `useMutableCompound` · `useTrimesh` · `usePlane` · `useHeightField` · `useEmpty` · `useAutoCollider`
 
 Plus [`useInstancedBodies`](#useinstancedbodies--one-mesh-one-shape-many-bodies) for many bodies of one kind.
 
@@ -328,6 +330,7 @@ All of them take these options and return `[ref, api]`.
 | `allowSleeping`            | `true`                      |                                                    |
 | `onWake` / `onSleep`       | —                           | Delivered after the step, not from inside it       |
 | `floats`                   | `true`                      | `false` ignores [water](#water); a number scales its buoyancy |
+| `stateId`                  | —                           | The body's Jolt id, for [`saveState`](#save-and-restore) |
 | `onEnterWater` / `onExitWater` | —                       | Dry to wet and back, delivered after the step      |
 | `allowedDOFs`              | all six                     | Raw `EAllowedDOFs` bit mask                        |
 | `lockRotations` / `lockTranslations` | `false`           | Ergonomic wrappers over `allowedDOFs`              |
@@ -365,6 +368,7 @@ Jolt has **no centre-of-mass override**. That comes from the shape, so shift it 
 | `useTaperedCylinder`| `topRadius`, `bottomRadius`, `height`, `convexRadius?`, `renderSegments?` |
 | `useConvex`         | `vertices: number[][]`                           |
 | `useCompound`       | `shapes: CompoundChild[]`                        |
+| `useMutableCompound`| `shapes: CompoundChild[]`                        |
 | `useTrimesh`        | `mesh: BufferGeometry \| { position, index? }`, `buildQuality?`, `triangleUserData?` |
 | `usePlane`          | `normal?`, `constant?`, `point?`, `halfExtent?`, `renderSize?`, `renderSegments?` |
 | `useHeightField`    | `heights`, `sampleCount`, `offset?`, `sampleScale?`, `blockSize?`, `bitsPerSample?`, `range?`, `materialIndices?` |
@@ -375,6 +379,37 @@ Jolt has **no centre-of-mass override**. That comes from the shape, so shift it 
 `useTrimesh` accepts a `BufferGeometry` directly and derives the index when the geometry is non-indexed. **A trimesh body is always static** — Jolt mesh shapes cannot be dynamic.
 
 `useCompound` children are `{ type, position, rotation?, … }` where `type` is `box`, `sphere`, `capsule`, `cylinder`, `taperedCapsule` or `convex`. An invalid child is skipped with a console error and the rest of the compound still builds.
+
+#### `useMutableCompound` — children that change
+
+```tsx
+const [ref, crate] = useMutableCompound({
+  shapes: planks,
+  position: [0, 2, 0],
+  motionType: "dynamic",
+});
+
+crate.removeShape(index);
+crate.adjustCenterOfMass();
+
+<mesh ref={ref} geometry={crate.geometry} />;
+```
+
+| Method | |
+| --- | --- |
+| `addShape(child, index?)` | Returns the child's index, or -1 for a child that could not be built |
+| `removeShape(index)` | Later children move down one. Refuses the last child of a body that moves, which would have no mass |
+| `modifyShape(index, position, rotation?, child?)` | Moves a child, and swaps what it is when given `child` |
+| `modifyShapes(start, positions, rotations)` | Moves a run of children in one go |
+| `adjustCenterOfMass()` | Makes the body turn about the middle of what it now holds |
+| `getShapeCount()` / `getShape(index)` | A child's `position` and `rotation` |
+
+- Positions stay in the frame `shapes` was written in, whatever the centre of mass does. The body does not move when the centre of mass does, and a spinning body's children keep their velocities.
+- **Nothing moves the centre of mass but `adjustCenterOfMass`**, so call it after a change big enough to feel. A body that lost one side keeps turning about a point it no longer has until you do.
+- Mass follows the children. `mass` scales with what is left: 8 kg across eight equal children is 7 kg with one gone. `massProperties` stays as given.
+- `api.geometry` is rebuilt in place on every change, and whatever rested on a removed child wakes and falls.
+- **A joint on the body moves with the centre of mass**, because Jolt's JS bindings cannot tell a constraint it changed. `adjustCenterOfMass` warns; rebuild the joint with `key`.
+- It is slower to collide with than `useCompound`, so use it only when the children really do change.
 
 `useTaperedCylinder` is a cylinder with two radii, and with one of them at zero it is a cone. Flat ends are the whole difference from `useTaperedCapsule`: this stands where a tapered capsule rolls.
 
@@ -418,7 +453,8 @@ Worth knowing:
 - **`range` is the span the field can *store*.** It defaults to the span of the samples you gave it, which means `setHeights` can never push a sample outside the terrain's own extremes — silently clamped, not warned. Widen it now for terrain that will be deformed later.
 - **`getHeights` and `setHeights` work in whole blocks.** `x`, `z`, `sizeX` and `sizeZ` must all be multiples of `blockSize`. Jolt only asserts on this in a debug build; in a release build a misaligned region reads past the end of the heap, so the hook refuses instead.
 - An 8-bit `bitsPerSample` over a wide `range` is 256 discrete steps however precise the samples were, and terrain terraces visibly when the two are mismatched.
-- Render geometry is the collider's own triangulation, and `setHeights` regenerates it in place, so the mesh and the physics cannot drift apart.
+- Render geometry is the collider's own triangulation, and `setHeights` regenerates it in place, so the mesh and the physics cannot drift apart. It also wakes whatever sits on the patch, so a body falls into a crater dug beneath it.
+- `setHeights` re-quantises every block it touches and the blocks around them, so reading a patch and writing it back moves it slightly: up to 1.2 cm on a test terrain with a 16 m `range` at 8 bits, and it does not settle with more passes.
 
 ### Returned api
 
@@ -454,6 +490,7 @@ Vectors take a three `Vector3` or a `[x, y, z]` tuple; rotations take a `Quatern
 | `moveKinematic(p, r, deltaTime?)`       | The correct way to drive a kinematic body                 |
 | `moveTo(p, r, deltaTime?)`              | The same call, named for a grab loop                      |
 | `setScale(scale, updateMassProperties?)` | Replaces the collider with a scaled one                  |
+| `saveState()` / `restoreState(bytes)`   | This body alone; see [Save and restore](#save-and-restore) |
 | **Shape-specific** | Only on the hooks that can support them                                |
 | `setMaterial(m)` / `getMaterial()` | `usePlane` and `useConvex` — see below                 |
 | `getTriangleUserData(subShapeID)` | `useTrimesh`                                            |
@@ -606,7 +643,8 @@ Both take `(delta, index)`: the duration of that step, and its number. `index` i
 - Nothing runs while `<Physics paused>`, because nothing is stepping.
 - With `timeStep="vary"` there is exactly one step per frame, so these behave like a `useFrame`.
 - Subscribers run in the order they mounted. A callback that subscribes another one from inside a step is held until the next step rather than run twice.
-- Contact events are still delivered once per frame, after the last step, so a contact made in this step has not been dispatched when your `after` callback runs.
+- Contact events are still delivered once per frame, after the last step, so a contact made in this step has not been dispatched when your `after` callback runs. Saving a snapshot delivers them first, so with [`useRollback`](#rollback) they arrive once per step.
+- A [rollback](#rollback) runs a step again under the same `index`, with `timing.resimulating` true.
 
 ## `useConveyor` — belts, walkways and turntables
 
@@ -652,7 +690,7 @@ Three things worth knowing:
 
 ## Constraints
 
-Eight hooks, one per Jolt constraint type. Each takes two bodies and an options object, and returns `[api]` — `undefined` until both bodies exist, like every other hook here.
+Twelve hooks, one per Jolt constraint type. Each takes two bodies and an options object, and returns `[api]` — `undefined` until both bodies exist, like every other hook here.
 
 ```tsx
 const Door = () => {
@@ -687,6 +725,10 @@ const Door = () => {
 | `useConeConstraint` | a point, limits the lean | twist about the axis |
 | `useSwingTwistConstraint` | a point, limits lean **and** twist | within the limits |
 | `useSixDOFConstraint` | whatever you say | whatever you say |
+| `usePathConstraint` | a point on a curve | travel along it; rotation by `rotation` |
+| `useGearConstraint` | two rotations in a ratio | everything else: pair with hinges |
+| `useRackAndPinionConstraint` | a rotation and a travel in a ratio | everything else: pair with a hinge and a slider |
+| `usePulleyConstraint` | a rope's length over two fixed points | everything else |
 
 ### The two bodies
 
@@ -729,6 +771,78 @@ usePointConstraint(null, plank, { point: [0, 4, 0], breakForce: 5000, onBreak })
 - A limit only takes load once it is reached, so a joint whose limit catches a falling body reads an impact well above the static load.
 - `useFixedConstraint` cannot break: Jolt binds no load readout for it, and setting either option warns. A `useSixDOFConstraint` with every axis `"fixed"` holds the same and can break.
 
+### Paths
+
+`usePathConstraint(body1, body2, options)` holds body 2 to a curve fixed to body 1, or to the world with `null`, and leaves it free along the curve.
+
+```tsx
+const [ref, car] = useBox({
+  size: [1, 0.5, 1],
+  position: [0, 1, 0],
+  motionType: "dynamic",
+  mass: 80,
+});
+
+const [path] = usePathConstraint(null, car, {
+  points: [
+    { position: [0, 1, 0] },
+    { position: [8, 3, 0], normal: [0, 1, 0] },
+    { position: [8, 1, 8], tangent: [-8, 0, 0] },
+  ],
+  looping: true,
+  rotation: "path",
+  motor: { state: "velocity", targetVelocity: 6 },
+});
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `points` | — | `{ position, tangent?, normal? }`. The curve passes through each; fraction `i` is at point `i`. `tangent` defaults to from the point before to the point after, `normal` to world up |
+| `looping` | `false` | Joins the last point to the first. Do not repeat the first point |
+| `path` | — | In place of `points`: `{ maxFraction, looping?, at(fraction, out), closest?(position, hint) }`, called by Jolt during the step |
+| `pathPosition`, `pathRotation` | origin | Where the path sits on body 1 |
+| `pathFraction` | `0` | Where body 2 starts. It keeps its offset from that point |
+| `rotation` | `"free"` | `"path"` turns body 2 with the curve, `"fixed"` keeps it as it was; `"aroundTangent"`, `"aroundNormal"` and `"aroundBinormal"` leave one rotation free |
+| `maxFrictionForce` | `0` | Resists sliding along the path |
+| `motor` | off | `{ state, targetFraction, targetVelocity, …limits }` |
+
+The api adds `setMotorState`, `setTargetVelocity`, `setTargetFraction`, `setMaxFrictionForce` and `getPathFraction`. `samplePath({ points, looping }, perFraction?)` returns the curve as `Vector3[]`, for drawing a rail. `debug: true` draws it too; `<PhysicsDebug />` draws only the joint.
+
+- **`targetVelocity` is metres per second, `targetFraction` is a fraction.** A position motor's spring works in fractions, so it pulls harder across long spans than short ones. As with any position motor, walk a far target over rather than jumping to it, and a load sags against the spring.
+- **A path with a `normal` along its tangent throws at mount**, naming the fraction: nothing says which way is up there. The default normal is world up, so a path that goes vertical, a loop for one, needs its own.
+- **A `points` path looks for body 2 near where it last was**, up to one fraction either way, so a coaster stays on its own track where the path crosses itself. A body knocked further than that is pulled back rather than moved along. A `path` searches all of itself unless you give it `closest`.
+- It runs through JS rather than Jolt's own Hermite path, which the bindings cannot construct: about 50 µs per joint per step on the debug build.
+- It cannot break: Jolt binds no load readout for it.
+
+### Gears, racks and pulleys
+
+These tie motions together and hold nothing in place, so each moving part still needs a joint of its own.
+
+```tsx
+const [hinge1] = useHingeConstraint(null, small, { point: [0, 2, 0], hingeAxis: [0, 0, 1], normalAxis: [1, 0, 0] });
+const [hinge2] = useHingeConstraint(null, large, { point: [3, 2, 0], hingeAxis: [0, 0, 1], normalAxis: [1, 0, 0] });
+
+useGearConstraint(small, large, {
+  hingeAxis: [0, 0, 1],
+  teeth: [10, 20],
+  hinges: [hinge1, hinge2],
+});
+```
+
+| Hook | Options | Ratio |
+| --- | --- | --- |
+| `useGearConstraint(gear1, gear2, …)` | `hingeAxis` (or `hingeAxis1`, `hingeAxis2`), `teeth: [n1, n2]` or `ratio`, `hinges` | Gear 1 turns `-n2 / n1` times gear 2 |
+| `useRackAndPinionConstraint(pinion, rack, …)` | `hingeAxis`, `sliderAxis`, `teeth: { pinion, rack, length }` or `ratio`, `hinge`, `slider` | `ratio` radians of pinion per metre of rack |
+| `usePulleyConstraint(body1, body2, …)` | `bodyPoint` (or `bodyPoint1`, `bodyPoint2`), `fixedPoint1`, `fixedPoint2`, `ratio`, `minLength`, `maxLength` | The rope is `length1 + ratio × length2` long |
+
+- **Pass `hinges`, or `hinge` and `slider`.** Without them only the speeds are tied, so the two parts slowly slip out of step. They are read live, since those joints exist a render later. Each must turn the same way as the axis given here and start at its zero angle, or the correction pulls the wrong way.
+- **Gear `hinges` need one gear to turn a whole number of times per turn of the other**, 10:30 or 30:10. Jolt's correction reads hinge angles that wrap at ±π, which at a ratio like 20:30 reads as a false error each time round, so `hinges` is ignored there with a warning and only the speeds stay tied.
+- A gear or rack can take `breakTorque`; it reads no force. A pulley cannot break: Jolt binds no load readout for it.
+- A pulley goes slack rather than pushing: `minLength` is 0 and `maxLength` is the length at mount. `setLength(min, max)` winches it, and `getCurrentLength()`, `getMinLength()` and `getMaxLength()` read it.
+- **Nothing stops a body at a fixed point.** The rope is a sum of distances, so a body pulled up to one carries on through it. Leave room, or use limits of your own.
+- A hinge reads its angle wrapped to ±π, so compare gears with that in mind.
+- `debug` draws these as a line between the two bodies, which does not mean the joint is failing: they hold no shared point.
+
 ### Worth knowing
 
 - **Every runtime setter wakes both bodies.** A settled joint puts its bodies to sleep, and a sleeping body ignores a retargeted motor until something else wakes it. The hooks call Jolt's `ActivateConstraint` for you; `api.activate()` is there if you need it directly.
@@ -736,6 +850,7 @@ usePointConstraint(null, plank, { point: [0, 4, 0], breakForce: 5000, onBreak })
 - **`debug: true`** draws the joint: body 1's centre → its anchor → body 2's anchor → body 2's centre. The middle segment has zero length while the constraint holds, so a visible line there is the solver failing to close the gap. `<PhysicsDebug />` draws every joint in the world the same way, in a single buffer — see [Debug rendering](#debug-rendering).
 - **`useFixedConstraint` returns a `TwoBodyConstraint`**, not a `FixedConstraint`. Jolt binds the settings but not the class; nothing is lost, since a weld has no runtime controls.
 - **Two joined bodies still collide with each other** unless you keep them apart or filter them. A hinge whose door overlaps its own frame is held open by the contact, not by the joint.
+- **`stateId`** names the joint for [`saveState`](#save-and-restore), and `saveState()` / `restoreState(bytes)` on the api save it alone: its accumulated impulses and motor state.
 
 ## Picking things up
 
@@ -826,7 +941,9 @@ useFrame((_, delta) => {
 
 `update(direction, jump, crouched, deltaTime, options?)` — `direction` is a world-space `Vector3` and is **not** mutated. The trailing options are `{ ignoreHorizontalMovementLock?, addToVelocity?, overrideUpdate? }`. `overrideUpdate(velocity, up, deltaTime)` replaces the velocity before the move.
 
-`options` is optional and deep-merged with the defaults. Alongside the movement settings it exposes `maxSlopeAngle`, `maxStrength`, `characterPadding`, `penetrationRecoverySpeed`, `predictiveContactDistance` and `enhancedInternalEdgeRemoval` (stops catching on a triangle mesh's inner edges). A non-vertical `up` is supported at the top level.
+`options` is optional and deep-merged with the defaults. Alongside the movement settings it exposes `maxSlopeAngle`, `maxStrength`, `characterPadding`, `penetrationRecoverySpeed`, `predictiveContactDistance`, `enhancedInternalEdgeRemoval` (stops catching on a triangle mesh's inner edges) and `uprightSpeed`.
+
+**The feet point along gravity, and up is the other way.** Change `gravity` on `<Physics>` to any direction and the character turns itself to it at `uprightSpeed` (radians a second, `2π` by default, `Infinity` at once), about its middle, while it falls; reversed gravity turns it head over heels. Ground, slopes, steps and jumping follow the new up at once. `rotation` is its facing at mount, and `direction` stays world-space.
 
 The character's position is its **feet**, so a settled character on a floor whose top face is `y = 0` reports `y ≈ 0`. The shape is swapped only when the crouch state changes, and a stand-up with no room overhead is retried on the next update rather than taken. `api.setShape(children | shape | null)` swaps in a shape of your own, placed from the feet, until `null` hands back the standing or crouching one; it returns `false` and changes nothing when the shape has no room. Compound children are built and freed by the hook; a Jolt shape stays yours. A shape that does not reach down to the feet leaves the character unsupported on land. Debug meshes track the character every frame whether or not you call `update`.
 
@@ -835,7 +952,7 @@ Its weight presses on a dynamic body it stands on, under its centre, and never m
 Top-level options, all init-once:
 
 - `shape: { standing, crouching? }` replaces the capsules with compound children placed from the feet (the same children `useCompound` takes).
-- `innerBody: true | { standing, crouching? }` adds a kinematic body that follows the character, so raycasts, sensors and the solver see it. Without it a `CharacterVirtual` is invisible to the rest of the world. `innerBodyLayer` and `innerBodyIDOverride` set its layer and a fixed body ID.
+- `innerBody: true | { standing, crouching? }` adds a kinematic body that follows the character, so raycasts, sensors and the solver see it. Without it a `CharacterVirtual` is invisible to the rest of the world. `innerBodyLayer` and `innerBodyIDOverride` set its layer and a fixed body ID. `stateId` names the character for [`saveState`](#save-and-restore).
 - `collideWithCharacters` (on by default) adds the character to the world's character-vs-character registry, so characters block each other.
 - `collideWithSoftBodies` (off by default): the character walks through cloth, and its `innerBody` pushes the cloth aside. Jolt's character queries report contacts well short of a soft body, so a character colliding with one stops about a metre away.
 - `userData` is what the character reports itself as in other characters' contacts.
@@ -1030,6 +1147,105 @@ Braking is independent of `driveType`. The service brake acts on all four wheels
 | `handBrakeTorque` | `8000`  | Total handbrake torque, applied to the rear axle only  |
 
 Each axle's share is split evenly between its two wheels, so the defaults give 2400 per front wheel, 600 per rear wheel, and 4000 of handbrake per rear wheel. `brakeBias: 0.5` is a balanced setup; `1` is front-only.
+
+### Drivetrain
+
+`telemetry()` returns `{ rpm, gear, ratio, clutch }`, in an object reused between calls. `gear` is 0 in neutral and negative in reverse; `clutch` runs from 0, disengaged, to 1.
+
+`torqueCurve` is the fraction of `maxTorque` by fraction of the engine's maximum RPM, as `[rpmFraction, torque]` points. Jolt holds the engine at its minimum RPM through the clutch, so a car on a curve of zeros still creeps in first gear under throttle.
+
+```tsx
+torqueCurve: [[0, 0.5], [0.7, 1], [1, 0.65]],
+```
+
+### Tire callbacks
+
+A tire's friction is already mixed with the `material.friction` of what it is on, so a slippery surface needs no callback. These two are for grip that depends on more than that. Each is a JS call inside the step, so keep it cheap, keep it free of world changes, and keep it pure if the world is replayed.
+
+`tireGrip(tire)` sets how much a grounded tire may push. `tire` carries `wheel`, `bodyID`, `suspensionImpulse`, `longitudinalFriction`, `lateralFriction`, `longitudinalSlip`, `lateralSlip` and `deltaTime`, and is reused between calls. `longitudinalImpulse` and `lateralImpulse` start as friction × suspension impulse; write to them to change the limit. It runs once per wheel per solver iteration, about 9 times a wheel per step. Wheels are 0 front left, 1 front right, 2 rear left, 3 rear right.
+
+```tsx
+tireGrip: (tire) => {
+  if (tire.bodyID !== ICE_STATE_ID) return;
+  tire.longitudinalImpulse *= 0.12;
+  tire.lateralImpulse *= 0.12;
+},
+```
+
+`combineFriction(wheel, direction, tireFriction, body)` returns the friction to use, once per wheel for `"longitudinal"` and once for `"lateral"` each step. Without it the rule is `√(tireFriction × body friction)`.
+
+Either has to be given at mount for it to run. After that, each render's function is the one called.
+
+## `useTank`
+
+Two tracks on a `TrackedVehicleController`. Wheels are the left track front to back, then the right; each track is driven at its rear wheel, and the first and last wheels ride high with no travel, to carry it over what it meets.
+
+```tsx
+const [api] = useTank({
+  position: [0, 2, 0],
+  vehicleSize: { length: 6.4, width: 3.4, height: 1 },
+  wheelSettings: { radius: 0.3, width: 0.3, span: 5.7, offsetDown: 0.5 },
+});
+
+const state = api?.update({ forward, backward, left, right, brake });
+```
+
+`update` returns `{ position, rotation, velocity, wheels }`, reused between calls. `api` also has `body`, `constraint`, `telemetry()`, `debugGroup` and `geometry`.
+
+Turning with no throttle below `pivotSpeed` spins it on the spot, tracks running opposite ways. Under way, the inside track runs at `turnRatio`.
+
+| Option                               | Default              | Notes |
+| ------------------------------------ | -------------------- | ----- |
+| `wheelSettings.count`                | `9`                  | Wheels per track |
+| `wheelSettings.span`                 | required             | First wheel to last, along Z |
+| `wheelSettings.offsetDown`           | required             | Hull centre to road wheels. Sets the ground clearance |
+| `wheelSettings.endRaise`             | `0.3`                | How far above the road wheels the end wheels ride |
+| `suspension`                         | `0.3`, `0.5`, `1` Hz | `{ minLength, maxLength, frequency }` |
+| `castType`                           | `"cylinder"`         | `"ray"` is cheapest, but catches on the side of a low obstacle and stays there |
+| `turnRatio`                          | `0.6`                | Inside track's speed in a moving turn |
+| `pivotSpeed`                         | `1`                  | m/s, below which turning pivots |
+| `brakeTorque`                        | `15000`              | Per track |
+| `trackFriction`                      | `4`, `2`             | `{ longitudinal, lateral }` |
+| `trackInertia`                       | `100`                | kg m². A lighter track slips at a launch, more so at a longer step. Moving the body leaves the tracks spinning: remount with `key` to reset it |
+| `trackDamping`                       | `0.05`               | Fraction of a track's spin lost per second. Scale it down as `trackInertia` goes up, or the top speed drops |
+| `mass`, `maxTorque`                  | `4000`, `500`        | |
+| `maxPitchRollAngle`                  | `60`                 | |
+
+`stateId`, `rotation`, `torqueCurve`, `combineFriction`, `layer` and `debug` work as on `useCar`. A track has no `tireGrip`: Jolt binds that callback for wheeled controllers only.
+
+## `useMotorcycle`
+
+Two wheels on a `MotorcycleController`, whose lean spring tips the bike into a turn and stands it back up. Wheel 0 is the front.
+
+```tsx
+const [api] = useMotorcycle({
+  position: [0, 1.2, 0],
+  vehicleSize: { length: 0.8, width: 0.4, height: 0.6 },
+  wheelSettings: { radius: 0.31, width: 0.05, offsetForward: 0.75, offsetDown: 0.27 },
+});
+
+const state = api?.update({ forward, backward, left, right, handbrake, modifier });
+```
+
+`update` returns the same reused object as `useCar`. `api` also has `body`, `constraint`, `telemetry()`, `setLeanController(enabled)`, `debugGroup` and `geometry`. With the lean controller off, nothing holds the bike up.
+
+| Option                  | Default         | Notes |
+| ----------------------- | --------------- | ----- |
+| `lean.maxAngle`         | `45`            | Degrees |
+| `lean.springConstant`   | `5000`          | |
+| `lean.springDamping`    | `1000`          | |
+| `lean.integrationCoefficient`, `lean.integrationCoefficientDecay` | `0`, `4` | |
+| `lean.smoothingFactor`  | `0.8`           | |
+| `steerRate`             | `4`             | Full lock per `1 / steerRate` seconds, counted in steps |
+| `maxSteerAngle`, `casterAngle` | `30`, `30` | Degrees |
+| `suspension`            | `0.3`, `0.5`, `1.5` and `2` Hz | `{ minLength, maxLength, frontFrequency, rearFrequency }` |
+| `brakeTorque`, `brakeBias` | `750`, `2/3` | Split front to rear |
+| `handBrakeTorque`       | `1500`          | Rear wheel only |
+| `mass`, `maxTorque`, `clutchStrength` | `240`, `150`, `2` | |
+
+`stateId`, `rotation`, `castType`, `torqueCurve`, `tireGrip`, `combineFriction`, `maxPitchRollAngle`, `layer` and `debug` work as on `useCar`.
+
+**The lean spring limits the step.** With the default spring the bike is stable up to a step of about 1/35 s. Steady steps of 1/30 s or longer throw it over, and it warns once. Use a fixed `timeStep` of 1/60, which holds at any frame rate, or halve the spring: `lean: { springConstant: 2500, springDamping: 500 }` holds at 1/30 s. With `timeStep: "vary"`, a slow frame or two is fine but a low frame rate is not.
 
 ## Queries
 
@@ -1249,9 +1465,95 @@ Inside these handlers: **do not** retain a `Body` or manifold past the call, **d
 
 `useJolt().contacts` exposes `subscribe(cb) => unsubscribe` and `getSnapshot()`, so you can drive `useSyncExternalStore` or a zustand store from contact activity without the library owning your state.
 
+## Save and restore
+
+`saveState()` returns the whole world as a `Uint8Array`: every body, contact, constraint and character, and the step clock. `restoreState(bytes)` puts it back, `timing.stepCount` included. Both are on `useJolt()`.
+
+```tsx
+const { saveState, restoreState } = useJolt();
+
+const checkpoint = saveState();
+// …later
+restoreState(checkpoint);
+```
+
+**Everything needs a `stateId`.** A snapshot names bodies by their Jolt id, and Jolt hands ids out in whatever order things mount, so a world mounted in a different order could not take the snapshot. A `stateId` makes the id yours.
+
+| Hook | What its `stateId` names |
+| --- | --- |
+| Body hooks, `useSoftBody` | The body |
+| `useCar`, `useTank`, `useMotorcycle` | The chassis body, and the vehicle constraint in the constraint numbering |
+| `useInstancedBodies` | Instance `i` is body `stateId + i` |
+| `useRagdoll` | Part `i` is body `stateId + i`; the joint into part `i` is constraint `stateId + i` |
+| Constraint hooks | The constraint. Numbered apart from bodies |
+| `useCharacter` | The character, and its inner body unless `innerBodyIDOverride` says otherwise |
+
+Body ids run from 0 to `maxBodies - 1` and are unique per world; constraints and characters each have their own numbering. `saveState` throws, naming the hooks, if anything lacks one; a clash throws at mount, naming whoever holds the id; `restoreState` throws, listing the ids that differ, if the world does not hold exactly what the snapshot does. Constraints with a `stateId` are also solved in `stateId` order, so two worlds mounted differently simulate a snapshot alike.
+
+`saveState({ body, constraint, character })` saves only what the filters pick, each a function of `stateId`; a kind with no filter is left out. A filtered snapshot carries no contacts, gravity or step clock, and restores into any world that holds at least its ids. Body, soft-body, constraint and character apis each have `saveState()` / `restoreState(bytes)` for themselves alone.
+
+`isSameState(a, b)` compares two snapshots byte for byte, which is the determinism check: the same scene run twice to the same step gives the same bytes.
+
+- **The same build and platform only.** Jolt is deterministic across runs of one build; a different wasm build, browser or CPU is not guaranteed to round floats alike.
+- **Ragdolls and soft bodies must be built identically** on both sides, from the same model and options.
+- **Your own state is not saved.** What the hooks keep in JS to run the world is: a character's inertia and posture, a car's reverse logic, `useSwimming`, a joint's load towards `breakForce`, a sensor's `inside`. A shape given to a character's `setShape` is not. Contact and water events already delivered are not taken back; later ones follow the restored world.
+- A character is moved by its `update` call, not by the step, so it replays only if your code calls `update` the same way.
+- **A ragdoll driven by animation and skinned cloth do not replay**, because they read the animation at frame rate. A passive ragdoll does.
+
+Shapes that change are saved too, when the hook has a `stateId`:
+
+- **`useMutableCompound`** restores to the byte, children and centre of mass and all. It can only bring back children it has held, so a fresh mount refuses a snapshot holding one added later, unless the same child has been added since.
+- **`useHeightField`** adds 8 bytes per sample in the area `setHeights` has touched. A restore that has to write heights is only exact to `setHeights`' quantisation, about 1 cm, so a replay across a dig is close rather than byte-identical. With nothing dug since the snapshot it writes nothing and stays exact.
+
+## Rollback
+
+> **Experimental.** `useRollback`, `api.replay`, `timing.resimulating` and `updateLoop: "fixed"` may change in a minor release.
+
+`useRollback({ capacity })` keeps a snapshot of the last `capacity` steps. When an input turns up late, `rewind(step)` goes back to it and runs forward to the present, so the world ends up where it would be had the input come on time. This is the core of rollback netcode: predict, then correct.
+
+```tsx
+const inputs = new Map<number, Input>();
+
+const Player = ({ socket }) => {
+  const rollback = useRollback({ capacity: 120 });
+  const [ref, api] = useSphere({ stateId: 1, radius: 0.5, position: [0, 1, 0] });
+
+  // Read inputs by step, here and only here, so a re-run sees the corrected one.
+  useBeforePhysicsStep((_, step) => {
+    const input = inputs.get(step) ?? lastKnownBefore(inputs, step);
+    if (input) api?.applyForce(input.force);
+  });
+
+  useEffect(() => {
+    socket.onmessage = ({ step, input }) => {
+      inputs.set(step, input);
+      if (!rollback.rewind(step)) requestFullState();
+    };
+  }, [rollback, socket]);
+
+  return <mesh ref={ref}>…</mesh>;
+};
+```
+
+| `useRollback` returns | |
+| --- | --- |
+| `rewind(step)` | Re-simulates from the start of `step`. True if the world now reflects it, which includes a step not yet reached. False, with the world untouched, if `step` has left the history |
+| `snapshotAt(step)` | The world as `step` began, or `null`. Compare two peers' with `isSameState` to detect a desync. The bytes are written over once `step` leaves the history: `slice()` them to keep them |
+
+`api.replay(bytes, untilStep)` is the primitive underneath, for your own history: restore a snapshot and run forward to a step.
+
+- **Everything that changes the world belongs in a step callback, keyed by step.** A force applied from a `useFrame` or a click is not in the re-run.
+- **Check `timing.resimulating` before a side effect.** Re-run steps fire step callbacks, contact events and `onBreak` again, with it true. A sound belongs behind it.
+- **The bodies must stay the same across the history.** A `rewind` past a body that mounted or unmounted throws, naming it, so keep a pool rather than spawning.
+- **`rewind` and `restoreState` throw inside a step callback.** The step under way would carry on with the old clock. Call them where the input or snapshot arrives.
+- **Each step saves the whole world**, at about 6 µs and 135 bytes a body: comfortable at a few hundred bodies, a third of a 60 Hz frame at a thousand.
+- A rewind costs one restore plus every step it re-runs, within a single frame, so long rewinds in a busy world will show. A corrected body jumps to its new place; smoothing that is the game's call.
+- A restore from anywhere else, of the world or of one object, empties the history, since a rewind past it would undo it. `timeStep` must be numeric.
+- The [limits of save and restore](#save-and-restore) apply: the same build and platform only.
+
 ## `useJolt`
 
-Returns the physics context: `Jolt` (the module), `joltInterface`, `physicsSystem`, `bodyInterface`, `layers`, `groups`, `objectLayer(group, mask)`, `contacts`, `activation`, `constraints`, `steps`, `temps`, `timing`, [`step(delta?)`](#stepping-it-yourself), `debug` and `state`. Use it to reach anything the hooks do not wrap.
+Returns the physics context: `Jolt` (the module), `joltInterface`, `physicsSystem`, `bodyInterface`, `layers`, `groups`, `objectLayer(group, mask)`, `contacts`, `activation`, `constraints`, `steps`, `temps`, `timing`, [`step(delta?)`](#stepping-it-yourself), [`saveState(filter?)` / `restoreState(bytes)`](#save-and-restore), [`replay(bytes, untilStep)`](#rollback) (experimental), `stateIds`, `snapshots`, `debug` and `state`. Use it to reach anything the hooks do not wrap.
 
 ## State management
 
@@ -1322,7 +1624,7 @@ Unlike bodies, joints are drawn from the library's own registry: Jolt exposes no
 
 **Bodies fall through thin floors.** Fast movers tunnel. Set `motionQuality: "linearCast"` on the moving body, or make the floor thicker than the distance travelled in one step.
 
-**Nothing renders and there are no errors.** `<Physics>` renders `null` until the WASM module resolves. If it never resolves, your bundler is probably not serving the `.wasm` asset — use the default `wasm-compat` entry point.
+**Nothing renders and there are no errors.** `<Physics>` renders `null` until the WASM module resolves. If it never resolves, your bundler is probably not serving the `.wasm` asset — use the default `wasm-compat` entry point. A load that fails outright throws to the nearest error boundary instead.
 
 **`SharedArrayBuffer is not defined`.** You selected a multithreaded build without COOP/COEP headers. See [Choosing a Jolt build](#choosing-a-jolt-build).
 
@@ -1353,17 +1655,17 @@ pnpm install
 pnpm dev
 ```
 
-66 scenes in seven categories, one per hook or feature:
+76 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
-| **Shapes**       | all 12 shape hooks, one scene each · terrain from all three `heights` forms · per-triangle surface types |
+| **Shapes**       | all 12 shape hooks, one scene each · craters · terrain from all three `heights` forms · per-triangle surface types |
 | **Body options** | motion types · mass & material · damping · DOF locks · sensors · sleep/wake · gravity factor · layers & masks · collision groups · auto colliders · motion quality |
 | **Control**      | forces & impulses · velocities · teleport vs drive · kinematic platform · grab & scale · conveyor    |
-| **Constraints**  | all 8 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints |
+| **Constraints**  | all 12 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints · coaster and lift · gear train, rack, pulley · crane, turret, drawbridge |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
-| **Systems**      | character · character contacts · water · cloth · car · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · breakable objects |
+| **Systems**      | character · gravity in any direction · character contacts · water · cloth · car · tank · motorcycle · ragdoll · ragdoll character · gravity tunnel · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · save & restore · rollback · breakable objects |
 
 Toolbar toggles for `<PhysicsDebug />`, `<Physics debug>`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 

@@ -1,5 +1,84 @@
 # Changelog
 
+## 0.5.0
+
+### Breaking changes
+
+- `useCharacter` takes no `up`. Its up is always opposite the world's gravity: it is turned to stand against `gravity` at mount and turns itself when gravity changes direction, at the new `options.uprightSpeed`. `direction` is world-space, as documented; it was turned by a non-vertical `up` before.
+
+### Save and restore
+
+- `saveState(filter?)` and `restoreState(bytes)` on `useJolt()`: the whole world as a `Uint8Array` — bodies, contacts, constraints, characters and the step clock. `restoreState` puts `timing.stepCount` back too.
+- `stateId` on every body hook, `useSoftBody`, `useInstancedBodies` (instance `i` is `stateId + i`), `useRagdoll` (part `i` is `stateId + i`), `useCar`, `useTank` and `useMotorcycle` (the chassis, and the vehicle constraint among constraints), `useCharacter` and the constraint hooks. Bodies are created on that Jolt id, so a world mounted in a different order takes the same snapshot. `saveState` throws, naming the hooks, if anything lacks one; a clash throws at mount, naming the holder; `restoreState` throws, listing the ids that differ, for a snapshot of another world, and throws inside a step callback.
+- Constraints with a `stateId` are solved in `stateId` order, so two worlds mounted differently simulate a snapshot alike.
+- A `filter` (`StateFilter`: `{ body, constraint, character }`, each by `stateId`) saves part of the world, without contacts or the clock.
+- `saveState()` / `restoreState(bytes)` on the body, soft-body, constraint and character apis, for one object alone.
+- `isSameState(a, b)`: byte-for-byte comparison, the determinism check.
+- `PhysicsTiming.restores` counts restores; interpolation, sleeping bodies' held poses and instanced meshes re-read after one.
+- `useRagdoll` adds its bodies and joints itself rather than through `Ragdoll.AddToPhysicsSystem`; behaviour is unchanged.
+- What hooks keep in JS to run the world is saved with it: a character's inertia and posture, a car's reverse logic, `useSwimming`, a joint's load towards `breakForce`, a sensor's `inside`.
+
+### Rollback (experimental)
+
+`useRollback`, `api.replay`, `timing.resimulating` and `updateLoop: "fixed"` may change in a minor release.
+
+- `useRollback({ capacity })`: a snapshot of each of the last `capacity` steps. `rewind(step)` goes back to a late input's step and re-simulates to the present; `snapshotAt(step)` hands over a step's snapshot, for desync checks. Each slot's memory is reused, so `slice()` a snapshot to keep it past `capacity` steps.
+- `api.replay(bytes, untilStep)`: restore a snapshot and run fixed steps to a given one, leaving the accumulator alone.
+- `PhysicsTiming.resimulating`: true during a re-run and for the events it delivers, so a side effect can happen once.
+- `updateLoop: "fixed"`: runs off a timer and the wall clock, so a world keeps time in a background tab and never drops a step. It runs on the page's main thread.
+- A `"start"` phase on `api.steps`, ahead of every `"before"` callback.
+- Saving a snapshot delivers queued contact, activation and water events first, so with `useRollback` they arrive once per step.
+
+### Machinery constraints
+
+- `usePathConstraint`: body 2 held to a curve on body 1 or the world. `points` (`{ position, tangent?, normal? }`) or a computed `path`; `looping`, `pathPosition`, `pathRotation`, `pathFraction`, `rotation`, `maxFrictionForce`, and a `motor` driven in metres per second or to a fraction. A `points` path searches near the last fraction, so it holds its track where it crosses itself.
+- `samplePath({ points, looping }, perFraction?)`: the curve as `Vector3[]`, for drawing it. `CustomPath`, `PathPoint` and `PathSample` are exported.
+- `useGearConstraint`: two rotations in a ratio, by `teeth` or `ratio`. `hinges` corrects drift.
+- `useRackAndPinionConstraint`: a rotation and a travel in a ratio, by `teeth` or `ratio`. `hinge` and `slider` correct drift.
+- `usePulleyConstraint`: two bodies on one rope over two fixed points, with `ratio`, `minLength`, `maxLength`, `setLength` and `getCurrentLength`.
+- `breakTorque` on gear and rack joints.
+
+### Dynamic worlds
+
+- `useMutableCompound`: a compound whose children change at runtime. `addShape`, `removeShape`, `modifyShape`, `modifyShapes`, `adjustCenterOfMass`, `getShapeCount`, `getShape`. `api.geometry` is rebuilt in place, what rested on a removed child wakes, and `mass` scales with what is left. With a `stateId` it restores to the byte.
+- `useHeightField` with a `stateId` carries `setHeights` in a snapshot.
+
+### Vehicles
+
+- `useCar` is built on a shared vehicle core. Its api and its simulation are unchanged.
+- `torqueCurve` on `useCar`: the engine's torque by fraction of its maximum RPM.
+- `api.telemetry()`: `{ rpm, gear, ratio, clutch }`, in a reused object.
+- `tireGrip(tire)`: the impulse limits of a grounded tire, with the body under it and its slip. Once per wheel per solver iteration.
+- `combineFriction(wheel, direction, tireFriction, body)`: replaces Jolt's `√(tire × body)`. Once per wheel per direction per step.
+- `useTank(options)`: two tracks on a `TrackedVehicleController`, each driven at its rear wheel. `update({ forward, backward, left, right, brake })` pivots on the spot at a standstill and slows the inside track under way. Options: `wheelSettings` (`count`, `span`, `offsetDown`, `endRaise`), `suspension`, `castType`, `turnRatio`, `pivotSpeed`, `brakeTorque`, `trackFriction`, `trackInertia`, `trackDamping`, `mass`, `maxTorque`, `torqueCurve`, `maxPitchRollAngle`, `combineFriction`, `stateId`, `layer`, `debug`.
+- `useMotorcycle(options)`: two wheels on a `MotorcycleController`. `lean` sets `maxAngle`, `springConstant`, `springDamping`, `integrationCoefficient`, `integrationCoefficientDecay` and `smoothingFactor`; `api.setLeanController(enabled)` switches it. Also `steerRate`, `casterAngle`, `maxSteerAngle`, `suspension`, `brakeTorque`, `brakeBias`, `handBrakeTorque`, `torqueCurve`, `tireGrip`, `combineFriction`. Warns once of a step too long for the lean spring, which at the defaults starts at about 1/30 s.
+- `TireContact`, `TireFrictionDirection`, `VehicleTelemetry`, `VehicleState` and `VehicleWheelState` are exported.
+
+### Fixes
+
+- `setHeights` now tells Jolt the shape changed and wakes what sits on the patch. A hill raised above the terrain's old heights collided with nothing above them, and a body over a new crater stayed in the air, awake or asleep.
+- Water no longer skips buoyancy on a step run a second time after a restore.
+- `<Physics>` whose module fails to load, or whose `settingsOverride` throws, throws to the nearest error boundary instead of rendering nothing for good, and the next mount loads again.
+- A hook refused at mount no longer leaves anything behind: a body or `useInstancedBodies` whose `massProperties` are refused or whose `bodySettingsOverride` throws (the swarm took the bodies made so far with it), a trimesh Jolt rejects, a `useCharacter` whose shape cannot be built.
+- `<Physics>` sets its `gravity` as it builds the world, so a hook mounting with it already reads it rather than Jolt's default.
+- Compound children's `rotation` is normalised, as a single collider's already was; a rotation typed to a few decimals made Jolt assert.
+- `useSwimming` no longer drops in and out of the water every frame when `setFloatDepth` is deeper than `depth`.
+
+### Demo
+
+- Systems › Save & restore: a wrecking ball and a brick tower, every step kept for ten seconds, with a scrub bar, save and load.
+- Systems › Rollback: two worlds on their own clocks, kept identical across adjustable latency.
+- Constraints › Path: a coaster on a banked circuit and a three-floor lift.
+- Constraints › Machinery: a gear train, a rack and pinion, a pulley.
+- Constraints › Motorised: a crane, a turret tracking a target, a drawbridge.
+- Shapes › Craters: shells dig a heightfield with `getHeights` and `setHeights`, and sleeping balls wake as the ground goes.
+- Systems › Breakable objects: rebuilt on `useMutableCompound`. A knock chips a brick and a cannonball shatters it; its chunks collide, or a button only draws them.
+- Systems › Car: gear and rpm from `telemetry()`, a `torqueCurve`, ice through `tireGrip` and gravel through `combineFriction`.
+- Systems › Tank: logs, a step, a crate wall and a ramp.
+- Systems › Motorcycle: cones and ramps, with the lean controller switchable.
+- Systems › Gravity: a room whose gravity points at any wall; the character turns over and walks on whatever it lands on.
+- Systems › Gravity tunnel: the ragdoll character in a square tunnel whose gravity turns to another wall every ten seconds. It falls across, goes limp, and gets up on the new floor.
+
 ## 0.4.0
 
 ### Breaking changes

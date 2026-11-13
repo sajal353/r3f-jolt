@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useGLTF } from "@react-three/drei";
-import { Mesh, Vector3 } from "three";
+import { Mesh, Quaternion, Vector3 } from "three";
 import { clone as cloneSkinned } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { useJolt } from "@/Jolt/useJolt";
 import type { RagdollApi } from "@/Jolt/useRagdoll";
@@ -14,6 +14,8 @@ import {
 } from "./animation";
 
 export const MANNEQUIN = "/models/mannequin/mannequin.glb";
+
+const Y_AXIS = new Vector3(0, 1, 0);
 
 /**
  * A copy of the mannequin with a skeleton of its own, playing `clip`. Each
@@ -52,11 +54,24 @@ export const useMannequin = (
     character.updateMatrixWorld(true);
   });
 
-  /** Stands the character at `x, y, z` facing `yaw`, as a controller drives it. */
-  const [place] = useState(() => (x: number, y: number, z: number, yaw: number) => {
-    character.position.set(x, y, z);
-    character.rotation.y = yaw;
-  });
+  const [facing] = useState(() => new Quaternion());
+
+  /**
+   * Stands the character at `x, y, z` facing `yaw`, as a controller drives it.
+   * `upright` turns +Y to the way it stands, for gravity that is not down; the
+   * yaw is about that up.
+   */
+  const [place] = useState(
+    () => (x: number, y: number, z: number, yaw: number, upright?: Quaternion) => {
+      character.position.set(x, y, z);
+      if (!upright) {
+        character.rotation.y = yaw;
+        return;
+      }
+      facing.setFromAxisAngle(Y_AXIS, yaw);
+      character.quaternion.copy(upright).multiply(facing);
+    },
+  );
 
   /**
    * From lying limp to standing on `then`: picks the get-up for how the
@@ -65,10 +80,19 @@ export const useMannequin = (
    */
   const [getUp] = useState(
     () =>
-      (ragdoll: RagdollApi, then: string, onStood?: () => void): GetUpPlan => {
+      (
+        ragdoll: RagdollApi,
+        then: string,
+        onStood?: () => void,
+        upright?: Quaternion,
+      ): GetUpPlan => {
+        // Planned as if up were +Y, then turned back, so a get-up works on a
+        // wall or a ceiling the same as on the floor.
+        const toUpright = upright?.clone().invert();
         const at = (bone: string) => {
           const point = bodyInterface.GetPosition(ragdoll.bodyOf(bone)!);
-          return new Vector3(point.GetX(), point.GetY(), point.GetZ());
+          const found = new Vector3(point.GetX(), point.GetY(), point.GetZ());
+          return toUpright ? found.applyQuaternion(toUpright) : found;
         };
 
         const plan = planGetUp(
@@ -81,7 +105,8 @@ export const useMannequin = (
           (move: GetUpMove) => getUpStart(gltf.scene, gltf.animations, move),
         );
 
-        place(plan.position.x, plan.position.y, plan.position.z, plan.yaw);
+        if (upright) plan.position.applyQuaternion(upright);
+        place(plan.position.x, plan.position.y, plan.position.z, plan.yaw, upright);
         character.updateMatrixWorld(true);
 
         // Straight into the clip, no crossfade: the blend from the ragdoll is

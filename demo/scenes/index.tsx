@@ -11,6 +11,7 @@ import { Trimesh } from "./shapes/Trimesh";
 import { Plane } from "./shapes/Plane";
 import { HeightField } from "./shapes/HeightField";
 import { TerrainSources } from "./shapes/TerrainSources";
+import { Craters } from "./shapes/Craters";
 import { TaperedCylinder } from "./shapes/TaperedCylinder";
 import { Empty } from "./shapes/Empty";
 import { SurfaceTypes } from "./shapes/SurfaceTypes";
@@ -44,6 +45,9 @@ import { SixDOFConstraintScene } from "./constraints/SixDOF";
 import { MotorsScene } from "./constraints/Motors";
 import { SpringsScene } from "./constraints/Springs";
 import { BreakingJointsScene } from "./constraints/Breaking";
+import { PathScene } from "./constraints/Path";
+import { MachineryScene } from "./constraints/Machinery";
+import { MotorisedScene } from "./constraints/Motorised";
 
 import { ClosestHit } from "./queries/ClosestHit";
 import { AnyHit } from "./queries/AnyHit";
@@ -58,13 +62,17 @@ import { SensorVolumes } from "./events/SensorVolumes";
 import { ContactForce } from "./events/ContactForce";
 
 import { Character } from "./systems/Character";
+import { Gravity } from "./systems/Gravity";
 import { CharacterContacts } from "./systems/CharacterContacts";
 import { Car } from "./systems/Car";
+import { Tank } from "./systems/Tank";
+import { Motorcycle } from "./systems/Motorcycle";
 import { Water } from "./systems/Water";
 import { Cloth } from "./systems/Cloth";
 import { RagdollScene } from "./systems/Ragdoll";
 import { RagdollFitScene } from "./systems/RagdollFit";
 import { RagdollCharacterScene } from "./systems/RagdollCharacter";
+import { GravityTunnel } from "./systems/GravityTunnel";
 import { Interpolation } from "./systems/Interpolation";
 import { StepCallbacks } from "./systems/StepCallbacks";
 import { DebugRendering } from "./systems/DebugRendering";
@@ -72,6 +80,8 @@ import { StressTest } from "./systems/StressTest";
 import { Instancing } from "./systems/Instancing";
 import { ManualStepping } from "./systems/ManualStepping";
 import { Breakable } from "./systems/Breakable";
+import { SaveRestore } from "./systems/SaveRestore";
+import { RollbackNetcode } from "./systems/Rollback";
 
 export interface Scene {
   name: string;
@@ -83,7 +93,7 @@ export interface Scene {
   /** Starting timestep. Defaults to `"vary"`; only scenes about a fixed step set it. */
   timeStep?: number | "vary";
   /** `"independent"` leaves the world still until the scene steps it itself. */
-  updateLoop?: "follow" | "independent";
+  updateLoop?: "follow" | "independent" | "fixed";
 }
 
 export interface Category {
@@ -211,6 +221,19 @@ export const categories: Category[] = [
             drops through a <b>hole</b> — a <code>null</code> sample.{" "}
             <i>raise a hill</i> is <code>setHeights</code>, which only works
             because <code>range</code> reserved headroom at build time.
+          </>
+        ),
+      },
+      {
+        name: "Craters",
+        Component: Craters,
+        hook: "useHeightField",
+        hint: (
+          <>
+            <b>Click the ground</b> to drop a shell. Where it lands,{" "}
+            <code>getHeights</code> reads the patch and <code>setHeights</code>{" "}
+            digs it out in whole blocks. The balls have gone to sleep and wake
+            when the ground goes from under them.
           </>
         ),
       },
@@ -581,6 +604,46 @@ export const categories: Category[] = [
         ),
       },
       {
+        name: "Path",
+        Component: PathScene,
+        hook: "usePathConstraint, samplePath",
+        hint: (
+          <>
+            A body held to a curve, free along it. The car turns with the track
+            (<code>rotation: "path"</code>) and a <b>velocity</b> motor is its
+            chain: turn it off and gravity alone decides how far it gets. The
+            lift keeps level (<code>"fixed"</code>) under a <b>position</b>{" "}
+            motor, whose target is a fraction: fraction 2 is point 2.
+          </>
+        ),
+      },
+      {
+        name: "Machinery",
+        Component: MachineryScene,
+        hook: "useGearConstraint, useRackAndPinionConstraint, usePulleyConstraint",
+        hint: (
+          <>
+            These joints tie two motions together and hold nothing in place:
+            each wheel still needs its own hinge, and handing those to the joint
+            is what stops the two slipping out of step. Only the red wheel has a
+            motor. The pulley's rope has a fixed length, so the heavy block drops
+            as far as the light one rises.
+          </>
+        ),
+      },
+      {
+        name: "Motorised",
+        Component: MotorisedScene,
+        hook: "motor, setTargetAngle, setTargetPosition, setDistance",
+        hint: (
+          <>
+            Machines from the ordinary joints: the crane is a hinge, a slider
+            and a distance joint stacked; the turret is a hinge on a hinge; the
+            drawbridge is one hinge with limits for its rest positions.
+          </>
+        ),
+      },
+      {
         name: "Motors",
         Component: MotorsScene,
         hook: "motor, setTargetAngle, setTargetPosition",
@@ -777,6 +840,20 @@ export const categories: Category[] = [
         ),
       },
       {
+        name: "Gravity",
+        Component: Gravity,
+        hook: "useCharacter",
+        hint: (
+          <>
+            <code>WASD</code> to walk, <code>Space</code> to jump. The buttons
+            point gravity at any wall of the room. A character&apos;s feet
+            always point along gravity, so it turns itself over at{" "}
+            <code>uprightSpeed</code> while it falls, and walks on whatever it
+            lands on. Up for the ground, slopes and jumping changes at once.
+          </>
+        ),
+      },
+      {
         name: "Character contacts",
         Component: CharacterContacts,
         hook: "useCharacter",
@@ -834,7 +911,46 @@ export const categories: Category[] = [
             <code>Shift</code> for full throttle, <code>R</code> to reset. A
             real <code>WheeledVehicleController</code>: engine, transmission,
             differentials, anti-roll bars. Handbrake is rear-only; the service
-            brake splits 80/20 front/rear.
+            brake splits 80/20 front/rear. The gear and rpm above the car come
+            from <code>telemetry()</code> and the engine has a{" "}
+            <code>torqueCurve</code>. Off to the left is ice,{" "}
+            <code>tireGrip</code> cutting the impulse a tire may apply; off to
+            the right is gravel, <code>combineFriction</code> taking more grip
+            sideways than along the tire.
+          </>
+        ),
+      },
+      {
+        name: "Tank",
+        Component: Tank,
+        hook: "useTank",
+        hint: (
+          <>
+            <code>WASD</code> to drive, <code>Space</code> to brake,{" "}
+            <code>R</code> to reset. Two tracks of nine wheels on a{" "}
+            <code>TrackedVehicleController</code>, each driven at its rear wheel.
+            Standing still, <code>A</code> and <code>D</code> spin it on the spot
+            with the tracks running opposite ways; under way the inside track
+            slows down. Eight tonnes and heavy tracks pull away without
+            spinning them, the cast wheels and the suspension take it over the
+            logs and the step, and the crates are shoved aside.
+          </>
+        ),
+      },
+      {
+        name: "Motorcycle",
+        Component: Motorcycle,
+        hook: "useMotorcycle",
+        hint: (
+          <>
+            <code>WASD</code> to ride, <code>Shift</code> for full throttle,{" "}
+            <code>Space</code> for the rear brake, <code>R</code> to reset. Two
+            wheels and a <code>MotorcycleController</code>, whose lean spring
+            tips it into a turn and stands it back up. Weave the cones to watch
+            the lean above the bike, then switch the lean controller off and
+            nothing holds it up. The spring here is half Jolt's: the default
+            throws the bike over at a <code>1/30</code> step, which{" "}
+            <code>vary</code> falls back to on a slow frame.
           </>
         ),
       },
@@ -873,6 +989,22 @@ export const categories: Category[] = [
             out, so the two never fight. The cape is cloth skinned to the
             upper spine through <code>skin</code>: its top edge is held to the
             shoulders and the rest may stray further the lower it hangs.
+          </>
+        ),
+      },
+      {
+        name: "Gravity tunnel",
+        Component: GravityTunnel,
+        hook: "useCharacter, useRagdoll",
+        hint: (
+          <>
+            <code>WASD</code> to walk, <code>Shift</code> to sprint,{" "}
+            <code>Space</code> to jump. Every ten seconds gravity turns to
+            another of the tunnel&apos;s four walls. The character falls across
+            the tunnel, fast enough to go <code>passive</code>, lands as a
+            ragdoll, and gets up standing on the new floor: the get-up is
+            planned with gravity&apos;s up in place of +Y. The camera follows
+            but never turns.
           </>
         ),
       },
@@ -974,20 +1106,53 @@ export const categories: Category[] = [
         ),
       },
       {
+        name: "Save & restore",
+        Component: SaveRestore,
+        hook: "saveState, restoreState, stateId",
+        updateLoop: "independent",
+        timeStep: 1 / 60,
+        hint: (
+          <>
+            Every step goes into a ten-second history — <b>drag the bar</b> to
+            scrub back through it, <b>play</b> to carry on from there. The
+            floor, each brick, the ball and its hinge carry a{" "}
+            <code>stateId</code>: a snapshot names everything by it, and{" "}
+            <code>saveState</code> refuses a world where anything lacks one.
+          </>
+        ),
+      },
+      {
+        name: "Rollback",
+        Component: RollbackNetcode,
+        hook: 'useRollback, updateLoop="fixed"',
+        hint: (
+          <>
+            Two worlds, each on its own clock, that hear of the other's input{" "}
+            <b>late</b> — drag the latency. Each predicts the other player, then
+            rewinds and re-runs when the real input lands, so the far ball
+            jumps while the two stay the same. <b>WASD</b> takes over red.
+          </>
+        ),
+      },
+      {
         name: "Breakable objects",
         Component: Breakable,
-        hook: "useBodyContacts, useConvex",
+        hook: "useMutableCompound, useBodyContacts",
         hint: (
           <>
             <b>Click to fire.</b> A dry-stacked brick wall — no joints, just
-            friction — splitting two generations deep to a ceiling of{" "}
-            <b>200 chunks</b>. A piece goes when the estimated impulse would
-            change <i>its own</i> velocity by 0.8 m/s: <code>impulse</code> is
-            momentum, so only a mass-relative threshold breaks a brick and its
-            chips alike. The split runs from <code>useBodyContacts</code>, whose
-            handler fires <b>between steps</b> — building bodies inside
-            Jolt&apos;s own contact callback is illegal. <code>impulse</code> is
-            an estimate, not a number Jolt reported.
+            friction. Each brick is cut up <b>before the first render</b> and
+            held together as one <code>useMutableCompound</code>. A knock chips
+            it with <code>removeShape</code> and <code>adjustCenterOfMass</code>{" "}
+            lets what is left tip; a cannonball shatters it. A chunk flies on the
+            hull it had in the compound, so a break builds nothing, and chunks
+            ignore each other; switch them off to only draw them falling. A
+            brick goes when the estimated impulse would change{" "}
+            <i>its own</i> velocity by 0.8 m/s: <code>impulse</code> is momentum,
+            so only a mass-relative threshold breaks a whole brick and a piece
+            of one alike. It runs from <code>useBodyContacts</code>, whose
+            handler fires <b>between steps</b> — changing bodies inside
+            Jolt&apos;s own contact callback is illegal.
           </>
         ),
       },

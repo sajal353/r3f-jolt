@@ -272,6 +272,7 @@ export const useSixDOFConstraint = (
     body2,
     options,
     {
+      hook: "useSixDOFConstraint",
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castSixDOF,
       load: readSixDOFLoad,

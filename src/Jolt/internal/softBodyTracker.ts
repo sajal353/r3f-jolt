@@ -23,8 +23,17 @@ export const createVertexTracker = (count: number) => {
   const bounds = new Box3();
 
   let lastStepCount = -1;
+  let lastRestores = 0;
   let primed = false;
   let resting = false;
+
+  /** A restored world has no history worth blending from. */
+  const forgetIfRestored = (timing: PhysicsTiming) => {
+    if (timing.restores === lastRestores) return;
+    lastRestores = timing.restores;
+    primed = false;
+    resting = false;
+  };
 
   const read = (jolt: JoltModule, body: Jolt.Body, layout: SoftBodyVertices) => {
     const heap = jolt.HEAPF32;
@@ -100,6 +109,7 @@ export const createVertexTracker = (count: number) => {
       layout: SoftBodyVertices,
       timing: PhysicsTiming,
     ) => {
+      forgetIfRestored(timing);
       resting = false;
 
       if (!timing.interpolate) {
@@ -128,7 +138,13 @@ export const createVertexTracker = (count: number) => {
      * For a sleeping body: lands on its pose once and then reports nothing to
      * write until it wakes, so a settled cloth uploads no buffers.
      */
-    rest: (jolt: JoltModule, body: Jolt.Body, layout: SoftBodyVertices) => {
+    rest: (
+      jolt: JoltModule,
+      body: Jolt.Body,
+      layout: SoftBodyVertices,
+      timing: PhysicsTiming,
+    ) => {
+      forgetIfRestored(timing);
       if (resting) return false;
 
       read(jolt, body, layout);

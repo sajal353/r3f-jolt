@@ -96,6 +96,7 @@ export const useConeConstraint = (
     body2,
     options,
     {
+      hook: "useConeConstraint",
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castCone,
       load: readConeLoad,

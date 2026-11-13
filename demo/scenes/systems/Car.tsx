@@ -2,25 +2,22 @@ import { useRef } from "react";
 import { Group } from "three";
 import { useFrame } from "@react-three/fiber";
 import { KeyboardControls, useKeyboardControls } from "@react-three/drei";
+import type Jolt from "jolt-physics";
 import { useBox } from "@/Jolt/useBox";
 import { useSphere } from "@/Jolt/useSphere";
 import { useCylinder } from "@/Jolt/useCylinder";
 import { useTaperedCapsule } from "@/Jolt/useTaperedCapsule";
 import { useCar } from "@/Jolt/useCar";
-import { useJolt } from "@/Jolt/useJolt";
+import type { TireContact, TireFrictionDirection } from "@/Jolt/internal/vehicle";
 import type { Vec3Tuple } from "@/Jolt/types";
-import { Floor, Hud, Ramp, Wall } from "../../shared/Stage";
+import { Floor, Ramp, Tag, Wall } from "../../shared/Stage";
+import {
+  useDashboard,
+  useFollowCamera,
+  useResetKey,
+  VEHICLE_KEYS,
+} from "../../shared/vehicleHud";
 import { tilt } from "../../shared/helpers";
-
-const controls = [
-  { name: "forward", keys: ["ArrowUp", "KeyW"] },
-  { name: "backward", keys: ["ArrowDown", "KeyS"] },
-  { name: "left", keys: ["ArrowLeft", "KeyA"] },
-  { name: "right", keys: ["ArrowRight", "KeyD"] },
-  { name: "handbrake", keys: ["Space"] },
-  { name: "boost", keys: ["ShiftLeft", "ShiftRight"] },
-  { name: "reset", keys: ["KeyR"] },
-];
 
 const ARENA = 120;
 const SPAWN: Vec3Tuple = [0, 2, 34];
@@ -28,9 +25,84 @@ const SPAWN: Vec3Tuple = [0, 2, 34];
 /** A car at identity drives towards +z, and the course runs the other way. */
 const FACING = tilt([0, 1, 0], Math.PI);
 
+const CAMERA_OFFSET: Vec3Tuple = [0, 11, 17];
+const ICE = 900;
+const GRAVEL = 901;
+const SURFACE_NAMES = new Map([
+  [ICE, "ice"],
+  [GRAVEL, "gravel"],
+]);
+
+const ICE_GRIP = 0.12;
+const GRAVEL_GRIP = { longitudinal: 0.75, lateral: 0.45 };
+const MAX_RPM = 6000;
+
+/** A petrol engine's hump: weak off idle, strongest high up, fading at the redline. */
+const TORQUE_CURVE: [number, number][] = [
+  [0, 0.5],
+  [0.4, 0.85],
+  [0.7, 1],
+  [1, 0.65],
+];
+
+const iceGrip = (tire: TireContact) => {
+  if (tire.bodyID !== ICE) return;
+  tire.longitudinalImpulse *= ICE_GRIP;
+  tire.lateralImpulse *= ICE_GRIP;
+};
+
+const gravelFriction = (
+  _wheel: number,
+  direction: TireFrictionDirection,
+  friction: number,
+  body: Jolt.Body,
+) => {
+  const combined = Math.sqrt(friction * body.GetFriction());
+  return body.GetID().GetIndexAndSequenceNumber() === GRAVEL
+    ? combined * GRAVEL_GRIP[direction]
+    : combined;
+};
+
+/**
+ * A `stateId` puts the body on a known Jolt id, which is all a surface needs to
+ * be told apart from inside a tire callback.
+ */
+const Patch = ({
+  stateId,
+  x,
+  color,
+}: {
+  stateId: number;
+  x: number;
+  color: string;
+}) => {
+  const size: Vec3Tuple = [26, 0.04, 34];
+  const position: Vec3Tuple = [x, 0.02, 38];
+  const [ref] = useBox({
+    stateId,
+    position,
+    size,
+    motionType: "static",
+    material: { friction: 1 },
+  });
+
+  return (
+    <>
+      <mesh ref={ref} receiveShadow>
+        <boxGeometry args={size} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+      <Tag position={[x, 1.5, 30]}>{SURFACE_NAMES.get(stateId)}</Tag>
+    </>
+  );
+};
+
 const Course = () => (
   <>
     <Floor size={ARENA} color="#242424" friction={1} />
+
+    <Patch stateId={ICE} x={-20} color="#7fb2cc" />
+    <Patch stateId={GRAVEL} x={20} color="#6b5d4a" />
 
     <Wall position={[0, 1.5, -ARENA / 2]} size={[ARENA, 3, 2]} />
     <Wall position={[0, 1.5, ARENA / 2]} size={[ARENA, 3, 2]} />
@@ -190,8 +262,6 @@ const Props = () => (
 );
 
 const Vehicle = () => {
-  const { bodyInterface, temps } = useJolt();
-
   const bodyRef = useRef<Group>(null);
   const wheelRefs = useRef<(Group | null)[]>([]);
 
@@ -199,6 +269,9 @@ const Vehicle = () => {
     position: SPAWN,
     rotation: FACING,
     driveType: "awd",
+    torqueCurve: TORQUE_CURVE,
+    tireGrip: iceGrip,
+    combineFriction: gravelFriction,
     vehicleSize: { length: 4, width: 1.8, height: 1 },
     wheelSettings: {
       radius: 0.35,
@@ -209,23 +282,16 @@ const Vehicle = () => {
   });
 
   const [, getKeys] = useKeyboardControls();
-  const resetHeld = useRef(false);
+  const { show, dashboard } = useDashboard(MAX_RPM, 1.9);
+  const follow = useFollowCamera(SPAWN, CAMERA_OFFSET);
+  const reset = useResetKey(SPAWN, FACING);
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     if (!api) return;
 
     const keys = getKeys() as Record<string, boolean>;
 
-    if (keys.reset && !resetHeld.current) {
-      bodyInterface.SetPositionRotationAndVelocity(
-        api.carBody.GetID(),
-        temps.rvec3(SPAWN),
-        temps.quat(FACING),
-        temps.vec3([0, 0, 0]),
-        temps.vec3([0, 0, 0]),
-      );
-    }
-    resetHeld.current = keys.reset;
+    reset(keys.reset, api.carBody);
 
     const state = api.update({
       forward: keys.forward,
@@ -247,10 +313,22 @@ const Vehicle = () => {
       group.position.copy(wheel.position);
       group.quaternion.copy(wheel.rotation);
     });
+
+    const rearWheel = api.constraint.GetWheel(2);
+    show(
+      api.telemetry(),
+      rearWheel.HasContact()
+        ? (SURFACE_NAMES.get(
+            rearWheel.GetContactBodyID().GetIndexAndSequenceNumber(),
+          ) ?? "tarmac")
+        : "air",
+    );
+    follow(state.position, delta);
   });
 
   return (
     <group ref={bodyRef}>
+      {dashboard}
       <mesh castShadow>
         <boxGeometry args={[1.8, 1, 4]} />
         <meshStandardMaterial color="#c0392b" />
@@ -276,12 +354,9 @@ const Vehicle = () => {
 };
 
 export const Car = () => (
-  <KeyboardControls map={controls}>
+  <KeyboardControls map={VEHICLE_KEYS}>
     <Course />
     <Props />
     <Vehicle />
-    <Hud position={[0, 6, 38]}>
-      <b>R</b> resets the car
-    </Hud>
   </KeyboardControls>
 );

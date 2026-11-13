@@ -1,6 +1,8 @@
 import type initJolt from "jolt-physics/wasm-compat";
 import type Jolt from "jolt-physics";
 import type { Quaternion, Vector3 } from "three";
+import type { StateIdRegistry } from "./internal/stateIds";
+import type { Snapshots } from "./internal/snapshot";
 
 export type JoltModule = Awaited<ReturnType<typeof initJolt>>;
 
@@ -180,6 +182,20 @@ export interface PhysicsTiming {
    */
   alpha: number;
   interpolate: boolean;
+  /**
+   * Counts `restoreState` calls. Anything holding on to a body's last pose —
+   * interpolation, a sleeping body's skipped readback — reads it again when
+   * this changes.
+   */
+  restores: number;
+  /**
+   * True while `replay` or a rollback's `rewind` runs steps a second time, and
+   * for the events those steps deliver. Check it before anything that should
+   * happen once, like a sound.
+   *
+   * @experimental May change in a minor release.
+   */
+  resimulating: boolean;
 }
 
 /**
@@ -190,7 +206,8 @@ export interface PhysicsTiming {
  */
 export type StepCallback = (delta: number, index: number) => void;
 
-export type StepPhase = "before" | "after";
+/** `"start"` runs ahead of every `"before"`, so it sees the world as the step found it. */
+export type StepPhase = "start" | "before" | "after";
 
 /**
  * The only registry with no Jolt object in it: these callbacks run *between*
@@ -311,7 +328,35 @@ export interface ConstraintRegistry {
   add: (entry: ConstraintEntry) => () => void;
   forEach: (visit: (entry: ConstraintEntry) => void) => void;
   size: () => number;
+  /** Throws if `stateId` is not a whole number or another constraint holds it. */
+  check: (stateId: number, hook: string) => void;
+  /** Adds the constraint to the world; the returned function takes it out. */
+  attach: (
+    constraint: Jolt.Constraint,
+    stateId: number | undefined,
+    hook: string,
+  ) => () => void;
+  /** Puts constraints with a `stateId` back in `stateId` order, if needed. */
+  order: () => void;
+  attached: () => readonly AttachedConstraint[];
   destroy: () => void;
+}
+
+export interface AttachedConstraint {
+  constraint: Jolt.Constraint;
+  stateId: number | undefined;
+  hook: string;
+}
+
+/**
+ * Picks what a filtered `saveState` holds, by `stateId`. A kind with no
+ * function is left out, and contacts, gravity and the step clock only travel
+ * in a full snapshot.
+ */
+export interface StateFilter {
+  body?: (stateId: number) => boolean;
+  constraint?: (stateId: number) => boolean;
+  character?: (stateId: number) => boolean;
 }
 
 export interface JoltApi {
@@ -341,6 +386,29 @@ export interface JoltApi {
   /** Every `<WaterVolume>` in the world, and what each body is floating in. */
   water: WaterRegistry;
   timing: PhysicsTiming;
+  stateIds: StateIdRegistry;
+  snapshots: Snapshots;
+  /**
+   * The whole world as bytes: every body, contact, constraint and character,
+   * and the step clock. Needs a `stateId` on each of them, and throws naming
+   * the ones without. With a `filter`, only what it selects.
+   */
+  saveState: (filter?: StateFilter) => Uint8Array;
+  /**
+   * Puts the world back as `saveState` found it, step clock included. Throws,
+   * listing the differences, unless the world holds exactly the `stateId`s
+   * the snapshot does — or, for a filtered one, at least those.
+   */
+  restoreState: (bytes: Uint8Array) => void;
+  /**
+   * Restores a snapshot, then runs fixed steps until `timing.stepCount` reaches
+   * `untilStep`, with `timing.resimulating` set throughout. Leaves the
+   * accumulator alone, works while paused, and needs a numeric `timeStep`.
+   * Throws if called from a step callback.
+   *
+   * @experimental May change in a minor release.
+   */
+  replay: (bytes: Uint8Array, untilStep: number) => void;
   /**
    * Advances the world by hand: the same accumulator, step callbacks and event
    * flushes a frame runs. Meant for `updateLoop: "independent"`, where nothing

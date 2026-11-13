@@ -65,7 +65,7 @@ export const createContactRegistry = (
 
   /**
    * Scratch for the estimate. Every `Body` vector getter hands back the **same**
-   * wrapper over shared static storage — measured: reading body 2's velocity
+   * wrapper over shared static storage: reading body 2's velocity
    * overwrites what body 1's returned — so each read is copied out here before
    * the next one happens. Read them straight and the relative velocity is
    * exactly zero on every contact.
@@ -243,8 +243,8 @@ export const createContactRegistry = (
 
   /**
    * Symmetric, so one pass serves both directions of the pair. Jolt's normal
-   * points from body 1 towards body 2 — measured with a falling ball as body 2
-   * over a static floor, giving +Y — so the pair is closing when the relative
+   * points from body 1 towards body 2 (+Y for a ball falling as body 2 onto a
+   * static floor), so the pair is closing when the relative
    * velocity of 1 against 2 runs along it.
    */
   const estimateForce = (

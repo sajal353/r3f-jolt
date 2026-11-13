@@ -4,6 +4,7 @@ import { Box3, Quaternion, Vector3, type AnimationMixer } from "three";
 import type Jolt from "jolt-physics";
 import { useJolt } from "./useJolt";
 import { buildRagdoll } from "./internal/ragdollBuild";
+import { addBodies, removeBodies } from "./internal/batchBodies";
 import { createRagdollDrive, type RagdollMode } from "./internal/ragdollDrive";
 import type { SkeletonRig } from "./internal/skeleton";
 import { useHandlerRef } from "./internal/useHandlerRef";
@@ -13,6 +14,11 @@ import type { JoltApi, Vec3Input } from "./types";
 export type { RagdollMode };
 
 export interface UseRagdollOptions {
+  /**
+   * For `saveState`: part `i` is body `stateId + i`, in `bones` order, and the
+   * joint into part `i` is constraint `stateId + i`.
+   */
+  stateId?: number;
   /** Default `"passive"`. Switch at runtime with `setMode`, on the same bodies. */
   mode?: RagdollMode;
   /**
@@ -150,6 +156,8 @@ export const useRagdoll = (
         motorStrength: options.motorStrength ?? 10,
         motorTorque: options.motorTorque,
       },
+      api.stateIds,
+      options.stateId,
     );
 
     const names = rig.names;
@@ -171,12 +179,35 @@ export const useRagdoll = (
     const constraints = joints.map((joint) =>
       jolt.castObject(joint, jolt.SwingTwistConstraint),
     );
+
+    // The joint into part `i` is constraint `stateId + i`. Every one is checked
+    // before the bodies go in, so a refusal leaves nothing in the world.
+    const jointIds = joints.map((joint) => {
+      if (options.stateId === undefined) return undefined;
+      const part = byBody.get(joint.GetBody2().GetID().GetIndexAndSequenceNumber());
+      return options.stateId + (part ?? 0);
+    });
+    try {
+      for (const id of jointIds) {
+        if (id !== undefined) api.constraints.check(id, "useRagdoll");
+      }
+    } catch (error) {
+      jolt.destroy(ragdoll);
+      rig.dispose();
+      throw error;
+    }
+
     const unregister = joints.map((joint) =>
       api.constraints.add({
         constraint: joint,
         body1: joint.GetBody1(),
         body2: joint.GetBody2(),
       }),
+    );
+
+    const ids = addBodies(api, bodies, true);
+    const detach = joints.map((joint, index) =>
+      api.constraints.attach(joint, jointIds[index], "useRagdoll"),
     );
 
     mixerRef.current?.update(0);
@@ -326,7 +357,8 @@ export const useRagdoll = (
 
       if (state.destroyed) return;
 
-      ragdoll.RemoveFromPhysicsSystem();
+      detach.forEach((remove) => remove());
+      removeBodies(api, ids);
       jolt.destroy(ragdoll);
       drive.dispose();
       rig.dispose();

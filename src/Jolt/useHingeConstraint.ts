@@ -175,6 +175,7 @@ export const useHingeConstraint = (
     body2,
     options,
     {
+      hook: "useHingeConstraint",
       settings: (jolt, temps) => buildSettings(jolt, temps, options),
       cast: castHinge,
       load: readHingeLoad,

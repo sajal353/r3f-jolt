@@ -33,6 +33,8 @@ export interface InstanceTransform {
 }
 
 export interface UseInstancedBodiesOptions {
+  /** Instance `i` gets body `stateId + i`; see `BodyOptions.stateId`. */
+  stateId?: number;
   count: number;
   /**
    * One collider, shared by every instance — Jolt shapes are immutable and
@@ -137,6 +139,7 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
     /** 1 while an instance still has a transform worth writing to the mesh. */
     pending: new Uint8Array(0),
     lastStepCount: -1,
+    lastRestores: 0,
     primed: false,
   });
 
@@ -151,6 +154,7 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
     } = api;
 
     const {
+      stateId,
       count,
       collider,
       transforms,
@@ -209,13 +213,33 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
             : layers.LAYER_MOVING),
     );
 
-    if (mass !== undefined || massProperties) {
-      applyMassProperties(
-        jolt,
-        settings,
-        massProperties ?? { mass },
-        overrideMassProperties,
+    const bodies: Jolt.Body[] = [];
+
+    /** Lets go of everything built so far, for a refusal partway through. */
+    const discard = () => {
+      destroyBodies(
+        api,
+        bodies.map((body) => body.GetID().GetIndexAndSequenceNumber()),
       );
+      jolt.destroy(settings);
+      jolt.destroy(position);
+      jolt.destroy(rotation);
+      shape.Release();
+      geometry.dispose();
+    };
+
+    if (mass !== undefined || massProperties) {
+      try {
+        applyMassProperties(
+          jolt,
+          settings,
+          massProperties ?? { mass },
+          overrideMassProperties,
+        );
+      } catch (error) {
+        discard();
+        throw error;
+      }
     }
 
     if (material?.friction !== undefined) settings.mFriction = material.friction;
@@ -248,8 +272,6 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
       jolt.destroy(built);
     }
 
-    const bodies: Jolt.Body[] = [];
-
     for (let index = 0; index < count; index += 1) {
       const transform = transformAt(transforms, index);
       const [x, y, z] = transform.position;
@@ -262,8 +284,19 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
       settings.mUserData =
         typeof userData === "function" ? userData(index) : (userData ?? 0);
 
-      bodySettingsOverride?.(settings, index);
-      bodies.push(bodyInterface.CreateBody(settings));
+      try {
+        bodySettingsOverride?.(settings, index);
+        bodies.push(
+          api.stateIds.createBody(
+            settings,
+            stateId === undefined ? undefined : stateId + index,
+            "useInstancedBodies",
+          ),
+        );
+      } catch (error) {
+        discard();
+        throw error;
+      }
     }
 
     jolt.destroy(settings);
@@ -414,6 +447,13 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
     } = tracking;
 
     const interpolating = mount.interpolate ?? timing.interpolate;
+
+    // A restore can move sleeping instances, and leaves no history to blend.
+    if (timing.restores !== tracking.lastRestores) {
+      tracking.lastRestores = timing.restores;
+      tracking.primed = false;
+      pending.fill(1);
+    }
 
     // Only shift on a frame that actually stepped. Shifting every frame would
     // collapse previous onto current and defeat the interpolation.
