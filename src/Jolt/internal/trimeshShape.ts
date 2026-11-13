@@ -105,11 +105,10 @@ export const createTrimeshShape = (
 
   const result = settings.Create();
   jolt.destroy(settings);
-  const shape = shapeFromResultAs(jolt, result, jolt.MeshShape, hook);
-
+  // Freed before the result is read, which throws if Jolt refused the mesh.
   jolt.destroy(materials);
   jolt.destroy(triangleList);
   jolt.destroy(vertexList);
 
-  return shape;
+  return shapeFromResultAs(jolt, result, jolt.MeshShape, hook);
 };

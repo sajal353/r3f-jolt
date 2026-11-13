@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { useEffect } from "react";
+import { describe, expect, it, vi } from "vitest";
 import ReactThreeTestRenderer from "@react-three/test-renderer";
 import { Physics } from "@/Jolt/Physics";
 import {
   expectNoAsserts,
   getApi,
   loadDebugModule,
+  Refused,
   renderPhysics,
   step,
   unmount,
@@ -26,6 +28,57 @@ describe("<Physics>", () => {
 
     expect(renderer.scene.children).toHaveLength(0);
     await unmount(renderer);
+  });
+
+  it("hands a module that failed to load to an error boundary, and tries again next mount", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const settle = () =>
+      ReactThreeTestRenderer.act(
+        () => new Promise((resolve) => setTimeout(resolve, 0)),
+      );
+
+    let attempts = 0;
+    const init = () => {
+      attempts += 1;
+      return attempts === 1
+        ? Promise.reject(new Error("the wasm did not load"))
+        : loadDebugModule();
+    };
+
+    const refusals: unknown[] = [];
+    const failed = await ReactThreeTestRenderer.create(
+      <Refused onError={(refusal) => refusals.push(refusal)}>
+        <Physics init={init}>
+          <mesh />
+        </Physics>
+      </Refused>,
+    );
+    await settle();
+    expect(String(refusals[0])).toContain("the wasm did not load");
+    await unmount(failed);
+
+    // Loaded ahead, so the retry waits on the build alone, not on compiling
+    // the module under a busy test run.
+    await loadDebugModule();
+    let built = false;
+    const Built = () => {
+      useEffect(() => {
+        built = true;
+      }, []);
+      return null;
+    };
+    const retried = await ReactThreeTestRenderer.create(
+      <Physics init={init}>
+        <Built />
+      </Physics>,
+    );
+    for (let tick = 0; tick < 20 && !built; tick += 1) await settle();
+    expect(attempts).toBe(2);
+    expect(built).toBe(true);
+
+    error.mockRestore();
+    await unmount(retried);
+    expectNoAsserts();
   });
 
   it("provides a context once ready and steps the world", async () => {

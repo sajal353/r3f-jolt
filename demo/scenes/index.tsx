@@ -62,6 +62,7 @@ import { SensorVolumes } from "./events/SensorVolumes";
 import { ContactForce } from "./events/ContactForce";
 
 import { Character } from "./systems/Character";
+import { Gravity } from "./systems/Gravity";
 import { CharacterContacts } from "./systems/CharacterContacts";
 import { Car } from "./systems/Car";
 import { Tank } from "./systems/Tank";
@@ -71,6 +72,7 @@ import { Cloth } from "./systems/Cloth";
 import { RagdollScene } from "./systems/Ragdoll";
 import { RagdollFitScene } from "./systems/RagdollFit";
 import { RagdollCharacterScene } from "./systems/RagdollCharacter";
+import { GravityTunnel } from "./systems/GravityTunnel";
 import { Interpolation } from "./systems/Interpolation";
 import { StepCallbacks } from "./systems/StepCallbacks";
 import { DebugRendering } from "./systems/DebugRendering";
@@ -838,6 +840,20 @@ export const categories: Category[] = [
         ),
       },
       {
+        name: "Gravity",
+        Component: Gravity,
+        hook: "useCharacter",
+        hint: (
+          <>
+            <code>WASD</code> to walk, <code>Space</code> to jump. The buttons
+            point gravity at any wall of the room. A character&apos;s feet
+            always point along gravity, so it turns itself over at{" "}
+            <code>uprightSpeed</code> while it falls, and walks on whatever it
+            lands on. Up for the ground, slopes and jumping changes at once.
+          </>
+        ),
+      },
+      {
         name: "Character contacts",
         Component: CharacterContacts,
         hook: "useCharacter",
@@ -973,6 +989,22 @@ export const categories: Category[] = [
             out, so the two never fight. The cape is cloth skinned to the
             upper spine through <code>skin</code>: its top edge is held to the
             shoulders and the rest may stray further the lower it hangs.
+          </>
+        ),
+      },
+      {
+        name: "Gravity tunnel",
+        Component: GravityTunnel,
+        hook: "useCharacter, useRagdoll",
+        hint: (
+          <>
+            <code>WASD</code> to walk, <code>Shift</code> to sprint,{" "}
+            <code>Space</code> to jump. Every ten seconds gravity turns to
+            another of the tunnel&apos;s four walls. The character falls across
+            the tunnel, fast enough to go <code>passive</code>, lands as a
+            ragdoll, and gets up standing on the new floor: the get-up is
+            planned with gravity&apos;s up in place of +Y. The camera follows
+            but never turns.
           </>
         ),
       },

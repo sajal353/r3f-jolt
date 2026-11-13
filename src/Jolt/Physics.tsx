@@ -47,6 +47,8 @@ const loadModule = (init: JoltInit) => {
 
   const pending = init();
   moduleCache.set(init, pending);
+  // A failed load is not kept, so the next mount tries again.
+  pending.catch(() => moduleCache.delete(init));
   return pending;
 };
 
@@ -139,6 +141,8 @@ export const Physics = ({
   settingsOverride,
 }: PhysicsProps) => {
   const [world, setWorld] = useState<JoltApi | null>(null);
+  const [failure, setFailure] = useState<{ error: unknown } | null>(null);
+  const gravityRef = useHandlerRef(gravity);
   const accumulatorRef = useRef(0);
   const debugRef = useRef(debug);
   const invalidate = useThree((state) => state.invalidate);
@@ -372,12 +376,23 @@ export const Physics = ({
       }
 
       // Last, so the escape hatch outranks every prop above it.
-      settingsOverride?.(settings, jolt);
+      try {
+        settingsOverride?.(settings, jolt);
+      } catch (error) {
+        jolt.destroy(settings);
+        throw error;
+      }
 
       const joltInterface = new jolt.JoltInterface(settings);
       jolt.destroy(settings);
 
       const physicsSystem = joltInterface.GetPhysicsSystem();
+      // Here as well as in the effect below, which runs after the children's
+      // own: a character mounting would otherwise see Jolt's default.
+      const [startX, startY, startZ] = gravityRef.current;
+      const startGravity = new jolt.Vec3(startX, startY, startZ);
+      physicsSystem.SetGravity(startGravity);
+      jolt.destroy(startGravity);
       const bodyInterface = physicsSystem.GetBodyInterface();
       const state = { disposed: false, destroyed: false };
       const steps = createStepRegistry();
@@ -495,7 +510,11 @@ export const Physics = ({
       });
     };
 
-    void build();
+    // Rendered as a throw below, so an error boundary sees a world that could
+    // not be built rather than a <Physics> that stays empty.
+    build().catch((error: unknown) => {
+      if (!cancelled) setFailure({ error });
+    });
 
     return () => {
       cancelled = true;
@@ -521,7 +540,7 @@ export const Physics = ({
         });
       }
     };
-  }, [mount, advanceRef, replayRef]);
+  }, [mount, advanceRef, replayRef, gravityRef]);
 
   useEffect(() => {
     if (updateLoop !== "fixed" || !world) return;
@@ -602,6 +621,7 @@ export const Physics = ({
     else advance(delta);
   }, updatePriority);
 
+  if (failure) throw failure.error;
   if (!world) return null;
 
   return (

@@ -107,7 +107,7 @@ Once it exists, every method on it is also safe to call after the body has been 
 
 ### `<Physics>` renders nothing until the WASM module resolves
 
-Loading Jolt is asynchronous. `<Physics>` returns `null` until the module is ready, so its children never mount early and no hook inside it runs against a missing world. It does not suspend, so it needs no `<Suspense>` boundary — but anything of yours that *does* suspend (`useGLTF`) still needs its own.
+Loading Jolt is asynchronous. `<Physics>` returns `null` until the module is ready, so its children never mount early and no hook inside it runs against a missing world. It does not suspend, so it needs no `<Suspense>` boundary — but anything of yours that *does* suspend (`useGLTF`) still needs its own. If the module fails to load, or `settingsOverride` throws, `<Physics>` throws to the nearest error boundary, and the next mount loads again.
 
 ### Stepping happens before syncing
 
@@ -941,7 +941,9 @@ useFrame((_, delta) => {
 
 `update(direction, jump, crouched, deltaTime, options?)` — `direction` is a world-space `Vector3` and is **not** mutated. The trailing options are `{ ignoreHorizontalMovementLock?, addToVelocity?, overrideUpdate? }`. `overrideUpdate(velocity, up, deltaTime)` replaces the velocity before the move.
 
-`options` is optional and deep-merged with the defaults. Alongside the movement settings it exposes `maxSlopeAngle`, `maxStrength`, `characterPadding`, `penetrationRecoverySpeed`, `predictiveContactDistance` and `enhancedInternalEdgeRemoval` (stops catching on a triangle mesh's inner edges). A non-vertical `up` is supported at the top level.
+`options` is optional and deep-merged with the defaults. Alongside the movement settings it exposes `maxSlopeAngle`, `maxStrength`, `characterPadding`, `penetrationRecoverySpeed`, `predictiveContactDistance`, `enhancedInternalEdgeRemoval` (stops catching on a triangle mesh's inner edges) and `uprightSpeed`.
+
+**The feet point along gravity, and up is the other way.** Change `gravity` on `<Physics>` to any direction and the character turns itself to it at `uprightSpeed` (radians a second, `2π` by default, `Infinity` at once), about its middle, while it falls; reversed gravity turns it head over heels. Ground, slopes, steps and jumping follow the new up at once. `rotation` is its facing at mount, and `direction` stays world-space.
 
 The character's position is its **feet**, so a settled character on a floor whose top face is `y = 0` reports `y ≈ 0`. The shape is swapped only when the crouch state changes, and a stand-up with no room overhead is retried on the next update rather than taken. `api.setShape(children | shape | null)` swaps in a shape of your own, placed from the feet, until `null` hands back the standing or crouching one; it returns `false` and changes nothing when the shape has no room. Compound children are built and freed by the hook; a Jolt shape stays yours. A shape that does not reach down to the feet leaves the character unsupported on land. Debug meshes track the character every frame whether or not you call `update`.
 
@@ -1546,7 +1548,7 @@ const Player = ({ socket }) => {
 - **`rewind` and `restoreState` throw inside a step callback.** The step under way would carry on with the old clock. Call them where the input or snapshot arrives.
 - **Each step saves the whole world**, at about 6 µs and 135 bytes a body: comfortable at a few hundred bodies, a third of a 60 Hz frame at a thousand.
 - A rewind costs one restore plus every step it re-runs, within a single frame, so long rewinds in a busy world will show. A corrected body jumps to its new place; smoothing that is the game's call.
-- A restore from anywhere else empties the history. `timeStep` must be numeric.
+- A restore from anywhere else, of the world or of one object, empties the history, since a rewind past it would undo it. `timeStep` must be numeric.
 - The [limits of save and restore](#save-and-restore) apply: the same build and platform only.
 
 ## `useJolt`
@@ -1622,7 +1624,7 @@ Unlike bodies, joints are drawn from the library's own registry: Jolt exposes no
 
 **Bodies fall through thin floors.** Fast movers tunnel. Set `motionQuality: "linearCast"` on the moving body, or make the floor thicker than the distance travelled in one step.
 
-**Nothing renders and there are no errors.** `<Physics>` renders `null` until the WASM module resolves. If it never resolves, your bundler is probably not serving the `.wasm` asset — use the default `wasm-compat` entry point.
+**Nothing renders and there are no errors.** `<Physics>` renders `null` until the WASM module resolves. If it never resolves, your bundler is probably not serving the `.wasm` asset — use the default `wasm-compat` entry point. A load that fails outright throws to the nearest error boundary instead.
 
 **`SharedArrayBuffer is not defined`.** You selected a multithreaded build without COOP/COEP headers. See [Choosing a Jolt build](#choosing-a-jolt-build).
 
@@ -1653,7 +1655,7 @@ pnpm install
 pnpm dev
 ```
 
-74 scenes in seven categories, one per hook or feature:
+76 scenes in seven categories, one per hook or feature:
 
 | Category         | Covers                                                                                             |
 | ---------------- | -------------------------------------------------------------------------------------------------- |
@@ -1663,7 +1665,7 @@ pnpm dev
 | **Constraints**  | all 12 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints · coaster and lift · gear train, rack, pulley · crane, turret, drawbridge |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
-| **Systems**      | character · character contacts · water · cloth · car · tank · motorcycle · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · save & restore · rollback · breakable objects |
+| **Systems**      | character · gravity in any direction · character contacts · water · cloth · car · tank · motorcycle · ragdoll · ragdoll character · gravity tunnel · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · save & restore · rollback · breakable objects |
 
 Toolbar toggles for `<PhysicsDebug />`, `<Physics debug>`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 

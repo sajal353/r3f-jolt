@@ -75,8 +75,10 @@ const createSwimming = (
 
     const wet = water.sample(feet, sample);
     depth = wet ? wet.depth : 0;
+    // Out at the shallower of the two, or a float set deeper than `depth`
+    // would let a swimmer out just after letting it in.
     swimming = swimming
-      ? depth >= floatDepth - EXIT_MARGIN
+      ? depth >= Math.min(floatDepth, options.depth) - EXIT_MARGIN
       : depth >= options.depth;
 
     if (!swimming) {

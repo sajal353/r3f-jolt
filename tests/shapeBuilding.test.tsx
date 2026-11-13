@@ -78,6 +78,27 @@ const DebugBox = ({ convexRadius }: { convexRadius?: number }) => {
 };
 
 describe("compound child validation", () => {
+  it("normalises a child's rotation typed to a few decimals", async () => {
+    forgetCaptures();
+    const renderer = await renderPhysics(
+      <Compound
+        shapes={[
+          { type: "box", position: [0, 0, 0], size: [1, 1, 1] },
+          {
+            type: "box",
+            position: [0, 1, 0],
+            rotation: [0, 0.707, 0, 0.707],
+            size: [0.5, 0.5, 0.5],
+          },
+        ]}
+      />,
+    );
+    await step(renderer, 2);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
   /**
    * A negative radius passes a "is it present" check but Jolt rejects the shape
    * it produces, and the failure takes the whole compound with it — the child is

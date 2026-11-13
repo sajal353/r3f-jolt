@@ -317,6 +317,11 @@ export const useConstraint = <
     const first = resolveBody(api, body1);
     const second = resolveBody(api, body2);
 
+    // Refused before `build.settings`, which may hold Jolt objects of its own.
+    if (options.stateId !== undefined) {
+      api.constraints.check(options.stateId, build.hook);
+    }
+
     const settings = build.settings(jolt, temps);
     applySharedOptions(settings, options);
     settingsOverride?.(settings, jolt);
@@ -337,6 +342,7 @@ export const useConstraint = <
       detach = api.constraints.attach(constraint, options.stateId, build.hook);
     } catch (error) {
       constraint.Release();
+      build.release?.();
       throw error;
     }
 

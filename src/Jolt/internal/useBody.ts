@@ -682,19 +682,21 @@ export const useBody = <S extends Jolt.Shape, E extends object = object>(
       bodySettings.mAllowedDOFs = resolvedDOFs;
     }
 
-    if (massProperties || overrideMassProperties) {
-      applyMassProperties(
-        jolt,
-        bodySettings,
-        massProperties ?? {},
-        overrideMassProperties,
-      );
-    }
-
-    bodySettingsOverride?.(bodySettings);
-
+    // Mass properties can be refused, and an override can throw: inside the
+    // try, so either lets go of the shape and settings.
     const body = (() => {
       try {
+        if (massProperties || overrideMassProperties) {
+          applyMassProperties(
+            jolt,
+            bodySettings,
+            massProperties ?? {},
+            overrideMassProperties,
+          );
+        }
+
+        bodySettingsOverride?.(bodySettings);
+
         return api.stateIds.createBody(
           bodySettings,
           stateId,

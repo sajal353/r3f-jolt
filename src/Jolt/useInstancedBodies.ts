@@ -213,13 +213,33 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
             : layers.LAYER_MOVING),
     );
 
-    if (mass !== undefined || massProperties) {
-      applyMassProperties(
-        jolt,
-        settings,
-        massProperties ?? { mass },
-        overrideMassProperties,
+    const bodies: Jolt.Body[] = [];
+
+    /** Lets go of everything built so far, for a refusal partway through. */
+    const discard = () => {
+      destroyBodies(
+        api,
+        bodies.map((body) => body.GetID().GetIndexAndSequenceNumber()),
       );
+      jolt.destroy(settings);
+      jolt.destroy(position);
+      jolt.destroy(rotation);
+      shape.Release();
+      geometry.dispose();
+    };
+
+    if (mass !== undefined || massProperties) {
+      try {
+        applyMassProperties(
+          jolt,
+          settings,
+          massProperties ?? { mass },
+          overrideMassProperties,
+        );
+      } catch (error) {
+        discard();
+        throw error;
+      }
     }
 
     if (material?.friction !== undefined) settings.mFriction = material.friction;
@@ -252,8 +272,6 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
       jolt.destroy(built);
     }
 
-    const bodies: Jolt.Body[] = [];
-
     for (let index = 0; index < count; index += 1) {
       const transform = transformAt(transforms, index);
       const [x, y, z] = transform.position;
@@ -266,9 +284,8 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
       settings.mUserData =
         typeof userData === "function" ? userData(index) : (userData ?? 0);
 
-      bodySettingsOverride?.(settings, index);
-
       try {
+        bodySettingsOverride?.(settings, index);
         bodies.push(
           api.stateIds.createBody(
             settings,
@@ -277,15 +294,7 @@ export const useInstancedBodies = (options: UseInstancedBodiesOptions) => {
           ),
         );
       } catch (error) {
-        destroyBodies(
-          api,
-          bodies.map((body) => body.GetID().GetIndexAndSequenceNumber()),
-        );
-        jolt.destroy(settings);
-        jolt.destroy(position);
-        jolt.destroy(rotation);
-        shape.Release();
-        geometry.dispose();
+        discard();
         throw error;
       }
     }

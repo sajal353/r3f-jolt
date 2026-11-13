@@ -1,11 +1,12 @@
 import { useEffect } from "react";
 import { describe, expect, it } from "vitest";
-import { Vector3 } from "three";
+import { Quaternion, Vector3 } from "three";
 import { useFrame } from "@react-three/fiber";
 import { useBox } from "@/Jolt/useBox";
 import { useCharacter } from "@/Jolt/useCharacter";
 import type { CharacterApi } from "@/Jolt/useCharacter";
 import type { CompoundChild } from "@/Jolt/useCompound";
+import { isSameState } from "@/Jolt/internal/snapshot";
 import {
   expectNoAsserts,
   getApi,
@@ -300,6 +301,202 @@ describe("useCharacter setShape", () => {
     moveTo(3);
     await step(renderer, 2);
     expect(shapeNow()).not.toBe(crouching);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+});
+
+const climber: { api?: CharacterApi; jumpAt: number; frame: number; direction: Vector3 } = {
+  jumpAt: -1,
+  frame: 0,
+  direction: new Vector3(),
+};
+
+const Climber = ({
+  start,
+  stateId,
+}: {
+  start: [number, number, number];
+  stateId?: number;
+}) => {
+  const [api] = useCharacter({
+    stateId,
+    position: start,
+    options: {
+      height: { standing: 1.8, crouching: 0.9 },
+      radius: { standing: 0.35, crouching: 0.35 },
+    },
+  });
+
+  useEffect(() => {
+    climber.api = api;
+    climber.frame = 0;
+  }, [api]);
+
+  useFrame(() => {
+    if (!api) return;
+    climber.frame += 1;
+    api.update(climber.direction, climber.frame === climber.jumpAt, false, 1 / 60);
+  });
+
+  return null;
+};
+
+const Slab = ({
+  position,
+  size,
+  stateId,
+}: {
+  position: [number, number, number];
+  size: [number, number, number];
+  stateId?: number;
+}) => {
+  useBox({ stateId, size, position, motionType: "static", material: { friction: 1 } });
+  return null;
+};
+
+/** Where the character's own up points, from its rotation. */
+const feetUp = () => {
+  const turn = climber.api!.character.GetRotation();
+  return new Vector3(0, 1, 0).applyQuaternion(
+    new Quaternion(turn.GetX(), turn.GetY(), turn.GetZ(), turn.GetW()),
+  );
+};
+
+const climberAt = () => {
+  const at = climber.api!.character.GetPosition();
+  return new Vector3(at.GetX(), at.GetY(), at.GetZ());
+};
+
+describe("useCharacter stands against gravity", () => {
+  /** How far along its up the character gets in the second after a jump. */
+  const jumpHeight = async (gravity: [number, number, number]) => {
+    const down = new Vector3(...gravity).normalize();
+    const floor = down.clone().multiplyScalar(0.5).toArray() as [number, number, number];
+    const size = down
+      .toArray()
+      .map((component) => (component === 0 ? 40 : 1)) as [number, number, number];
+    const start = down.clone().multiplyScalar(-1.2).toArray() as [number, number, number];
+
+    climber.jumpAt = 40;
+    climber.direction.set(0, 0, 0);
+    const renderer = await renderPhysics(
+      <>
+        <Slab position={floor} size={size} />
+        <Climber start={start} />
+      </>,
+      { gravity },
+    );
+    await step(renderer, 39);
+
+    const up = down.clone().negate();
+    expect(feetUp().dot(up)).toBeGreaterThan(0.9999);
+    const rest = climberAt().dot(up);
+    let apex = rest;
+    for (let frame = 0; frame < 60; frame += 1) {
+      await step(renderer, 1);
+      apex = Math.max(apex, climberAt().dot(up));
+    }
+
+    await unmount(renderer);
+    expectNoAsserts();
+    return apex - rest;
+  };
+
+  it("plants its feet towards gravity and jumps as high whichever way it points", async () => {
+    const downward = await jumpHeight([0, -9.81, 0]);
+    const sideways = await jumpHeight([-9.81, 0, 0]);
+
+    expect(downward).toBeGreaterThan(0.3);
+    expect(sideways).toBeCloseTo(downward, 2);
+  });
+
+  /** Floor below, ceiling above, a wall at +x; the character stands on the floor. */
+  const Room = () => (
+    <>
+      <Slab stateId={1} position={[0, -0.5, 0]} size={[40, 1, 40]} />
+      <Slab stateId={2} position={[0, 5.5, 0]} size={[40, 1, 40]} />
+      <Slab stateId={3} position={[6.5, 2.5, 0]} size={[1, 5, 40]} />
+      <Climber stateId={4} start={[0, 1.2, 0]} />
+    </>
+  );
+
+  const pull = (gravity: [number, number, number]) =>
+    getApi().physicsSystem.SetGravity(getApi().temps.vec3(gravity));
+
+  it("flips over on the way up to the ceiling when gravity reverses, and walks on it", async () => {
+    climber.jumpAt = -1;
+    climber.direction.set(0, 0, 0);
+    const renderer = await renderPhysics(<Room />);
+    await step(renderer, 60);
+    expect(feetUp().y).toBeGreaterThan(0.9999);
+
+    pull([0, 9.81, 0]);
+    let sidewaysOnTheWay = false;
+    for (let frame = 0; frame < 120; frame += 1) {
+      await step(renderer, 1);
+      const height = climberAt().y;
+      if (height > 1.5 && height < 4 && Math.abs(feetUp().y) < 0.5) {
+        sidewaysOnTheWay = true;
+      }
+    }
+
+    const { character } = climber.api!;
+    expect(sidewaysOnTheWay).toBe(true);
+    expect(feetUp().y).toBeLessThan(-0.9999);
+    expect(character.GetGroundState()).toBe(getApi().Jolt.EGroundState_OnGround);
+    // Feet on the ceiling's underside at 5.
+    expect(climberAt().y).toBeCloseTo(5, 1);
+
+    const before = climberAt();
+    climber.direction.set(-1, 0, 0);
+    await step(renderer, 60);
+    const after = climberAt();
+    expect(before.x - after.x).toBeGreaterThan(2);
+    expect(Math.abs(after.y - before.y)).toBeLessThan(0.05);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("turns to stand on a wall when gravity turns sideways", async () => {
+    climber.jumpAt = -1;
+    climber.direction.set(0, 0, 0);
+    const renderer = await renderPhysics(<Room />);
+    await step(renderer, 60);
+
+    pull([9.81, 0, 0]);
+    await step(renderer, 150);
+
+    expect(feetUp().x).toBeLessThan(-0.9999);
+    expect(climber.api!.character.GetGroundState()).toBe(
+      getApi().Jolt.EGroundState_OnGround,
+    );
+    expect(climberAt().x).toBeCloseTo(6, 1);
+
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("carries a turn half done in a snapshot", async () => {
+    climber.jumpAt = -1;
+    climber.direction.set(0, 0, 0);
+    const renderer = await renderPhysics(<Room />);
+    await step(renderer, 60);
+
+    pull([0, 9.81, 0]);
+    await step(renderer, 12);
+    expect(Math.abs(feetUp().y)).toBeLessThan(0.9);
+
+    const api = getApi();
+    const halfway = api.saveState();
+    await step(renderer, 30);
+    const straight = api.saveState();
+
+    api.restoreState(halfway);
+    await step(renderer, 30);
+    expect(isSameState(api.saveState(), straight)).toBe(true);
 
     await unmount(renderer);
     expectNoAsserts();

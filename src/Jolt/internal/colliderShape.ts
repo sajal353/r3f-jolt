@@ -224,7 +224,7 @@ export const addCompoundChildren = (
     const [x, y, z] = child.position;
     at.Set(x, y, z);
 
-    const [rx, ry, rz, rw] = child.rotation ?? [0, 0, 0, 1];
+    const [rx, ry, rz, rw] = normalizedRotation(child.rotation);
     facing.Set(rx, ry, rz, rw);
 
     settings.AddShape(at, facing, createChildSettings(jolt, child), 0);

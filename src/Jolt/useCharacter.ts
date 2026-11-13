@@ -53,6 +53,11 @@ export interface CharacterShapeOptions {
   predictiveContactDistance: number;
   /** Stops the character catching on the inner edges of a triangle mesh. Costs more per contact. */
   enhancedInternalEdgeRemoval: boolean;
+  /**
+   * How fast the character turns its feet towards a new gravity, in radians a
+   * second. `Infinity` turns it at once.
+   */
+  uprightSpeed: number;
 }
 
 export const defaultCharacterOptions: CharacterShapeOptions = {
@@ -71,6 +76,7 @@ export const defaultCharacterOptions: CharacterShapeOptions = {
   penetrationRecoverySpeed: 1,
   predictiveContactDistance: 0.1,
   enhancedInternalEdgeRemoval: false,
+  uprightSpeed: Math.PI * 2,
 };
 
 export interface CharacterUpdateOptions {
@@ -95,8 +101,11 @@ export interface CharacterShapes {
 
 export interface UseCharacterOptions extends CharacterContactHandlers {
   position: Vec3Tuple;
+  /**
+   * Facing at mount. The character is always turned so its feet point along
+   * the world's gravity, and turned again when gravity changes direction.
+   */
   rotation?: QuatTuple;
-  up?: Vec3Tuple;
   debug?: boolean;
   mass?: number;
   layer?: number;
@@ -304,6 +313,9 @@ const disposeGeometries = (set: ShapeSet) => {
 };
 
 const INVALID_ID = 0xffffffff;
+const LOCAL_UP = new Vector3(0, 1, 0);
+/** Within about a tenth of a degree, an up is left as it is. */
+const ALIGNED = 1 - 1e-6;
 
 const activeContact = (): CharacterActiveContact => ({
   bodyID: null,
@@ -408,7 +420,6 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     const {
       position,
       rotation = [0, 0, 0, 1],
-      up = [0, 1, 0],
       mass = 1000,
       layer = layers.LAYER_MOVING,
       userData,
@@ -481,7 +492,20 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       }
     }
 
-    const supportingPlaneNormal = new jolt.Vec3(up[0], up[1], up[2]);
+    // The feet point along gravity, so up is the other way. With no gravity
+    // there is no down, and the last up stands.
+    const characterUp = new Vector3(0, 1, 0);
+    const gravityUp = new Vector3();
+    const upFromGravity = () => {
+      const pull = physicsSystem.GetGravity();
+      gravityUp.set(-pull.GetX(), -pull.GetY(), -pull.GetZ());
+      if (gravityUp.lengthSq() < 1e-12) return characterUp;
+      return gravityUp.normalize();
+    };
+    characterUp.copy(upFromGravity());
+
+    // In the character's own space, where up is +Y.
+    const supportingPlaneNormal = new jolt.Vec3(0, 1, 0);
     const supportingVolume = new jolt.Plane(
       supportingPlaneNormal,
       -options.radius.standing,
@@ -491,11 +515,14 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     jolt.destroy(supportingPlaneNormal);
 
     const startPosition = new jolt.RVec3(position[0], position[1], position[2]);
+    const upright = new Quaternion()
+      .setFromUnitVectors(LOCAL_UP, characterUp)
+      .multiply(new Quaternion(rotation[0], rotation[1], rotation[2], rotation[3]));
     const startRotation = new jolt.Quat(
-      rotation[0],
-      rotation[1],
-      rotation[2],
-      rotation[3],
+      upright.x,
+      upright.y,
+      upright.z,
+      upright.w,
     );
 
     const character = new jolt.CharacterVirtual(
@@ -505,7 +532,7 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       physicsSystem,
     );
 
-    const upVector = new jolt.Vec3(up[0], up[1], up[2]);
+    const upVector = new jolt.Vec3(characterUp.x, characterUp.y, characterUp.z);
     character.SetUp(upVector);
     if (userData !== undefined) character.SetUserData(userData);
 
@@ -536,12 +563,6 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
 
     character.SetListener(contactListener);
 
-    const characterUp = new Vector3(up[0], up[1], up[2]).normalize();
-    const upRotation = new Quaternion().setFromUnitVectors(
-      new Vector3(0, 1, 0),
-      characterUp,
-    );
-
     const updateSettings = new jolt.ExtendedUpdateSettings();
 
     // Jolt switches both of these off with a zero vector, so enabling one means
@@ -556,15 +577,20 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       );
     };
 
-    if (options.enableStickToFloor) {
-      alignToUp(updateSettings.mStickToFloorStepDown, -1);
-    } else {
+    const alignSteps = () => {
+      if (options.enableStickToFloor) {
+        alignToUp(updateSettings.mStickToFloorStepDown, -1);
+      }
+      if (options.enableStairStep) {
+        alignToUp(updateSettings.mWalkStairsStepUp, 1);
+      }
+    };
+
+    alignSteps();
+    if (!options.enableStickToFloor) {
       updateSettings.mStickToFloorStepDown = jolt.Vec3.prototype.sZero();
     }
-
-    if (options.enableStairStep) {
-      alignToUp(updateSettings.mWalkStairsStepUp, 1);
-    } else {
+    if (!options.enableStairStep) {
       updateSettings.mWalkStairsStepUp = jolt.Vec3.prototype.sZero();
     }
 
@@ -749,6 +775,67 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
     const gravity = new Vector3();
     const newVelocity = new Vector3();
     const scratch = new Vector3();
+    const facing = new Quaternion();
+    const turn = new Quaternion();
+    const target = new Quaternion();
+    const feetUp = new Vector3();
+    const sideways = new Vector3();
+    const middle = new Vector3();
+    const pivot = new Vector3();
+
+    /**
+     * Turns the character's feet towards gravity, at `uprightSpeed`. Up for
+     * the ground and the steps follows gravity at once; only the shape turns
+     * over time. Read from its rotation rather than remembered, so a restored
+     * snapshot carries a turn half done.
+     */
+    const followGravity = (deltaTime: number) => {
+      const wanted = upFromGravity();
+
+      if (characterUp.dot(wanted) < ALIGNED) {
+        characterUp.copy(wanted);
+        upVector.Set(characterUp.x, characterUp.y, characterUp.z);
+        character.SetUp(upVector);
+        alignSteps();
+      }
+
+      const now = character.GetRotation();
+      facing.set(now.GetX(), now.GetY(), now.GetZ(), now.GetW());
+      feetUp.copy(LOCAL_UP).applyQuaternion(facing);
+      if (feetUp.dot(wanted) < ALIGNED) {
+        // About the shape's middle: turned about the feet, the shape would
+        // swing down into whatever they stand on.
+        // Jolt measures local bounds from the centre of mass, not the feet.
+        const shape = character.GetShape();
+        const massCentre = shape.GetCenterOfMass();
+        middle.set(massCentre.GetX(), massCentre.GetY(), massCentre.GetZ());
+        const boundsCentre = shape.GetLocalBounds().GetCenter();
+        middle.x += boundsCentre.GetX();
+        middle.y += boundsCentre.GetY();
+        middle.z += boundsCentre.GetZ();
+        const at = character.GetPosition();
+        pivot
+          .set(at.GetX(), at.GetY(), at.GetZ())
+          .add(scratch.copy(middle).applyQuaternion(facing));
+
+        // Gravity turned right round goes head over heels, about the
+        // character's own sideways axis, rather than about any axis at all.
+        if (feetUp.dot(wanted) < -ALIGNED) {
+          sideways.set(1, 0, 0).applyQuaternion(facing);
+          turn.setFromAxisAngle(sideways, Math.PI);
+        } else {
+          turn.setFromUnitVectors(feetUp, wanted);
+        }
+        target.copy(facing).premultiply(turn);
+        facing.rotateTowards(target, options.uprightSpeed * deltaTime);
+        pivot.sub(scratch.copy(middle).applyQuaternion(facing));
+
+        character.SetRotation(
+          api.temps.quat([facing.x, facing.y, facing.z, facing.w]),
+        );
+        character.SetPosition(api.temps.rvec3([pivot.x, pivot.y, pivot.z]));
+      }
+    };
 
     const update = (
       direction: Vector3,
@@ -758,6 +845,8 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
       updateOptions: CharacterUpdateOptions = {},
     ) => {
       if (state.destroyed) return;
+
+      followGravity(deltaTime);
 
       const {
         ignoreHorizontalMovementLock = false,
@@ -813,7 +902,8 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         worldGravity.GetZ(),
       );
 
-      const movingTowardsGround = verticalVelocity.y - groundVelocity.y < 0.1;
+      const movingTowardsGround =
+        verticalVelocity.dot(characterUp) - groundVelocity.dot(characterUp) < 0.1;
       const onGround =
         character.GetGroundState() === jolt.EGroundState_OnGround &&
         (options.enableInertia
@@ -831,14 +921,9 @@ export const useCharacter = (hookOptions: UseCharacterOptions) => {
         newVelocity.copy(verticalVelocity);
       }
 
-      scratch.copy(gravity).applyQuaternion(upRotation);
-      weight.copy(scratch);
-      newVelocity.addScaledVector(scratch, deltaTime);
-
-      scratch
-        .copy(stateRef.current.desiredVelocity)
-        .applyQuaternion(upRotation);
-      newVelocity.add(scratch);
+      weight.copy(gravity);
+      newVelocity.addScaledVector(gravity, deltaTime);
+      newVelocity.add(stateRef.current.desiredVelocity);
 
       if (addToVelocity) {
         newVelocity.add(addToVelocity);

@@ -1,6 +1,8 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  BufferGeometry,
+  Float32BufferAttribute,
   PlaneGeometry,
   Quaternion,
   Vector3,
@@ -11,6 +13,7 @@ import { useFrame } from "@react-three/fiber";
 import type Jolt from "jolt-physics";
 import { useBox } from "@/Jolt/useBox";
 import { useSphere } from "@/Jolt/useSphere";
+import { useTrimesh } from "@/Jolt/useTrimesh";
 import {
   useHingeConstraint,
   type HingeConstraintApi,
@@ -580,6 +583,51 @@ describe("stateId on every hook", () => {
   });
 });
 
+/** One triangle with all three corners in one place, which Jolt drops, leaving none. */
+const Flat = () => {
+  const [geometry] = useState(() => {
+    const flat = new BufferGeometry();
+    flat.setAttribute(
+      "position",
+      new Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3),
+    );
+    return flat;
+  });
+  useTrimesh({ mesh: geometry, position: [0, 0, 6] });
+  return null;
+};
+
+const Weightless = () => {
+  useBox({
+    stateId: 60,
+    size: [1, 1, 1],
+    position: [6, 2, 0],
+    motionType: "dynamic",
+    massProperties: { mass: 0 },
+  });
+  return null;
+};
+
+const FailingSwarm = ({ failAt }: { failAt?: number }) => {
+  const [ref] = useInstancedBodies({
+    stateId: 200,
+    count: 6,
+    collider: { type: "box", size: [0.5, 0.5, 0.5] },
+    transforms: (index) => ({ position: [index - 3, 8, 4] }),
+    motionType: "dynamic",
+    bodySettingsOverride: (_, index) => {
+      if (index === failAt) {
+        throw new Error(`override refused instance ${index}`);
+      }
+    },
+  });
+  return (
+    <instancedMesh ref={ref} args={[undefined, undefined, 6]}>
+      <meshStandardMaterial />
+    </instancedMesh>
+  );
+};
+
 /** A crouching capsule of no radius, which Jolt refuses after the standing one is built. */
 const Squashed = () => {
   useCharacter({
@@ -604,7 +652,7 @@ const Ghost = ({ stateId }: { stateId: number }) => {
   return null;
 };
 
-describe("a refused stateId leaves nothing behind", () => {
+describe("a refused hook leaves nothing behind", () => {
   const refusals: unknown[] = [];
   const caught = (error: unknown) => {
     refusals.push(error);
@@ -720,6 +768,55 @@ describe("a refused stateId leaves nothing behind", () => {
     const result = await mountBeside(<Squashed />);
 
     expect(result.refusal).toContain("Invalid radius");
+    expect(result.heapLost).toBeLessThanOrEqual(0);
+
+    error.mockRestore();
+    await unmount(result.renderer);
+    expectNoAsserts();
+  });
+
+  it("a body whose mass properties are refused", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await mountBeside(<Weightless />);
+
+    expect(result.refusal).toContain("needs a positive `mass`");
+    expect(result.bodiesLeft).toBe(0);
+    expect(result.heapLost).toBeLessThanOrEqual(0);
+
+    error.mockRestore();
+    await unmount(result.renderer);
+    expectNoAsserts();
+  });
+
+  it("a swarm whose override throws partway, which can then mount on the same ids", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await mountBeside(<FailingSwarm failAt={3} />);
+
+    expect(result.refusal).toContain("override refused instance 3");
+    expect(result.bodiesLeft).toBe(0);
+    expect(result.heapLost).toBeLessThanOrEqual(0);
+
+    await updatePhysics(
+      result.renderer,
+      <>
+        <Pile />
+        <Joints />
+        <FailingSwarm />
+      </>,
+    );
+    expect(result.api.physicsSystem.GetNumBodies()).toBe(5 + 6);
+
+    error.mockRestore();
+    await unmount(result.renderer);
+    expectNoAsserts();
+  });
+
+  it("a trimesh Jolt refuses", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const result = await mountBeside(<Flat />);
+
+    expect(result.refusal).not.toBe("undefined");
+    expect(result.bodiesLeft).toBe(0);
     expect(result.heapLost).toBeLessThanOrEqual(0);
 
     error.mockRestore();

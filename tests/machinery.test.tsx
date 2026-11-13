@@ -32,9 +32,11 @@ import type { Vec3Tuple } from "@/Jolt/types";
 import {
   expectNoAsserts,
   getApi,
+  Refused,
   renderPhysics,
   step,
   unmount,
+  updatePhysics,
 } from "./harness";
 
 const STEP = 1 / 60;
@@ -274,6 +276,42 @@ describe("usePathConstraint", () => {
     // Ten seconds at 6 m/s round a ring of about 31 m is nearly two laps.
     expect(wraps).toBe(1);
 
+    await unmount(renderer);
+    expectNoAsserts();
+  });
+
+  it("refuses a taken stateId before building its path", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const refusals: unknown[] = [];
+    const first = (
+      <Cart
+        options={{ points: LINE, stateId: 7 }}
+        start={[0, 5, 0]}
+        stateId={1}
+      />
+    );
+    const renderer = await renderPhysics(first, fixed);
+    const { Jolt: jolt } = getApi();
+    const free = jolt.JoltInterface.prototype.sGetFreeMemory();
+
+    await updatePhysics(
+      renderer,
+      <>
+        {first}
+        <Refused onError={(refusal) => refusals.push(refusal)}>
+          <Cart
+            options={{ points: LINE, stateId: 7 }}
+            start={[4, 5, 0]}
+            stateId={2}
+          />
+        </Refused>
+      </>,
+    );
+
+    expect(String(refusals[0])).toContain("constraint stateId 7 is taken");
+    expect(free - jolt.JoltInterface.prototype.sGetFreeMemory()).toBeLessThanOrEqual(0);
+
+    error.mockRestore();
     await unmount(renderer);
     expectNoAsserts();
   });

@@ -2,6 +2,10 @@
 
 ## 0.5.0
 
+### Breaking changes
+
+- `useCharacter` takes no `up`. Its up is always opposite the world's gravity: it is turned to stand against `gravity` at mount and turns itself when gravity changes direction, at the new `options.uprightSpeed`. `direction` is world-space, as documented; it was turned by a non-vertical `up` before.
+
 ### Save and restore
 
 - `saveState(filter?)` and `restoreState(bytes)` on `useJolt()`: the whole world as a `Uint8Array` — bodies, contacts, constraints, characters and the step clock. `restoreState` puts `timing.stepCount` back too.
@@ -54,6 +58,11 @@
 
 - `setHeights` now tells Jolt the shape changed and wakes what sits on the patch. A hill raised above the terrain's old heights collided with nothing above them, and a body over a new crater stayed in the air, awake or asleep.
 - Water no longer skips buoyancy on a step run a second time after a restore.
+- `<Physics>` whose module fails to load, or whose `settingsOverride` throws, throws to the nearest error boundary instead of rendering nothing for good, and the next mount loads again.
+- A hook refused at mount no longer leaves anything behind: a body or `useInstancedBodies` whose `massProperties` are refused or whose `bodySettingsOverride` throws (the swarm took the bodies made so far with it), a trimesh Jolt rejects, a `useCharacter` whose shape cannot be built.
+- `<Physics>` sets its `gravity` as it builds the world, so a hook mounting with it already reads it rather than Jolt's default.
+- Compound children's `rotation` is normalised, as a single collider's already was; a rotation typed to a few decimals made Jolt assert.
+- `useSwimming` no longer drops in and out of the water every frame when `setFloatDepth` is deeper than `depth`.
 
 ### Demo
 
@@ -67,6 +76,8 @@
 - Systems › Car: gear and rpm from `telemetry()`, a `torqueCurve`, ice through `tireGrip` and gravel through `combineFriction`.
 - Systems › Tank: logs, a step, a crate wall and a ramp.
 - Systems › Motorcycle: cones and ramps, with the lean controller switchable.
+- Systems › Gravity: a room whose gravity points at any wall; the character turns over and walks on whatever it lands on.
+- Systems › Gravity tunnel: the ragdoll character in a square tunnel whose gravity turns to another wall every ten seconds. It falls across, goes limp, and gets up on the new floor.
 
 ## 0.4.0
 
