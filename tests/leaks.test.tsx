@@ -5,6 +5,7 @@ import {
   Bone,
   BoxGeometry,
   BufferGeometry,
+  CatmullRomCurve3,
   Group,
   MeshBasicMaterial,
   PlaneGeometry,
@@ -56,6 +57,7 @@ import { useHeightField } from "@/Jolt/useHeightField";
 import { WaterVolume } from "@/Jolt/WaterVolume";
 import { useSoftBody } from "@/Jolt/useSoftBody";
 import { useSoftBodyContactListener } from "@/Jolt/useSoftBodyContactListener";
+import { useRope } from "@/Jolt/useRope";
 import { PhysicsDebug } from "@/Jolt/PhysicsDebug";
 import {
   addBodies,
@@ -992,6 +994,61 @@ const Stated = () => {
   return null;
 };
 
+const Ropes = () => {
+  const frame = useRef(0);
+  const [shown, setShown] = useState(true);
+  const [, hanging] = useRope({
+    stateId: 40,
+    points: [
+      [-1, 3, 0],
+      [1, 3, 0],
+    ],
+    segments: 12,
+    pinned: "both",
+    lra: "geodesic",
+    wind: [2, 0, 0],
+    debug: true,
+  });
+  const [, curled] = useRope({
+    stateId: 41,
+    points: [
+      [2, 2, 0],
+      [2.3, 2.3, 0],
+      [2.6, 2, 0],
+    ],
+    segments: 8,
+    pinned: "start",
+    clamp: true,
+    curl: true,
+    floats: 1,
+  });
+
+  useFrame(function exerciseRopes() {
+    frame.current += 1;
+    if (frame.current % 15 === 0) setShown((value) => !value);
+    if (!hanging || !curled) return;
+    hanging.getRotation(frame.current % hanging.segmentCount);
+    hanging.length();
+    hanging.pin(6, frame.current % 10 < 5);
+    hanging.setWind(frame.current % 20 < 10 ? [4, 0, 0] : [0, 0, 0]);
+    if (frame.current % 25 === 0) curled.setEnabled(false);
+    if (frame.current % 25 === 5) curled.setEnabled(true);
+    if (frame.current % 10 === 0) curled.restoreState(curled.saveState());
+  });
+
+  return shown ? <Tether /> : null;
+};
+
+const Tether = () => {
+  useRope({
+    stateId: 42,
+    curve: new CatmullRomCurve3([new Vector3(-2, 1, 1), new Vector3(0, 2, 1), new Vector3(2, 1, 1)]),
+    pinned: [0],
+    debug: true,
+  });
+  return null;
+};
+
 const cycles = async (element: React.ReactElement, frames: number) => {
   const module = await loadDebugModule();
 
@@ -1044,6 +1101,12 @@ describe("mount/unmount leak checks", () => {
 
   it("soft bodies, their contacts, wind, water and debug leave the heap flat across cycles", async () => {
     const { baseline, after } = await cycles(<SoftBodies />, 80);
+    expect(after).toBe(baseline);
+    expectNoAsserts();
+  });
+
+  it("useRope, its tethers, wind, water and debug leave the heap flat across cycles", async () => {
+    const { baseline, after } = await cycles(<Ropes />, 80);
     expect(after).toBe(baseline);
     expectNoAsserts();
   });

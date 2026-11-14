@@ -3,11 +3,14 @@ import { Group, Quaternion, Vector3 } from "three";
 import { useFrame, useThree } from "@react-three/fiber";
 import { KeyboardControls, useKeyboardControls } from "@react-three/drei";
 import { useCharacter } from "@/Jolt/useCharacter";
+import { useCharacterModel } from "@/Jolt/useCharacterModel";
 import { useJolt } from "@/Jolt/useJolt";
+import { useRagdoll } from "@/Jolt/useRagdoll";
 import type { Vec3Tuple } from "@/Jolt/types";
 import { Controls, Wall } from "../../shared/Stage";
 import { Figure } from "../../shared/Figure";
 import { turnTowards } from "../../shared/helpers";
+import { useMannequin } from "../../shared/mannequin";
 
 const controls = [
   { name: "forward", keys: ["ArrowUp", "KeyW"] },
@@ -31,6 +34,10 @@ const PULLS: { label: string; gravity: Vec3Tuple }[] = [
 ];
 
 const BODY = { height: 1.3, radius: 0.35 };
+/** Down at least this long, s, then up once asleep, or at `MAX_DOWN` regardless. */
+const SETTLE_SECONDS = 1.5;
+const MAX_DOWN = 4;
+const LOCAL_UP = new Vector3(0, 1, 0);
 const VIEW: Vec3Tuple = [0, HALF, ROOM * 2.2];
 const CENTRE: Vec3Tuple = [0, HALF, 0];
 
@@ -146,17 +153,54 @@ const Player = () => {
   );
 };
 
-const Switches = () => {
+/**
+ * Stands idle, hard keyed. When gravity turns it goes limp, falls to the new
+ * floor and gets up on it: the get-up is planned with gravity's up in place of +Y.
+ */
+const Mannequin = ({ pulls }: { pulls: number }) => {
+  const { physicsSystem } = useJolt();
+  const { character, mixer, getUp } = useMannequin([3, 0, -1], "Idle_Loop", [0, -0.6, 0]);
+  const model = useCharacterModel(character);
+  const [ragdoll] = useRagdoll(model, { mode: "hardKeying", mixer });
+  const down = useRef<number | null>(null);
+  const [scratch] = useState(() => ({ up: new Vector3(), upright: new Quaternion() }));
+
+  useEffect(() => {
+    if (pulls === 0 || !ragdoll) return;
+    ragdoll.setMode("passive");
+    ragdoll.activate();
+    down.current = 0;
+  }, [pulls, ragdoll]);
+
+  useFrame(function getUpWhenSettled(_, delta) {
+    if (down.current === null || !ragdoll) return;
+    down.current += delta;
+    if (down.current < SETTLE_SECONDS) return;
+    if (ragdoll.isActive() && down.current < MAX_DOWN) return;
+
+    down.current = null;
+    const pull = physicsSystem.GetGravity();
+    scratch.up.set(-pull.GetX(), -pull.GetY(), -pull.GetZ()).normalize();
+    scratch.upright.setFromUnitVectors(LOCAL_UP, scratch.up);
+    getUp(ragdoll, "Idle_Loop", undefined, scratch.upright);
+  });
+
+  return <primitive object={character} />;
+};
+
+const Switches = ({ onPull }: { onPull: () => void }) => {
   const { physicsSystem, temps } = useJolt();
   const [pulling, setPulling] = useState("down");
 
   const pull = (label: string, gravity: Vec3Tuple) => {
+    if (label === pulling) return;
     physicsSystem.SetGravity(temps.vec3(gravity));
     setPulling(label);
+    onPull();
   };
 
   return (
-    <Controls position={[0, ROOM + 1.6, 0]}>
+    <Controls position={[0, -1.4, HALF + 1]}>
       {PULLS.map(({ label, gravity }) => (
         <button
           key={label}
@@ -173,12 +217,14 @@ const Switches = () => {
 
 export const Gravity = () => {
   useRoomCamera();
+  const [pulls, setPulls] = useState(0);
 
   return (
     <KeyboardControls map={controls}>
       <Room />
       <Player />
-      <Switches />
+      <Mannequin pulls={pulls} />
+      <Switches onPull={() => setPulls((count) => count + 1)} />
     </KeyboardControls>
   );
 };

@@ -69,10 +69,10 @@ import { Tank } from "./systems/Tank";
 import { Motorcycle } from "./systems/Motorcycle";
 import { Water } from "./systems/Water";
 import { Cloth } from "./systems/Cloth";
+import { RopeScene } from "./systems/Rope";
 import { RagdollScene } from "./systems/Ragdoll";
 import { RagdollFitScene } from "./systems/RagdollFit";
 import { RagdollCharacterScene } from "./systems/RagdollCharacter";
-import { GravityTunnel } from "./systems/GravityTunnel";
 import { Interpolation } from "./systems/Interpolation";
 import { StepCallbacks } from "./systems/StepCallbacks";
 import { DebugRendering } from "./systems/DebugRendering";
@@ -842,7 +842,7 @@ export const categories: Category[] = [
       {
         name: "Gravity",
         Component: Gravity,
-        hook: "useCharacter",
+        hook: "useCharacter, useRagdoll",
         hint: (
           <>
             <code>WASD</code> to walk, <code>Space</code> to jump. The buttons
@@ -850,6 +850,10 @@ export const categories: Category[] = [
             always point along gravity, so it turns itself over at{" "}
             <code>uprightSpeed</code> while it falls, and walks on whatever it
             lands on. Up for the ground, slopes and jumping changes at once.
+            The mannequin is a <code>hardKeying</code> ragdoll: when gravity
+            turns it goes <code>passive</code>, falls to the new floor and gets
+            up standing on it, the get-up planned with gravity&apos;s up in place
+            of +Y.
           </>
         ),
       },
@@ -898,6 +902,21 @@ export const categories: Category[] = [
             <code>lra</code> tethers, the tablecloth drapes with a{" "}
             <code>vertexRadius</code>, and the beach ball and jelly hold their
             shape with <code>pressure</code>.
+          </>
+        ),
+      },
+      {
+        name: "Rope",
+        Component: RopeScene,
+        hook: "useRope",
+        hint: (
+          <>
+            <b>Click</b> to throw a ball. Left, a rope between two posts settles
+            to a catenary on geodesic <code>lra</code> tethers. Middle, two ropes
+            built straight out from either side of a pole: the pinned end hinges
+            and the rope swings past the pole, while the <code>clamp</code>ed
+            cable holds its line. Right, a strand with <code>curl</code> keeps
+            its coil and one without hangs straight.
           </>
         ),
       },
@@ -989,22 +1008,6 @@ export const categories: Category[] = [
             out, so the two never fight. The cape is cloth skinned to the
             upper spine through <code>skin</code>: its top edge is held to the
             shoulders and the rest may stray further the lower it hangs.
-          </>
-        ),
-      },
-      {
-        name: "Gravity tunnel",
-        Component: GravityTunnel,
-        hook: "useCharacter, useRagdoll",
-        hint: (
-          <>
-            <code>WASD</code> to walk, <code>Shift</code> to sprint,{" "}
-            <code>Space</code> to jump. Every ten seconds gravity turns to
-            another of the tunnel&apos;s four walls. The character falls across
-            the tunnel, fast enough to go <code>passive</code>, lands as a
-            ragdoll, and gets up standing on the new floor: the get-up is
-            planned with gravity&apos;s up in place of +Y. The camera follows
-            but never turns.
           </>
         ),
       },

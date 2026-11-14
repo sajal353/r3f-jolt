@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0
+
+### Ropes
+
+- `useRope`: a rope, cable or strand as a Cosserat rod, from `points` or a `curve`, with `segments`, `pinned` (`"start"` · `"end"` · `"both"` · indices), `clamp`, `curl`, `stretchCompliance`, `bendCompliance`, `mass`, `lra`, `lraMaxDistanceMultiplier`, `radius` and the soft-body body options. Its api adds `segmentCount`, `restLength`, `length()` and `getRotation(segment, target?)` to the soft-body members. `UseRopeOptions`, `RopeApi` and `RopePin` are exported.
+- `SoftBodyBaseApi` and `SoftBodyBodyOptions`: what `useSoftBody` and `useRope` share, exported.
+- `debugColors.rope`.
+
+### Fixes
+
+- `useSoftBody` with a `settingsOverride` that throws no longer leaks its creation settings.
+
+### Demo
+
+- Systems › Rope: a catenary between two posts, a hinged rope beside a clamped cable, and a strand with `curl` beside one without.
+- Systems › Gravity: the ragdoll mannequin joins the room. It goes limp when gravity turns, falls to the new floor and gets up on it. Systems › Gravity tunnel is gone.
+
 ## 0.5.0
 
 ### Breaking changes

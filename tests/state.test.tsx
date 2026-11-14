@@ -21,6 +21,7 @@ import {
 import { useDistanceConstraint } from "@/Jolt/useDistanceConstraint";
 import { useInstancedBodies } from "@/Jolt/useInstancedBodies";
 import { useSoftBody } from "@/Jolt/useSoftBody";
+import { useRope } from "@/Jolt/useRope";
 import { useCar, type CarApi } from "@/Jolt/useCar";
 import { useCharacter, type CharacterApi } from "@/Jolt/useCharacter";
 import { useCharacterModel } from "@/Jolt/useCharacterModel";
@@ -628,6 +629,28 @@ const FailingSwarm = ({ failAt }: { failAt?: number }) => {
   );
 };
 
+const refuseOverride = () => {
+  throw new Error("override refused the soft body");
+};
+
+const OverriddenCloth = () => {
+  const [geometry] = useState(() => new PlaneGeometry(1, 1, 4, 4));
+  useSoftBody(geometry, { position: [6, 2, 6], settingsOverride: refuseOverride });
+  return null;
+};
+
+const OverriddenRope = () => {
+  useRope({
+    points: [
+      [6, 2, -6],
+      [7, 2, -6],
+    ],
+    segments: 8,
+    settingsOverride: refuseOverride,
+  });
+  return null;
+};
+
 /** A crouching capsule of no radius, which Jolt refuses after the standing one is built. */
 const Squashed = () => {
   useCharacter({
@@ -785,6 +808,19 @@ describe("a refused hook leaves nothing behind", () => {
 
     error.mockRestore();
     await unmount(result.renderer);
+    expectNoAsserts();
+  });
+
+  it("a soft body or rope whose settingsOverride throws", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const refused of [<OverriddenCloth key="cloth" />, <OverriddenRope key="rope" />]) {
+      const result = await mountBeside(refused);
+      expect(result.refusal).toContain("override refused the soft body");
+      expect(result.bodiesLeft).toBe(0);
+      expect(result.heapLost).toBeLessThanOrEqual(0);
+      await unmount(result.renderer);
+    }
+    error.mockRestore();
     expectNoAsserts();
   });
 

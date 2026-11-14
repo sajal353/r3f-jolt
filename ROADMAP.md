@@ -13,7 +13,7 @@ Where this library is going, and why. Jolt Physics exposes far more than `r3f-jo
 | **0.3.0** | Foundations — constraints + motors, instancing, auto-colliders, shape/point queries, before/after-step hooks                                                                                                                                                                  |
 | **0.4.0** | Character & water systems — ragdolls (active + passive), skinned-model binding, water volumes with flow, soft bodies & cloth                                                                                                                                                  |
 | **0.5.0** | Advanced vehicles, destruction & dynamic worlds, determinism / save-load / netcode                                                                                                                                                                                            |
-| **0.6.0** | Hair, rope and cables via Cosserat rods                                                                                                                                                                                                                                       |
+| **0.6.0** | Hair, rope and cables via Cosserat rods; soft-body self-collision                                                                                                                                                                                                                  |
 
 ### Why this order
 
@@ -264,15 +264,15 @@ Verified: `Body.ApplyBuoyancyImpulse` and `BodyInterface.ApplyBuoyancyImpulse(bo
 ### Carried over from 0.5.0
 
 - [ ] Restore a snapshot in parts across frames, with Jolt's `SetIsLastPart`, for a world too large to restore in one
-- [ ] Physics in a worker. Hooks hand out live Jolt objects and run step callbacks inside the step, so a worker needs a message-based API of its own
+- [ ] Physics in a worker. Hooks hand out live Jolt objects and run step callbacks inside the step, so a worker needs a message-based API of its own. **Amended:** deferred to 0.7.0 — a separate API rather than a rod feature
 
 ### Rod primitive
 
-- [ ] `useRope` / `useCable` from a polyline: one `RodStretchShear` per segment, one `RodBendTwist` per adjacent pair, then `CalculateRodProperties()`
-- [ ] Stretch, shear and bend/twist compliance exposed separately — they are independent constraints, and tuning them as one is what makes rope feel wrong
-- [ ] Pin either or both ends via `mInvMass = 0`
+- [x] `useRope` from a polyline: one `RodStretchShear` per segment, one `RodBendTwist` per adjacent pair, then `CalculateRodProperties()`. **Amended:** one hook, no `useCable` — a cable is a rope with stiff bend/twist compliance
+- [x] Stretch, shear and bend/twist compliance exposed separately — they are independent constraints, and tuning them as one is what makes rope feel wrong. **Amended:** two values, not three. Jolt has one compliance per rod constraint, so stretch and shear share `stretchCompliance` and bend and twist share `bendCompliance`
+- [x] Pin either or both ends via `mInvMass = 0`. **Amended:** Jolt gives a segment touching a pinned vertex no mass and never turns it, so a pinned end would keep its direction. The hook gives that segment its mass back, so a pinned end swings; `clamp` keeps the fixed direction
 - [ ] Attach an end to a rigid body, for grapples, tow ropes and pulleys
-- [ ] Set `mOmega0` from the rest geometry so a pre-curled strand relaxes to its authored curl
+- [x] Set `mOmega0` from the rest geometry so a pre-curled strand relaxes to its authored curl. **Amended:** `CalculateRodProperties` fills it; `curl` keeps it, and without it the rest shape is straight
 
 ### Hair
 
@@ -307,8 +307,8 @@ Jolt soft bodies collide only with rigid bodies: cloth folding onto itself passe
 
 ### Verification
 
-- [ ] Test a pinned rope reaches a stable catenary and stays within epsilon of it
-- [ ] Test rod rotations produce a continuous frame along a strand (no flips between adjacent segments)
+- [x] Test a pinned rope reaches a stable catenary and stays within epsilon of it
+- [x] Test rod rotations produce a continuous frame along a strand (no flips between adjacent segments)
 - [ ] Test hair roots track a bone exactly while tips lag
 - [ ] Test strands do not stretch beyond the LRA limit under a fast root snap
 - [ ] Test per-frame strand update allocates nothing across N frames

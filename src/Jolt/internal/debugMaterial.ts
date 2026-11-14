@@ -19,6 +19,7 @@ export const debugColors = {
   vehicle: "mediumslateblue",
   wheel: "lawngreen",
   softBody: "coral",
+  rope: "sandybrown",
 } as const;
 
 export type DebugShapeKind = keyof typeof debugColors;
@@ -43,6 +44,10 @@ export const DEBUG_RENDER_ORDER = 1000;
 
 export const createDebugMaterial = (kind: DebugShapeKind) =>
   new MeshBasicMaterial({ color: debugColors[kind], ...overlay });
+
+/** For a body drawn as lines rather than faces: a rope. */
+export const createDebugLineMaterial = (kind: DebugShapeKind) =>
+  new LineBasicMaterial({ color: debugColors[kind], ...asOverlay });
 
 export const debugConstraintColor = "gold";
 

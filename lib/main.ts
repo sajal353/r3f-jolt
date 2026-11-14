@@ -72,6 +72,16 @@ export {
   type LRAType,
   type SoftBodySkinOptions,
 } from "@/Jolt/useSoftBody";
+export type {
+  SoftBodyBaseApi,
+  SoftBodyBodyOptions,
+} from "@/Jolt/internal/softBodyLifecycle";
+export {
+  useRope,
+  type UseRopeOptions,
+  type RopeApi,
+  type RopePin,
+} from "@/Jolt/useRope";
 export { useSoftBodyContactListener } from "@/Jolt/useSoftBodyContactListener";
 export type {
   CharacterContactHandlers,

@@ -1068,6 +1068,37 @@ const [ref, cape] = useSoftBody(capeGeometry, {
 - Hold pinned and `maxDistance: 0` vertices to bones that move together. If the skin stretches the distances between held vertices, the rigid edges between them can never be met and the cloth shakes, harder with more `iterations`. A little `bendCompliance` (`0.001`) keeps air drag from rippling the cloth near a held edge.
 - Collide cloth with a ragdoll's torso at most: collision is per vertex, so a thin limb slips between vertices and tangles it, and cloth trapped under a lying body thrashes. A ragdolling character's cape wants `skinConstraints: false`, since the skin may lie under the floor.
 
+## Ropes
+
+`useRope(options)` simulates a rope, cable or strand as a Cosserat rod: every segment carries an orientation, so unlike a chain of distance joints it resists twisting and has a frame to draw along.
+
+```tsx
+const [ref, rope] = useRope({
+  points: [[-1, 3, 0], [1, 3, 0]],
+  segments: 24,
+  pinned: "both",
+});
+
+return (
+  <lineSegments ref={ref} geometry={rope?.geometry}>
+    <lineBasicMaterial />
+  </lineSegments>
+);
+```
+
+Read at mount: `points` (relative to `position`) or `curve` (a three.js `Curve<Vector3>`), `segments` (resamples `points` into equal segments; `16` for a `curve`), `position`, `pinned` (`"start"` · `"end"` · `"both"` · vertex indices), `clamp`, `curl`, `stretchCompliance` (`0`), `bendCompliance` (`0.01`), `mass` (total; 1 kg a vertex by default), `lra` (`"none"` · `"euclidean"` · `"geodesic"`), `lraMaxDistanceMultiplier`, `stateId`, `maxLinearVelocity`, `allowSleeping`, `userData`, `layer`, `group`, `mask`, `collisionGroup`, `enabled`, `debug`, `settingsOverride(shared, creation)`. Live: `radius` (`0.02`), `iterations`, `friction`, `restitution`, `gravityFactor`, `linearDamping`, `wind`, `airDrag` (`1`), `floats`, `onEnterWater`, `onExitWater`.
+
+The api: `body`, `geometry`, `debugMesh`, `vertexCount`, `segmentCount`, `restLength`, `length()`, `getRotation(segment, target?)`, and the soft-body members `setEnabled`, `applyForce`, `applyImpulse`, `setLinearVelocity`, `setPosition`, `wake`, `sleep`, `isSleeping`, `getVertex`, `setVertex`, `setVertexVelocity`, `pin`, `isPinned`, `setWind`, `saveState`, `restoreState`.
+
+- **A pinned end swings freely** about its pin. `clamp` holds it in the direction it was built with instead, as a fitting holds a cable.
+- **Two stiffnesses, not three.** `stretchCompliance` covers stretch and shear, `bendCompliance` bend and twist: Jolt has one value for each pair. `0.01` hangs like rope, `1e-5` holds its shape like cable.
+- **`curl`** makes the authored shape the rest shape, so a pre-curled strand springs back to it. Off, the rest shape is straight.
+- **`lra` tethers** stop a rope stretching past its length however hard it is pulled. Each free vertex is tethered to the nearest pin on either side: `"geodesic"` measures along the rope, `"euclidean"` straight across.
+- **`getRotation(segment)`** is the segment's material frame as of the last step: local +Z along the segment, +X turning with the twist.
+- **`radius`** is the collision thickness: vertices keep that far off what they touch, and `airDrag` acts on a segment `2 × radius` wide, across it only.
+- **Rays and shape casts do not hit a rope**: it has no faces. `useBodyContacts` and `useSensor` work on it as on any soft body.
+- A hanging rope settles faster and stretches less with more `iterations` (Jolt's default is 5), some `linearDamping` and `lra: "geodesic"`.
+
 ## Ragdolls
 
 `useCharacterModel` fits a ragdoll to a skinned character; `useRagdoll` builds it and drives the bones.
@@ -1665,7 +1696,7 @@ pnpm dev
 | **Constraints**  | all 12 constraint hooks · motors · springs · breaking joints · rope built from chained distance joints · coaster and lift · gear train, rack, pulley · crane, turret, drawbridge |
 | **Queries**      | closest hit · any hit · all hits · shape cast · shape overlap + broadphase · point query             |
 | **Events**       | `useBodyContacts` · `useContactListener` · `useSensor` · contact force                             |
-| **Systems**      | character · gravity in any direction · character contacts · water · cloth · car · tank · motorcycle · ragdoll · ragdoll character · gravity tunnel · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · save & restore · rollback · breakable objects |
+| **Systems**      | character · gravity in any direction, with a ragdoll that gets up on any wall · character contacts · water · cloth · rope · car · tank · motorcycle · ragdoll · ragdoll character · ragdoll fit · interpolation · step callbacks · debug rendering · stress test · instancing · manual stepping · save & restore · rollback · breakable objects |
 
 Toolbar toggles for `<PhysicsDebug />`, `<Physics debug>`, `paused`, `interpolate`, and a `1/60` · `1/30` · `1/15` · `vary` timestep switch, so the scenes that exist to show a difference can actually show it.
 

@@ -9,7 +9,6 @@ import {
   Vector3,
   type BufferGeometry,
 } from "three";
-import type Jolt from "jolt-physics";
 import { useJolt } from "./useJolt";
 import {
   createSharedSettings,
@@ -17,12 +16,18 @@ import {
   type SoftBodyConstraintOptions,
   type SoftBodyTopology,
 } from "./internal/softBodyBuild";
+import type { SoftBodyVertices } from "./internal/softBodyVertices";
 import {
-  softBodyMotion,
-  softBodyVertices,
-  type SoftBodyVertices,
-} from "./internal/softBodyVertices";
-import { createVertexTracker } from "./internal/softBodyTracker";
+  addAirPass,
+  createSoftBodyBaseApi,
+  createSoftBodyHandle,
+  requireRoomForBody,
+  useAir,
+  useLiveSoftBodyOptions,
+  type SoftBodyBaseApi,
+  type SoftBodyBodyOptions,
+  type SoftBodyHandle,
+} from "./internal/softBodyLifecycle";
 import {
   bindSkin,
   createSkinDriver,
@@ -40,54 +45,23 @@ import {
   disposeDebugMaterial,
   DEBUG_RENDER_ORDER,
 } from "./internal/debugMaterial";
-import {
-  useWaterBody,
-  validateUserData,
-  withCollisionGroup,
-  type CollisionGroupOptions,
-  type WaterBodyOptions,
-} from "./internal/useBody";
-import { readVector } from "./internal/query";
-import type { QuatTuple, Vec3Input, Vec3Tuple } from "./types";
+import { useWaterBody } from "./internal/useBody";
+import type { QuatTuple } from "./types";
 
 export type { BendType, LRAType } from "./internal/softBodyBuild";
 export type { SoftBodySkinOptions } from "./internal/softBodySkin";
 
 export interface UseSoftBodyOptions
   extends SoftBodyConstraintOptions,
-    WaterBodyOptions {
-  /** The body's Jolt id, for `saveState`; see `BodyOptions.stateId`. */
-  stateId?: number;
-  position?: Vec3Tuple;
+    SoftBodyBodyOptions {
   /** Baked into the vertices: a soft body's own rotation stays identity. */
   rotation?: QuatTuple;
   /** Geometry vertices closer than this become one simulated vertex. */
   weld?: number;
-  iterations?: number;
-  linearDamping?: number;
-  maxLinearVelocity?: number;
-  restitution?: number;
-  friction?: number;
   /** Pushes a closed mesh outwards: n·R·T, in pascal-cubic-metres. */
   pressure?: number;
-  gravityFactor?: number;
-  /**
-   * Keeps the vertices this far off whatever they rest on, so cloth draped
-   * over a mesh does not z-fight with it.
-   */
-  vertexRadius?: number;
   /** Collide with both sides of a face — a flag, rather than a balloon. */
   facesDoubleSided?: boolean;
-  allowSleeping?: boolean;
-  userData?: number;
-  layer?: number;
-  group?: number;
-  mask?: number;
-  collisionGroup?: CollisionGroupOptions;
-  enabled?: boolean;
-  debug?: boolean;
-  /** World-space air velocity, pushing each face along its normal. Live. */
-  wind?: Vec3Tuple;
   /**
    * Air resistance per square metre of face, against the body's motion through
    * the air (`wind` included). What makes cloth drift down and settle rather
@@ -106,10 +80,6 @@ export interface UseSoftBodyOptions
   skinConstraints?: boolean;
   /** Scales every `skin.maxDistance`. Default 1. Live. */
   skinnedMaxDistanceMultiplier?: number;
-  settingsOverride?: (
-    shared: Jolt.SoftBodySharedSettings,
-    creation: Jolt.SoftBodyCreationSettings,
-  ) => void;
 }
 
 /**
@@ -117,38 +87,10 @@ export interface UseSoftBodyOptions
  * `BufferGeometry` uses — mapped through the weld, so a seam vertex and its
  * twin address the same simulated point.
  */
-export interface SoftBodyApi {
-  body: Jolt.Body;
+export interface SoftBodyApi extends SoftBodyBaseApi {
   /** Your geometry, cloned, with positions and normals the hook rewrites. */
   geometry: BufferGeometry;
   debugMesh: Mesh | null;
-  /** Simulated vertices, after welding. */
-  vertexCount: number;
-  setEnabled: (enabled: boolean) => void;
-  /** Acts on the whole body, every vertex alike. */
-  applyForce: (force: Vec3Input) => void;
-  applyImpulse: (impulse: Vec3Input) => void;
-  setLinearVelocity: (velocity: Vec3Input) => void;
-  setPosition: (position: Vec3Input) => void;
-  wake: () => void;
-  sleep: () => void;
-  isSleeping: () => boolean;
-  /** World position of a geometry vertex, as of the last step. */
-  getVertex: (index: number, target?: Vector3) => Vector3;
-  /** Teleports a vertex, with no velocity. Pin it too, or it falls again. */
-  setVertex: (index: number, position: Vec3Input) => void;
-  /**
-   * Sets one vertex moving, without pinning it. Called before every step with
-   * a velocity towards a target, it drags cloth the way a hand does: the
-   * vertex keeps its mass, so the cloth pulls back instead of being yanked.
-   * A pinned vertex has no mass to keep: it moves at exactly this velocity
-   * until it is set again.
-   */
-  setVertexVelocity: (index: number, velocity: Vec3Input) => void;
-  /** A pinned vertex has no mass: constraints and gravity cannot move it. */
-  isPinned: (index: number) => boolean;
-  pin: (index: number, pinned: boolean) => void;
-  setWind: (wind: Vec3Input) => void;
   /**
    * Puts every vertex back on the skin, at rest, on the next step: after
    * teleporting the character. Does nothing without `skin`.
@@ -159,9 +101,6 @@ export interface SoftBodyApi {
    * did not come from this body.
    */
   faceOf: (subShapeID: number) => number;
-  /** This body alone, every vertex included; see `BodyApi.saveState`. */
-  saveState: () => Uint8Array;
-  restoreState: (bytes: Uint8Array) => void;
 }
 
 const writeRender = (
@@ -283,25 +222,6 @@ const pushVertex = (
 
 const faceNormal = new Vector3();
 
-/** Pinned vertices are left alone: they move only when told to. */
-const addToFreeVertices = (
-  heap: Float32Array,
-  layout: SoftBodyVertices,
-  x: number,
-  y: number,
-  z: number,
-  replace: boolean,
-) => {
-  for (let index = 0; index < layout.count; index += 1) {
-    const offset = index * layout.stride;
-    if (heap[layout.inverseMass + offset] <= 0) continue;
-    const at = layout.velocity + offset;
-    heap[at] = (replace ? 0 : heap[at]) + x;
-    heap[at + 1] = (replace ? 0 : heap[at + 1]) + y;
-    heap[at + 2] = (replace ? 0 : heap[at + 2]) + z;
-  }
-};
-
 /**
  * Air resistance on every face, as a velocity change on its free vertices,
  * before each step. Faces see the air relative to their own motion, so a flag moving
@@ -365,8 +285,6 @@ const blowWind = (
   }
 };
 
-const ZERO: Vec3Tuple = [0, 0, 0];
-
 const boundsPoint = new Vector3();
 
 const boundsOf = (positions: Float32Array, target: Box3) => {
@@ -382,6 +300,16 @@ const boundsOf = (positions: Float32Array, target: Box3) => {
 /** Roughly ½ × air density × the drag coefficient of a flat sheet. */
 const DEFAULT_AIR_DRAG = 1;
 
+interface SoftBodyInternals {
+  handle: SoftBodyHandle;
+  topology: SoftBodyTopology;
+  geometry: BufferGeometry;
+  normals: Float32Array;
+  skin: SkinDriver | null;
+  /** The tracker's vertices moved onto the live skin. */
+  drawn: Float32Array;
+}
+
 export const useSoftBody = (
   geometry: BufferGeometry,
   options: UseSoftBodyOptions = {},
@@ -391,65 +319,19 @@ export const useSoftBody = (
   const scene = useThree((state) => state.scene);
   const debugViewRef = useRef<DebugView<Mesh> | null>(null);
   const [softApi, setSoftApi] = useState<SoftBodyApi>();
-  const windRef = useRef(new Vector3());
-  const airDragRef = useRef(DEFAULT_AIR_DRAG);
+  const air = useAir(options.wind, options.airDrag ?? DEFAULT_AIR_DRAG);
 
   // Creation is init-once, like every body: rebuild with `key`.
   const [mount] = useState(() => ({ geometry, options }));
 
-  const internals = useRef<{
-    layout: SoftBodyVertices;
-    topology: SoftBodyTopology;
-    tracker: ReturnType<typeof createVertexTracker>;
-    motion: Jolt.SoftBodyMotionProperties;
-    geometry: BufferGeometry;
-    normals: Float32Array;
-    skin: SkinDriver | null;
-    /** The tracker's vertices moved onto the live skin. */
-    drawn: Float32Array;
-    usable: () => boolean;
-  } | null>(null);
+  const internals = useRef<SoftBodyInternals | null>(null);
 
   useEffect(() => {
-    const {
-      Jolt: jolt,
-      bodyInterface,
-      physicsSystem,
-      layers,
-      groups,
-      objectLayer,
-      temps,
-      state,
-      steps,
-    } = api;
+    const { Jolt: jolt, state, steps } = api;
     const { geometry: source, options } = mount;
-    const {
-      weld = 1e-4,
-      iterations,
-      linearDamping,
-      maxLinearVelocity,
-      restitution,
-      friction,
-      pressure,
-      gravityFactor,
-      vertexRadius,
-      facesDoubleSided,
-      allowSleeping,
-      userData,
-      layer,
-      group,
-      mask,
-      collisionGroup,
-      enabled = true,
-      settingsOverride,
-    } = options;
+    const { weld = 1e-4, pressure, facesDoubleSided } = options;
 
-    if (physicsSystem.GetNumBodies() >= physicsSystem.GetMaxBodies()) {
-      throw new Error(
-        `r3f-jolt: the world is full at ${physicsSystem.GetMaxBodies()} bodies. ` +
-          "Raise `maxBodies` on <Physics>.",
-      );
-    }
+    requireRoomForBody(api.physicsSystem);
 
     const topology = weldGeometry(source, weld);
     const binding = options.skin
@@ -462,124 +344,44 @@ export const useSoftBody = (
       options,
       binding,
     );
-    const position: Vec3Tuple = binding
-      ? [binding.origin.x, binding.origin.y, binding.origin.z]
-      : (options.position ?? [0, 0, 0]);
-    const rotation: QuatTuple = binding
-      ? [0, 0, 0, 1]
-      : (options.rotation ?? [0, 0, 0, 1]);
 
-    const resolvedLayer =
-      layer ??
-      (group !== undefined || mask !== undefined
-        ? objectLayer(
-            group ?? groups.GROUP_MOVING,
-            mask ?? groups.GROUP_MOVING | groups.GROUP_NON_MOVING,
-          )
-        : layers.LAYER_MOVING);
-
-    const creation = new jolt.SoftBodyCreationSettings(
+    const handle = createSoftBodyHandle(api, {
       shared,
-      temps.rvec3(position),
-      temps.quat(rotation),
-      resolvedLayer,
-    );
+      position: binding
+        ? [binding.origin.x, binding.origin.y, binding.origin.z]
+        : (options.position ?? [0, 0, 0]),
+      rotation: binding ? [0, 0, 0, 1] : (options.rotation ?? [0, 0, 0, 1]),
+      options,
+      mass: options.mass,
+      hook: "useSoftBody",
+      configure: function setClothFields(creation) {
+        if (pressure !== undefined) creation.mPressure = pressure;
+        if (facesDoubleSided !== undefined) {
+          creation.mFacesDoubleSided = facesDoubleSided;
+        }
+      },
+    });
+    const { body, layout, motion, tracker, usable, readable } = handle;
 
-    if (iterations !== undefined) creation.mNumIterations = iterations;
-    if (linearDamping !== undefined) creation.mLinearDamping = linearDamping;
-    if (maxLinearVelocity !== undefined) {
-      creation.mMaxLinearVelocity = maxLinearVelocity;
-    }
-    if (restitution !== undefined) creation.mRestitution = restitution;
-    if (friction !== undefined) creation.mFriction = friction;
-    if (pressure !== undefined) creation.mPressure = pressure;
-    if (gravityFactor !== undefined) creation.mGravityFactor = gravityFactor;
-    if (vertexRadius !== undefined) creation.mVertexRadius = vertexRadius;
-    if (facesDoubleSided !== undefined) {
-      creation.mFacesDoubleSided = facesDoubleSided;
-    }
-    if (allowSleeping !== undefined) creation.mAllowSleeping = allowSleeping;
-    if (userData !== undefined) {
-      validateUserData(userData, "userData");
-      creation.mUserData = userData;
-    }
-    if (collisionGroup) {
-      withCollisionGroup(jolt, collisionGroup, (value) => {
-        creation.mCollisionGroup = value;
-      });
-    }
-
-    settingsOverride?.(shared, creation);
-
-    const body = (() => {
-      try {
-        return api.stateIds.createSoftBody(
-          creation,
-          options.stateId,
-          "useSoftBody",
-        );
-      } catch (error) {
-        jolt.destroy(creation);
-        shared.Release();
-        throw error;
-      }
-    })();
-    jolt.destroy(creation);
-    // The body holds its own reference now.
-    shared.Release();
-
-    const id = body.GetID();
-    const bodyID = id.GetIndexAndSequenceNumber();
-    const layout = softBodyVertices(jolt, body);
-    const motion = softBodyMotion(jolt, body);
     const softShape = jolt.castObject(body.GetShape(), jolt.SoftBodyShape);
     const subShape = new jolt.SubShapeID();
     const faceBits = softShape.GetSubShapeIDBits();
     // Jolt fills the bits a sub-shape ID does not use with ones. An ID with
     // anything else up there came from another body, and decoding it asserts.
     const unusedBits = 0xffffffff >>> faceBits;
-    const restInverseMass = new Float32Array(layout.count);
-    for (let index = 0; index < layout.count; index += 1) {
-      restInverseMass[index] =
-        jolt.HEAPF32[layout.inverseMass + index * layout.stride];
-    }
-    const freeInverseMass =
-      restInverseMass.find((value) => value > 0) ??
-      (options.mass ? layout.count / options.mass : 1);
 
     const renderGeometry = cloneForRender(source);
-    const tracker = createVertexTracker(layout.count);
     const skin = binding
       ? createSkinDriver(jolt, binding, topology.positions)
       : null;
 
-    let added = false;
-    let alive = true;
-    const usable = () => added && alive && !state.disposed;
-
-    const setEnabled = (value: boolean) => {
-      if (!alive || state.disposed || value === added) return;
-      if (value) {
-        bodyInterface.AddBody(id, jolt.EActivation_Activate);
-      } else {
-        api.contacts.forgetSoftBody(bodyID);
-        bodyInterface.RemoveBody(id);
-      }
-      added = value;
-    };
-
-    setEnabled(enabled);
-
     internals.current = {
-      layout,
+      handle,
       topology,
-      tracker,
-      motion,
       geometry: renderGeometry,
       normals: new Float32Array(layout.count * 3),
       skin,
       drawn: new Float32Array(skin ? layout.count * 3 : 0),
-      usable,
     };
 
     const buildDebugMesh = () => {
@@ -598,144 +400,26 @@ export const useSoftBody = (
     const debugView = createDebugView(buildDebugMesh, releaseDebugMesh);
     debugViewRef.current = debugView;
 
-    const vertexAt = (index: number) =>
-      layout.position + topology.vertexOf[index] * layout.stride;
-
     const published: Omit<SoftBodyApi, "debugMesh"> = {
-      body,
+      ...createSoftBodyBaseApi(
+        api,
+        handle,
+        air,
+        (index) => topology.vertexOf[index],
+        options.mass,
+      ),
       geometry: renderGeometry,
-      vertexCount: layout.count,
-      setEnabled,
-
-      applyForce: (force) => {
-        if (!usable()) return;
-        bodyInterface.AddForce(id, temps.vec3(force), jolt.EActivation_Activate);
-      },
-
-      // Jolt's own `AddImpulse` and `SetLinearVelocity` write the rigid-body
-      // velocity, which a soft body's solver never reads; these go to the
-      // vertices instead.
-      applyImpulse: (impulse) => {
-        if (!usable()) return;
-        const heap = jolt.HEAPF32;
-        let mass = 0;
-        for (let index = 0; index < layout.count; index += 1) {
-          const inverse = heap[layout.inverseMass + index * layout.stride];
-          if (inverse > 0) mass += 1 / inverse;
-        }
-        if (mass === 0) return;
-        const [x, y, z] = readVector(impulse);
-        addToFreeVertices(heap, layout, x / mass, y / mass, z / mass, false);
-        bodyInterface.ActivateBody(id);
-      },
-
-      setLinearVelocity: (velocity) => {
-        if (!usable()) return;
-        const [x, y, z] = readVector(velocity);
-        addToFreeVertices(jolt.HEAPF32, layout, x, y, z, true);
-        bodyInterface.ActivateBody(id);
-      },
-
-      setPosition: (target) => {
-        if (!usable()) return;
-        tracker.reset();
-        bodyInterface.SetPositionAndRotation(
-          id,
-          temps.rvec3(target),
-          temps.quat([0, 0, 0, 1]),
-          jolt.EActivation_Activate,
-        );
-      },
-
-      wake: () => {
-        if (usable()) bodyInterface.ActivateBody(id);
-      },
-
-      sleep: () => {
-        if (usable()) bodyInterface.DeactivateBody(id);
-      },
-
-      isSleeping: () => usable() && !bodyInterface.IsActive(id),
-
-      getVertex: (index, target = new Vector3()) => {
-        if (!alive || state.disposed) return target.set(0, 0, 0);
-        const at = vertexAt(index);
-        const origin = body.GetPosition();
-        const heap = jolt.HEAPF32;
-        return target.set(
-          heap[at] + origin.GetX(),
-          heap[at + 1] + origin.GetY(),
-          heap[at + 2] + origin.GetZ(),
-        );
-      },
-
-      setVertex: (index, target) => {
-        if (!usable()) return;
-        const [x, y, z] = readVector(target);
-        const physics = topology.vertexOf[index];
-        const at = layout.position + physics * layout.stride;
-        const velocity = layout.velocity + physics * layout.stride;
-        const origin = body.GetPosition();
-        const heap = jolt.HEAPF32;
-        heap[at] = x - origin.GetX();
-        heap[at + 1] = y - origin.GetY();
-        heap[at + 2] = z - origin.GetZ();
-        heap.set(ZERO, velocity);
-        bodyInterface.ActivateBody(id);
-      },
-
-      setVertexVelocity: (index, velocity) => {
-        if (!usable()) return;
-        const at = layout.velocity + topology.vertexOf[index] * layout.stride;
-        const [x, y, z] = readVector(velocity);
-        const heap = jolt.HEAPF32;
-        heap[at] = x;
-        heap[at + 1] = y;
-        heap[at + 2] = z;
-        if (!bodyInterface.IsActive(id)) bodyInterface.ActivateBody(id);
-      },
-
-      isPinned: (index) =>
-        alive &&
-        !state.disposed &&
-        jolt.HEAPF32[
-          layout.inverseMass + topology.vertexOf[index] * layout.stride
-        ] === 0,
-
-      pin: (index, pinned) => {
-        if (!usable()) return;
-        const physics = topology.vertexOf[index];
-        const heap = jolt.HEAPF32;
-        heap[layout.inverseMass + physics * layout.stride] = pinned
-          ? 0
-          : restInverseMass[physics] || freeInverseMass;
-        heap.set(ZERO, layout.velocity + physics * layout.stride);
-        bodyInterface.ActivateBody(id);
-      },
-
-      setWind: (wind) => {
-        const [x, y, z] = readVector(wind);
-        windRef.current.set(x, y, z);
-      },
 
       snapToSkin: () => {
         skin?.snap();
       },
 
       faceOf: (subShapeID) => {
-        if (!alive || state.disposed) return -1;
+        if (!readable()) return -1;
         if (subShapeID >>> faceBits !== unusedBits) return -1;
         subShape.SetValue(subShapeID);
         const face = softShape.GetFaceIndex(subShape);
         return topology.triangleOf[face] ?? -1;
-      },
-
-      saveState: () =>
-        usable() ? api.snapshots.saveBody(body) : new Uint8Array(0),
-
-      restoreState: (bytes) => {
-        if (!usable() || bytes.length === 0) return;
-        api.snapshots.restoreBody(body, bytes);
       },
     };
 
@@ -745,18 +429,7 @@ export const useSoftBody = (
       enumerable: true,
     });
 
-    const unsubscribeWind = steps.add("before", function blowOnSoftBody(delta) {
-      const wind = windRef.current;
-      const drag = airDragRef.current;
-      if (!usable() || drag <= 0) return;
-
-      // Still air leaves a sleeper asleep; wind wakes it.
-      if (!bodyInterface.IsActive(id)) {
-        if (wind.lengthSq() === 0) return;
-        bodyInterface.ActivateBody(id);
-      }
-      blowWind(jolt.HEAPF32, layout, wind, drag, delta);
-    });
+    const unsubscribeWind = addAirPass(api, handle, air, blowWind);
 
     const tempAllocator = api.joltInterface.GetTempAllocator();
     const unsubscribeSkin = skin
@@ -764,15 +437,20 @@ export const useSoftBody = (
           if (!usable()) return;
           const { moved, hard } = skin.skin(body, motion, tempAllocator);
           // Jolt leaves a sleeping cloth where it lay as the bones walk off.
-          if (moved && !bodyInterface.IsActive(id)) bodyInterface.ActivateBody(id);
+          if (moved && !api.bodyInterface.IsActive(handle.id)) {
+            api.bodyInterface.ActivateBody(handle.id);
+          }
           if (hard) tracker.reset();
         })
       : null;
 
+    // The same external-resource publication as `useCar`: the body only exists
+    // once this effect has built it.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSoftApi(result);
 
     return () => {
-      alive = false;
+      handle.retire();
       unsubscribeWind();
       unsubscribeSkin?.();
       setSoftApi(undefined);
@@ -786,42 +464,28 @@ export const useSoftBody = (
 
       jolt.destroy(subShape);
       skin?.dispose();
-      if (added) {
-        api.contacts.forgetSoftBody(bodyID);
-        bodyInterface.RemoveBody(id);
-      }
-      bodyInterface.DestroyBody(id);
+      handle.destroy();
     };
-  }, [api, mount, scene]);
+  }, [api, mount, scene, air]);
 
   const {
     pressure,
-    iterations,
     vertexRadius,
-    friction,
-    restitution,
-    gravityFactor,
-    linearDamping,
     skinConstraints,
     skinnedMaxDistanceMultiplier,
-    wind,
-    airDrag = DEFAULT_AIR_DRAG,
   } = options;
 
-  const appliedRef = useRef(false);
+  useLiveSoftBodyOptions(api, softApi, options);
+
+  const clothAppliedRef = useRef(false);
 
   useEffect(
-    function applyLiveOptions() {
-      const motion = internals.current?.motion;
-      if (!softApi || !motion) return;
+    function applyLiveClothOptions() {
+      if (!softApi) return;
+      const motion = internals.current?.handle.motion;
+      if (!motion) return;
 
       if (pressure !== undefined) motion.SetPressure(pressure);
-      if (iterations !== undefined) motion.SetNumIterations(iterations);
-      if (vertexRadius !== undefined) motion.SetVertexRadius(vertexRadius);
-      if (gravityFactor !== undefined) motion.SetGravityFactor(gravityFactor);
-      if (linearDamping !== undefined) motion.SetLinearDamping(linearDamping);
-      if (friction !== undefined) softApi.body.SetFriction(friction);
-      if (restitution !== undefined) softApi.body.SetRestitution(restitution);
       if (skinConstraints !== undefined) {
         motion.SetEnableSkinConstraints(skinConstraints);
       }
@@ -829,32 +493,10 @@ export const useSoftBody = (
         motion.SetSkinnedMaxDistanceMultiplier(skinnedMaxDistanceMultiplier);
       }
 
-      // The first pass only restates what creation already set.
-      if (appliedRef.current) softApi.wake();
-      appliedRef.current = true;
+      if (clothAppliedRef.current) softApi.wake();
+      clothAppliedRef.current = true;
     },
-    [
-      softApi,
-      pressure,
-      iterations,
-      vertexRadius,
-      friction,
-      restitution,
-      gravityFactor,
-      linearDamping,
-      skinConstraints,
-      skinnedMaxDistanceMultiplier,
-    ],
-  );
-
-  const [windX, windY, windZ] = wind ?? ZERO;
-
-  useEffect(
-    function applyAir() {
-      windRef.current.set(windX, windY, windZ);
-      airDragRef.current = airDrag;
-    },
-    [windX, windY, windZ, airDrag],
+    [softApi, pressure, skinConstraints, skinnedMaxDistanceMultiplier],
   );
 
   useWaterBody(softApi?.body, options);
@@ -867,11 +509,10 @@ export const useSoftBody = (
 
   useFrame(function syncSoftBody() {
     const inner = internals.current;
-    if (!softApi || !inner || !inner.usable()) return;
+    if (!softApi || !inner || !inner.handle.usable()) return;
 
-    const { layout, topology, tracker, normals, skin, drawn, geometry: target } =
-      inner;
-    const body = softApi.body;
+    const { handle, topology, normals, skin, drawn, geometry: target } = inner;
+    const { body, layout, tracker } = handle;
     const active = body.IsActive();
     const timing = api.timing;
 
